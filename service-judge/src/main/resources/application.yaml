@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: service-judge
+  config:
+    import: optional:nacos:service-judge.yaml   # ? Nacos ???
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+      config:
+        server-addr: localhost:8848
+        file-extension: yaml
+server:
+  port: 8086

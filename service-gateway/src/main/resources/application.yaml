@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: service-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins:
+              - "http://localhost:5173"
+              - "http://127.0.0.1:5173"
+            allowed-methods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowed-headers: "*"
+            allow-credentials: true
+            max-age: 3600
+      routes:
+        # 1. WebSocket 路由
+        - id: question-service-ws
+          uri: lb:ws://service-question
+          predicates:
+            - Path=/websocket/**
+
+        # 2. 用户服务
+        - id: service-user
+          uri: lb://service-user
+          predicates:
+            - Path=/api/user/**
+
+        # 3. 题目服务
+        - id: service-question
+          uri: lb://service-question
+          predicates:
+            - Path=/api/question/**
+
+        # 4. AI 服务
+        - id: service-ai
+          uri: lb://service-ai
+          predicates:
+            - Path=/api/ai/**
+
+jwt:
+  secret: codewise-jwt-secret-key-must-be-at-least-256-bits-long
+  expiration: 86400000
+
+server:
+  port: 8082
+
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.web: DEBUG

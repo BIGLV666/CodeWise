@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: service-email
+  config:
+    import: nacos:service-email.yaml
+  cloud:
+    nacos:
+      config:
+        server-addr: localhost:8848
+        file-extension: yaml
+        group: DEFAULT_GROUP   # ← 加上这行，确保和 Nacos 里的一致
+      discovery:
+        server-addr: localhost:8848
+        group: DEFAULT_GROUP
+
+
+server:
+  port: 8083
