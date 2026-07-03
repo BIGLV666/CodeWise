@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.servicequestion.mapper.QuestionMapper">
+    <update id="updateAiStatusToFailure" >
+        update question set ai_statue='failure' where question_id=#{questionId}
+    </update>
+    <update id="updateAiStatusToSuccess">
+        update question set ai_statue='success' where question_id=#{questionId}
+    </update>
+    <update id="updateTotal">
+        update question set total_submit=total_submit+1,pass_rate=total_ac/total_submit where question_id=#{questionId}
+    </update>
+    <update id="updateTotalAc">
+        update question set total_ac=total_ac+1,pass_rate=total_ac/total_submit where question_id=#{questionId}
+    </update>
+</mapper>
