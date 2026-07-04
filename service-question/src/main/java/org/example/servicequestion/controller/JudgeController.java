@@ -1,6 +1,7 @@
 package org.example.servicequestion.controller;
 
 import org.example.serviceapi.dto.Result;
+import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
 import org.example.servicequestion.entry.SubmitRecord;
@@ -25,6 +26,10 @@ public class JudgeController {
     public Result<Long> judge(@RequestBody GetCodeDto getCodeDto) {
         Long submitRecordId = judgeService.judge(getCodeDto.getCode(), getCodeDto.getLanguage(), getCodeDto.getQuestionId());
         return Result.success(submitRecordId);
+    }
+    @PostMapping("/debug")
+    public Result<String> debug(@RequestBody DebugDto getCodeDto) {
+        return Result.success(judgeService.debug(getCodeDto));
     }
 
     @GetMapping("/getsubmitrecordbyid")

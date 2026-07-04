@@ -60,6 +60,13 @@ public class MqConfig {
                 .to(judgeExchange())
                 .with(MqContexts.JUDGE_ROUTING_KEY);
     }
+    @Bean
+    public Binding judgeBinding2() {
+        return BindingBuilder
+                .bind(judgeQueue())
+                .to(judgeExchange())
+                .with(MqContexts.JUDGE_DEBUG_ROUTING_KEY);
+    }
 
     @Bean
     public MessageConverter messageConverter() {
@@ -111,6 +118,13 @@ public class MqConfig {
                 .bind(questionQueue())
                 .to(questionExchange())
                 .with(QUESTION_SUBMIT_RECORD_ROUTING_KEY);
+    }
+    @Bean
+    public Binding debugBinding() {
+        return BindingBuilder
+                .bind(questionQueue())
+                .to(questionExchange())
+                .with(QUESTION_DEBUG_ROUTING_KEY);
     }
 
 }

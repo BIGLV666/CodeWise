@@ -9,7 +9,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
-import org.example.serviceapi.dto.JudgeResultDto;
+import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.TestCase;
 import org.example.servicejudge.interfaces.JudgeInterface;
@@ -74,24 +74,24 @@ public class JudgeService implements JudgeInterface {
     // ========== 判题主方法 ==========
     @Override
 
-    public JudgeRecord executeCode(String code, String language, TestCase testMessage) {
-        String input = testMessage.getInputData();
-        String output = testMessage.getExpectedOutput();
-        Long testCaseId = testMessage.getCaseId();
-        int failIndex = 0;  // 默认失败索引为 0
+    public JudgeReturnDto executeCode(String code, String language, String input) {
+
+
+  // 默认失败索引为 0
 
         if (code == null || code.isBlank()) {
-            return buildResult("CE", output, null, 0, 0, "代码不能为空", failIndex, testCaseId, null, input);
+            return formatJudgeReturnDto(null,0,null,"代码不能为空",null,0);
         }
 
         LanguageSpec spec = LanguageSpec.of(language);
         if (spec == null) {
-            return buildResult("CE", output, null, 0, 0, "不支持的语言: " + language, failIndex, testCaseId, null, input);
+            return  formatJudgeReturnDto(null,0,null,"不支持的语言",null,0);
         }
 
         String containerId = containerPool.get(language);
         if (containerId == null) {
-            return buildResult("RE", output, null, 0, 0, "沙箱环境未就绪，请稍后重试", failIndex, testCaseId, null, input);
+            return   formatJudgeReturnDto(null,0,null,"沙箱环境未就绪，请稍后重试",null,0);
+
         }
 
         long start = System.currentTimeMillis();
@@ -123,34 +123,15 @@ public class JudgeService implements JudgeInterface {
                         }
                     }
                 }
-
-                // ============ 核心改造部分：友好的错误信息处理 ============
-
-                if (exitCode != null && exitCode == 124) {
-                    return buildResult("TLE", output, stdout, timeUsed, memoryUsed, "超出时间限制", failIndex, testCaseId, stderr, input);
-                }
-
-                if (exitCode != null && exitCode == 2) {
-                    String cleanErr = formatCompileError(stderr);
-                    return buildResult("CE", output, stdout, timeUsed, memoryUsed, cleanErr, failIndex, testCaseId, stderr, input);
-                }
-
-                if (exitCode != null && exitCode != 0) {
-                    String cleanErr = formatRuntimeError(stderr, language);
-                    return buildResult("RE", output, stdout, timeUsed, memoryUsed, cleanErr, failIndex, testCaseId, stderr, input);
-                }
-
-                String actual = normalizeOutput(stdout);
-                String expected = normalizeOutput(output);
-
-                if (actual.equals(expected)) {
-                    return buildResult("AC", output, actual, timeUsed, memoryUsed, "执行成功", failIndex, testCaseId, stdout, input);
-                }
-
-                // WA 的情况，像力扣一样告诉用户输入、输出和期望
-                String waErr = formatWrongAnswerError(input, expected, actual);
-                return buildResult("WA", output, actual, timeUsed, memoryUsed, waErr, failIndex, testCaseId, stdout, input);
-
+                String cleanErr = formatRuntimeError(stderr, language);
+                JudgeReturnDto judgeReturnDto = new JudgeReturnDto();
+                judgeReturnDto.setExitCode(exitCode);
+                judgeReturnDto.setStdout(stdout);
+                judgeReturnDto.setLog(stderr);
+                judgeReturnDto.setMemoryUsed(memoryUsed);
+                judgeReturnDto.setTimeUsed(timeUsed);
+                judgeReturnDto.setErrorMsg(cleanErr);
+                return judgeReturnDto;
             } finally {
                 Files.walk(workspace)
                         .sorted((a, b) -> b.compareTo(a))
@@ -164,8 +145,9 @@ public class JudgeService implements JudgeInterface {
         } catch (Exception e) {
             log.error("判题系统内部错误", e);
             int timeUsed = (int) (System.currentTimeMillis() - start);
-            return buildResult("RE", output, null, timeUsed, 0, "判题系统内部错误: " + e.getMessage(), failIndex, testCaseId, null, input);
+            return formatJudgeReturnDto(null,  null,  "判题系统内部错误:" + e.getMessage(),"判题系统内部错误",null,null );
         }
+
     }
     /**
      * 使用 Docker Java API 获取容器内存使用量 (KB)
@@ -218,41 +200,12 @@ public class JudgeService implements JudgeInterface {
     /**
      * 构建判题结果
      */
-    private JudgeRecord buildResult(String status, String expected, String actual,
-                                    int timeUsed, int memoryUsed, String error,
-                                    int failIndex, Long testCaseId, String log, String input) {
-        return JudgeRecord.builder()
-                .submitStatus(status)
-                .expectedOutput(expected)
-                .userOutput(actual)
-                .timeUsed(timeUsed)
-                .memoryUsed(memoryUsed)
-                .errorMsg(error)
-                .testCaseId(testCaseId)
-                .failIndex(failIndex)
-                .log(log)
-                .inputData(input)
-                .build();
+    private JudgeReturnDto formatJudgeReturnDto(Integer exitCode,Integer timeUsed,String log,String errorMsg,String stdout,Integer memoryUsed) {
+        return  JudgeReturnDto.builder().exitCode(exitCode).timeUsed(timeUsed).log(log).errorMsg(errorMsg).stdout(stdout).memoryUsed(memoryUsed).build();
     }
 
-    /**
-     * 格式化编译错误 (CE)
-     */
-    private String formatCompileError(String stderr) {
-        if (stderr == null || stderr.isEmpty()) return "编译失败，未知错误。";
-        // 简单截取核心错误行（通常包含 error:）
-        StringBuilder sb = new StringBuilder("编译错误:\n");
-        for (String line : stderr.split("\n")) {
-            // 过滤掉太长的文件路径，只保留关键信息
-            if (line.contains("error:") || line.contains("错误:")) {
-                sb.append(line.substring(line.indexOf(":") + 1).trim()).append("\n");
-            }
-        }
-        if (sb.length() < 10) { // 如果没匹配到 error: 关键字，直接返回前500个字符避免太长
-            return "编译错误:\n" + stderr.substring(0, Math.min(stderr.length(), 500));
-        }
-        return sb.toString().trim();
-    }
+
+
 
     /**
      * 格式化运行时错误 (RE)
@@ -272,25 +225,7 @@ public class JudgeService implements JudgeInterface {
         return "运行时错误:\n" + stderr.substring(0, Math.min(stderr.length(), 200));
     }
 
-    /**
-     * 格式化答案错误 (WA)，类似力扣展示
-     */
-    private String formatWrongAnswerError(String input, String expected, String actual) {
-        // 截断过长的输入和输出，防止前端卡死
-        String truncatedInput = input != null ? input.substring(0, Math.min(input.length(), 300)) : "";
-        String truncatedExpected = expected != null ? expected.substring(0, Math.min(expected.length(), 300)) : "";
-        String truncatedActual = actual != null ? actual.substring(0, Math.min(actual.length(), 300)) : "";
 
-        return String.format(
-                "解答错误\n" +
-                        "输入: %s\n" +
-                        "输出: %s\n" +
-                        "预期: %s",
-                truncatedInput.isEmpty() ? "(空)" : truncatedInput,
-                truncatedActual.isEmpty() ? "(空)" : truncatedActual,
-                truncatedExpected.isEmpty() ? "(空)" : truncatedExpected
-        );
-    }
 
 
     // ========== 创建容器 ==========

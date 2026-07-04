@@ -8,7 +8,9 @@ import org.example.serviceapi.dto.JudgeMqDto;
 import org.example.serviceapi.dto.JudgeResultDto;
 import org.example.serviceapi.dto.TestMessage;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.Mq.MessageHandler;
+import org.example.servicejudge.Util.BuildResult;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.SubmitRecord;
 import org.example.servicejudge.entry.TestCase;
@@ -80,7 +82,8 @@ public class JudgeServiceHandel implements MessageHandler {
 
             for (int i = 0; i < testMessages.size(); i++) {
                 TestCase testMessage = testMessages.get(i);
-                JudgeRecord result = judge.executeCode(submitRecord.getSubmitContent(), submitRecord.getLanguage(), testMessage);
+                JudgeReturnDto resultDto = judge.executeCode(submitRecord.getSubmitContent(), submitRecord.getLanguage(), testMessage.getInputData());
+                JudgeRecord result= BuildResult.buildResult(resultDto,testMessage.getCaseId(),testMessage.getInputData(),testMessage.getExpectedOutput(),i+1,submitRecord.getLanguage());
 
                 log.info("测试用例 {}/{}: {}", i + 1, totalCount, result.getSubmitStatus());
 
