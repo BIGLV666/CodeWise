@@ -54,7 +54,7 @@ public class FavoritesService {
        if(favorites == null) {
         throw new IllegalArgumentException("未找到该收藏");
        }
-       if(favorites.getUserId().equals(UserContext.getUserId())) {
+       if(!favorites.getUserId().equals(UserContext.getUserId())) {
         throw new IllegalArgumentException("该收藏不是您的收藏");
        }
        List<Long> questionIds = favorites.getQuestionIds();
@@ -99,6 +99,7 @@ public class FavoritesService {
         }
         Favorites favorites = Favorites.builder()
                 .favoritesName(favoritesName)
+                .questionIds(Collections.emptyList())
                 .userId(UserContext.getUserId())
                 .createTime(LocalDateTime.now())
                 .updateTime(LocalDateTime.now())
@@ -222,4 +223,5 @@ public class FavoritesService {
         }
         return sb.toString();
     }
+
 }
