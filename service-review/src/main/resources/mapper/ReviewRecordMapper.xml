@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.servicereview.mapper.ReviewRecordMapper">
+
+    <resultMap id="ReviewRecordResultMap" type="org.example.servicereview.entry.ReviewRecord">
+        <id property="reviewRecordId" column="review_record_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="pendingReviewQuestionIds" column="pending_review_question_ids"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result property="completedReviewQuestionIds" column="completed_review_question_ids"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result property="createTime" column="create_time"/>
+        <result property="reviewDays" column="review_days"/>
+        <result property="acQuestionIds" column="ac_question_ids"
+                typeHandler="com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"/>
+        <result property="reviewDate" column="review_date"/>
+    </resultMap>
+
+    <select id="getTodayRecord" resultMap="ReviewRecordResultMap">
+        select
+            review_record_id,
+            user_id,
+            pending_review_question_ids,
+            completed_review_question_ids,
+            create_time,
+            review_days,
+            ac_question_ids,
+            cast(create_time as date) as review_date
+        from review_record
+        where user_id = #{userId}
+          and cast(create_time as date) = current_date
+        limit 1
+    </select>
+
+    <select id="getlastRecord" resultMap="ReviewRecordResultMap">
+        select
+            review_record_id,
+            user_id,
+            pending_review_question_ids,
+            completed_review_question_ids,
+            create_time,
+            review_days,
+            ac_question_ids,
+            cast(create_time as date) as review_date
+        from review_record
+        where user_id = #{userId}
+          and cast(create_time as date) &lt; current_date
+        order by create_time desc
+        limit 1
+    </select>
+
+</mapper>

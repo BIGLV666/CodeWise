@@ -56,10 +56,13 @@ public class DebugServiceHandle implements MessageHandler {
                 log.info("uuid is empty{}",uuid);
                 throw new RuntimeException("未找到该提交");
             }
-//            if(Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.JUDGE_SUCCESS_KEY + uuid, "pending", 5, TimeUnit.MINUTES))){
-//                log.info("uuid{}已经处理",uuid);
-//                channel.basicAck(deliveryTag,false);
-//            }
+            Boolean firstConsume = redisTemplate.opsForValue()
+                    .setIfAbsent(RedisContext.JUDGE_SUCCESS_KEY + uuid, "pending", 5, TimeUnit.MINUTES);
+            if (Boolean.FALSE.equals(firstConsume)) {
+                log.info("uuid{}已经处理", uuid);
+                channel.basicAck(deliveryTag, false);
+                return;
+            }
             DebugDto debugDto=(DebugDto) redisTemplate.opsForHash().get(RedisContext.JUDGE_DEBUG_KEY,uuid);
             if(debugDto==null){
                 log.info("未找到该提交");

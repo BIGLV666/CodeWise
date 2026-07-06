@@ -1,9 +1,5 @@
 package org.example.serviceuser.dto;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableField;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import lombok.Data;
 import org.example.serviceuser.entry.User;
 
@@ -13,7 +9,7 @@ import java.time.LocalDateTime;
 @Data
 public class UserDto {
 
-    private Long userId;
+    private String userId;
     //用户信息
     private String userName;
 
@@ -45,7 +41,7 @@ public class UserDto {
     private LocalDateTime banTime;
 
     public UserDto(User user) {
-        this.userId = user.getUserId();
+        this.userId = user.getUserId().toString();
         this.userName = user.getUserName();
         this.email = user.getEmail();
         this.phone = user.getPhone();

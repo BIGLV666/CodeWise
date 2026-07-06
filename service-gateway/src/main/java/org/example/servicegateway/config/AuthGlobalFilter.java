@@ -14,8 +14,6 @@ import reactor.core.publisher.Mono;
 
 import java.util.Objects;
 
-import static io.jsonwebtoken.Jwts.header;
-
 @Component
 public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
@@ -56,7 +54,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         System.out.println("📌 客户端 IP: " + ip);
 
         // 2. 放行登录/注册
-        if (path.contains("login") || path.contains("register")) {
+        if (path.contains("login") || path.contains("register")||path.contains("updatefromcode")||path.contains("updatepasswordforemail")) {
             System.out.println("✅ 放行: " + path);
             ServerHttpRequest newRequest = requestBuilder.build();
             System.out.println("📌 newRequest 的 X-Real-IP: " + newRequest.getHeaders().getFirst("X-Real-IP"));

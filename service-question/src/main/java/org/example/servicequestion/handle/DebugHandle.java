@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
-
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -44,11 +43,11 @@ public class DebugHandle implements MessageHandler {
                 log.info("未找到该记录{}",uuid);
                 throw new RuntimeException("未找到该记录");
             }
-//            if(Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.QUESTION_SUCCESS_KEY + uuid, "pending", 5, TimeUnit.MINUTES)))
-//            {
-//                log.info("重复消费");
-//                return;
-//            }
+            if(Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.QUESTION_SUCCESS_KEY + uuid, "pending", 5, TimeUnit.MINUTES)))
+            {
+                log.info("重复消费");
+                return;
+            }
             List<JudgeReturnRecordDto> ress= (List<JudgeReturnRecordDto>) redisTemplate.opsForHash().get(RedisContext.JUDGE_RESULT_KEY,uuid);
             if(ress==null||ress.isEmpty()){
                 throw new RuntimeException("判题结果为空");

@@ -1,7 +1,6 @@
 package org.example.serviceuser.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-
 import org.example.servicecommon.service.EmailService;
 import org.example.servicecommon.until.UserContext;
 import org.example.serviceuser.dto.UserDto;
@@ -99,19 +98,12 @@ public class UserService {
     public void register(String n,String code){
         try {
 
-            System.out.println("1️⃣ 进入 register 方法");
-
             String key = "";
             if (n.contains("@")) {
                 key = USER_EMAIL_KEY + "--" + n;
             } else {
                 key = USER_PHONE_KEY + "--" + n;
             }
-            System.out.println("2️⃣ key: " + key);
-
-            System.out.println("3️⃣ 开始查询 Redis");
-            System.out.println("4️⃣ redisTemplate 是否为 null: " + (redisTemplate == null));
-
             Map<String, Object> map = (Map<String, Object>) redisTemplate.opsForValue().get(key);
             System.out.println("5️⃣ map: " + map);
         if(map==null){
@@ -162,7 +154,7 @@ public class UserService {
         map.put("user",user);
         String contest=String.format("【CodeWise】验证码:%s 用于邮箱身份验证，5分钟内有效，请勿泄露和转发。如非本人操作，请忽略此邮件。",code);
         redisTemplate.opsForValue().set(key,map,5, TimeUnit.MINUTES);
-        emailService.sendEmail(email,"密码修改",contest);
+        emailService.sendEmail(email,"CodeWise 安全验证",contest);
     }
 
 
