@@ -2,10 +2,8 @@ package org.example.servicecommon.config;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-
 import org.example.servicecommon.until.UserContext;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 @AutoConfiguration
@@ -53,7 +51,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
 
 
         // 1. 登录/注册接口放行（不需要登录）
-        if (path.contains("login") || path.contains("register")) {
+        if (path.contains("login") || path.contains("register")||path.contains("updatepasswordforemail")||path.contains("updateformcode")) {
             return true;
         }
 

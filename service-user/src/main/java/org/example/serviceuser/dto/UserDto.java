@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @Data
 public class UserDto {
 
-    private Long userId;
+    private String userId;
     //用户信息
     private String userName;
 
@@ -45,7 +45,7 @@ public class UserDto {
     private LocalDateTime banTime;
 
     public UserDto(User user) {
-        this.userId = user.getUserId();
+        this.userId = user.getUserId().toString();
         this.userName = user.getUserName();
         this.email = user.getEmail();
         this.phone = user.getPhone();
