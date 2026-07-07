@@ -75,15 +75,17 @@ public class QuestionService {
         if(question==null){
             throw new RuntimeException("题目不存在");
         }
-        Result<UserDto>userDtoResult=userFeignClient.getUserInfo(UserContext.getUserId());
-        if(userDtoResult.getCode()!=200){
-            throw new RuntimeException(userDtoResult.getMessage());
-        }
-        if(userDtoResult.getData()==null){
-            throw new RuntimeException("未找到用户");
-        }
+
+
 
         if(question.getStatus().equals(3)){
+            Result<UserDto>userDtoResult=userFeignClient.getUserInfo(UserContext.getUserId());
+            if(userDtoResult.getCode()!=200){
+                throw new RuntimeException(userDtoResult.getMessage());
+            }
+            if(userDtoResult.getData()==null){
+                throw new RuntimeException("未找到用户");
+            }
             if(!UserContext.getUserId().equals(question.getCreateUserId())&&!userDtoResult.getData().getRoleId().equals(2)){
                 throw new RuntimeException("无权查看该题目");
             }

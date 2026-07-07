@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.UUID;
@@ -41,6 +42,9 @@ public class FavoritesService {
 
 
     public List<Favorites> getAllFavoritesByUserId() {
+        if(UserContext.getUserId()==null){
+            throw new IllegalArgumentException("请登录后操作");
+        }
         return favoritesMapper.selectList(new QueryWrapper<Favorites>().eq("user_id",UserContext.getUserId()));
     }
     /**
@@ -72,7 +76,7 @@ public class FavoritesService {
        }
        List<QuestionDto>remove=new ArrayList<>();
        for(QuestionDto questionDto:questionDtos) {
-            if(questionDto.getStatus().equals(1)){
+            if(!Integer.valueOf(1).equals(questionDto.getStatus())&&!Objects.equals(questionDto.getCreateUserId(), UserContext.getUserId())) {
                 remove.add(questionDto);
             }
         }

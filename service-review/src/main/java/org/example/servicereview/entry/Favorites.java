@@ -14,7 +14,7 @@ import java.util.List;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-@TableName("favorites")
+@TableName(value = "favorites", autoResultMap = true)
 public class Favorites {
     @TableId(type = IdType.AUTO)
     private Long favoritesId;

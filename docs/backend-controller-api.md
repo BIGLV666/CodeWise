@@ -72,8 +72,9 @@ X-Real-IP: <clientIp>
   "message": "success",
   "data": {}
 }
-```
 
+```
+注意如果返回结果只是一个字符串则message即返回结果
 ## service-user 用户模块
 
 基础路径：`/api/user`

@@ -8,8 +8,6 @@ import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.example.servicecommon.config.MqContexts;
 
 import static org.example.servicecommon.config.MqContexts.*;
 
@@ -125,6 +123,22 @@ public class MqConfig {
                 .bind(questionQueue())
                 .to(questionExchange())
                 .with(QUESTION_DEBUG_ROUTING_KEY);
+    }
+    //=============复习队列================
+    @Bean
+    public Queue reviewQueue() {
+        return QueueBuilder.durable(REVIEW_QUEUE_NAME).build();
+    }
+    @Bean
+    public DirectExchange reviewExchange() {
+        return new DirectExchange(REVIEW_EXCHANGE, true, false);
+    }
+    @Bean
+    public Binding reviewBinding() {
+        return BindingBuilder
+                .bind(reviewQueue())
+                .to(reviewExchange())
+                .with(REVIEW_JUDGE_RECORD_ROUTING_KEY);
     }
 
 }

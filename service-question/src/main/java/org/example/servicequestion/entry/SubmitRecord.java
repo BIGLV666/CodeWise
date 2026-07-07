@@ -27,5 +27,6 @@ public class SubmitRecord {
     private Integer memoryUsed;
     private String JudgeStatus;
     private String language;
+    private String submitScene="NORMAL";//NORMAL,REVIEW
     private LocalDateTime createTime=LocalDateTime.now();
 }

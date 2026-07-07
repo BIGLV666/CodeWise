@@ -26,10 +26,10 @@
             create_time,
             review_days,
             ac_question_ids,
-            cast(create_time as date) as review_date
+            review_date
         from review_record
         where user_id = #{userId}
-          and cast(create_time as date) = current_date
+          and review_date = current_date
         limit 1
     </select>
 
@@ -42,11 +42,11 @@
             create_time,
             review_days,
             ac_question_ids,
-            cast(create_time as date) as review_date
+            review_date
         from review_record
         where user_id = #{userId}
-          and cast(create_time as date) &lt; current_date
-        order by create_time desc
+          and review_date &lt; current_date
+        order by review_date desc
         limit 1
     </select>
 

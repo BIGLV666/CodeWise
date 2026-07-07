@@ -100,6 +100,7 @@ create table `submit_record` (
 
     `time_used`   COMMENT '时间使用(ms)',
     `memory_used` INT  COMMENT '内存使用(MB)',
+    `submit_scene` VARCHAR(10) not null default 'NORMAL' comment '判题来源，复习或者题目页',
     `judge_status` VARCHAR(20) NOT NULL COMMENT '判题状态',
     `language` VARCHAR(20) NOT NULL COMMENT '语言',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -117,6 +118,7 @@ CREATE TABLE `judge_record` (
                                 `error_msg` VARCHAR(2000) DEFAULT NULL COMMENT '错误信息',
                                 `log` LONGTEXT DEFAULT NULL COMMENT '日志',
                                 `user_output` LONGTEXT DEFAULT NULL COMMENT '用户输出(actual)',
+                                `test_total` INTEGER not null default 0 comment '测试样例总数',
                                 `fail_index` INT DEFAULT 0 COMMENT '失败索引(从0开始)',
                                 `code` LONGTEXT NOT NULL COMMENT '提交的代码',
                                 `input_data` LONGTEXT NOT NULL COMMENT '测试用例输入',

@@ -45,6 +45,12 @@ spring:
           uri: lb://service-ai
           predicates:
             - Path=/api/ai/**
+        # 5.复习收藏服务
+        - id: service-review
+          uri: lb://service-review
+          predicates:
+            - Path=/api/review/**
+
 
 jwt:
   secret: codewise-jwt-secret-key-must-be-at-least-256-bits-long
