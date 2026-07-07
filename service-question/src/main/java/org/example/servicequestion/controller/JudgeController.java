@@ -24,7 +24,7 @@ public class JudgeController {
 
     @PostMapping("/judge")
     public Result<Long> judge(@RequestBody GetCodeDto getCodeDto) {
-        Long submitRecordId = judgeService.judge(getCodeDto.getCode(), getCodeDto.getLanguage(), getCodeDto.getQuestionId());
+        Long submitRecordId = judgeService.judge(getCodeDto);
         return Result.success(submitRecordId);
     }
     @PostMapping("/debug")

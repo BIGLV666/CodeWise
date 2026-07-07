@@ -122,7 +122,7 @@ public class SubmitRecordHandel implements MessageHandler {
                 reviewJudgeRecordDto.setStatus(judgeRecord.getSubmitStatus());
                 reviewJudgeRecordDto.setErrorMessage(judgeRecord.getErrorMsg());
                 reviewJudgeRecordDto.setAllTestTotal(judgeRecord.getTestTotal());
-                reviewJudgeRecordDto.setAcTestTotal(judgeRecord.getTestTotal()-judgeRecord.getFailIndex());
+                reviewJudgeRecordDto.setAcTestTotal(judgeRecord.getFailIndex()-1);
                 rabbitTemplate.convertAndSend(
                         MqContexts.REVIEW_EXCHANGE,
                         MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY,

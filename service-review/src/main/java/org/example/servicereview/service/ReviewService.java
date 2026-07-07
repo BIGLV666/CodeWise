@@ -49,6 +49,25 @@ public class ReviewService {
     private final BigDecimal EFLOW= BigDecimal.valueOf(1.3);
     private final BigDecimal DEFAULT_EASINESS_FACTOR = BigDecimal.valueOf(2.5);
 
+    /**
+     *
+     * 添加题目到复习中
+     */
+    public String addQuestionToReview(Long questionId){
+        try {
+            Review review = Review.builder().questionId(questionId).userId(UserContext.getUserId())
+                    .lastQuality(0).lastReviewTime(LocalDateTime.now()).nextReviewTime(LocalDateTime.now().plusDays(1))
+                    .createTime(LocalDateTime.now()).updateTime(LocalDateTime.now()).build();
+            int r= reviewMapper.insert(review);
+            if(r!=1){
+                throw new IllegalArgumentException("添加失败请稍后重试");
+            }
+            return  "success";
+        }catch (DuplicateKeyException e){
+            throw new IllegalArgumentException("该题目已在您的复习计划");
+        }
+    }
+
 
     /**
      * 获取当前登录用户的复习配置；如果不存在，则创建默认配置。
@@ -141,9 +160,6 @@ public class ReviewService {
             List<Long>questionIds=new ArrayList<>();
             if(reviewRecord.getPendingReviewQuestionIds()!=null){
                 questionIds.addAll(reviewRecord.getPendingReviewQuestionIds());
-            }
-            if(reviewRecord.getCompletedReviewQuestionIds()!=null){
-                questionIds.addAll(reviewRecord.getCompletedReviewQuestionIds());
             }
             if(questionIds.isEmpty()){
                 return Collections.emptyList();
@@ -249,6 +265,7 @@ public class ReviewService {
     public void setReview(Message amqpMessage, Channel channel,
                           @Header(AmqpHeaders.RECEIVED_ROUTING_KEY) String routingKey){
         Long tag=amqpMessage.getMessageProperties().getDeliveryTag();
+
         try{
              if(!MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY.equals(routingKey)){
                  log.warn("忽略未知复习消息 routingKey: {}", routingKey);
@@ -383,10 +400,14 @@ public class ReviewService {
      * @return SM-2 quality，范围通常为 0~5；-1 表示不计入本次复习
      */
     private Integer getQuality(ReviewJudgeRecordDto reviewJudgeRecordDto, ReviewConfig reviewConfig) {
+
         if (reviewJudgeRecordDto == null) {
             return 0;
         }
-
+        //系统内部原因不计入复习
+        if(reviewJudgeRecordDto.getErrorMessage().contains("代码不能为空")||reviewJudgeRecordDto.getErrorMessage().contains("不支持的语言")||reviewJudgeRecordDto.getErrorMessage().contains("沙箱环境未就绪，请稍后重试")){
+            return -1;
+        }
         String status = reviewJudgeRecordDto.getStatus();
         if (status == null) {
             return 0;

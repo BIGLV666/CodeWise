@@ -15,7 +15,14 @@ import java.util.List;
 public class ReviewController {
     @Autowired
     private ReviewService reviewService;
-
+    /**
+     *添加题目到复习计划
+     */
+    @PostMapping("/addquestiontoreview")
+    public Result<String> addReview(@RequestParam Long questionId){
+        reviewService.addQuestionToReview(questionId);
+        return Result.success("success");
+    }
     /**
      * 获取今日复习计划。
      * <p>
