@@ -1,10 +1,8 @@
 package org.example.servicequestion.handle;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceapi.dto.JudgeMqDto;
 import org.example.serviceapi.dto.JudgeResultDto;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
@@ -17,9 +15,7 @@ import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.example.servicequestion.service.WebSocketPushService;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 

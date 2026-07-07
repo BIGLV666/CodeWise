@@ -1,30 +1,21 @@
 package org.example.servicereview.service;
+
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.serviceapi.dto.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.feign.QuestionFeignClient;
-
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
-
 import org.example.servicereview.dto.ReceiveDto;
 import org.example.servicereview.entry.Favorites;
 import org.example.servicereview.mapper.FavoritesMapper;
-
-
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Objects;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.UUID;
 import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class FavoritesService {
