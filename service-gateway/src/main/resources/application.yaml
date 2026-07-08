@@ -50,6 +50,11 @@ spring:
           uri: lb://service-review
           predicates:
             - Path=/api/review/**
+        # 6，静态资源
+        - id: service-user-uploads
+          uri: lb://service-user
+          predicates:
+            - Path=/uploads/**
 
 
 jwt:

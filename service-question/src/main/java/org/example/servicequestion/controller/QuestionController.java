@@ -3,6 +3,7 @@ package org.example.servicequestion.controller;
 import org.example.serviceapi.dto.Result;
 import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.dto.InsertQuestionDto;
+import org.example.servicequestion.dto.ReturnQuestionDto;
 import org.example.servicequestion.entry.Question;
 
 
@@ -57,13 +58,13 @@ public class QuestionController {
     }
 
     @GetMapping("/cursorquestions")
-    public Result<CursorPageResult<Question>> cursorQuestions(
+    public Result<CursorPageResult<ReturnQuestionDto>> cursorQuestions(
             @RequestParam(required = false) Long lastId,
             @RequestParam Integer pageSize,
             @RequestParam(required = false) Integer difficulty,
             @RequestParam(required = false) Integer status,
             @RequestParam(required = false) String title) {
-        CursorPageResult<Question> result = questionService.cursorQuestions(lastId, pageSize, difficulty, status, title);
+        CursorPageResult<ReturnQuestionDto> result = questionService.cursorQuestions(lastId, pageSize, difficulty, status, title);
         return Result.success(result);
     }
 }

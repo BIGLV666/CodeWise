@@ -19,6 +19,7 @@ public class SubmitRecord {
     @TableId(type = IdType.AUTO)
     private Long submitRecordId;
     private Long questionId;
+    private String questionTitle;
     private Long userId;
     private LocalDateTime submitTime;
     private String submitContent;

@@ -3,6 +3,7 @@ package org.example.servicequestion.controller;
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.until.UserContext;
+import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.dto.GetCodeDto;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.service.JudgeService;
@@ -45,8 +46,11 @@ public class JudgeController {
     }
 
     @GetMapping("/getsubmitrecordsbyuserid")
-    public Result<List<SubmitRecord>> getSubmitRecordsByUserId() {
-        List<SubmitRecord> records = submitRecordService.getSubmitRecordsByUserId(UserContext.getUserId());
+    public Result<CursorPageResult<SubmitRecord>> getSubmitRecordsByUserId(
+            @RequestParam(required = false) Long lastId,
+            @RequestParam Integer pageSize) {
+
+            CursorPageResult<SubmitRecord> records = submitRecordService.cursorSubmitRecord(lastId,pageSize);
         return Result.success(records);
     }
 

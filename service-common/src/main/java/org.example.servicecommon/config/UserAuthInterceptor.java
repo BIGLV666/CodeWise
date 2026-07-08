@@ -54,6 +54,10 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         if (path.contains("login") || path.contains("register")||path.contains("updatepasswordforemail")||path.contains("updateformcode")) {
             return true;
         }
+        //2.放行静态资源
+        if(path.contains("uploads")){
+            return true;
+        }
 
         // 2. 验证内部 Token（确保请求来自网关）
         String internalToken = request.getHeader("X-Internal-Token");

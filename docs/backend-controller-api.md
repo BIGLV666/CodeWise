@@ -242,6 +242,51 @@ Authorization: Bearer <token>
 
 返回：`Result<UserDto>`。
 
+### 修改当前用户昵称
+
+```http
+PUT /api/user/nickname?nickName=CodeWise
+Authorization: Bearer <token>
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `nickName` | `String` | 是 | 新昵称，不能为空，最长 30 个字符 |
+
+返回：`Result<UserDto>`，`data` 为更新后的当前用户信息。
+
+### 修改当前用户个人简介
+
+```http
+PUT /api/user/bio?bio=热爱算法
+Authorization: Bearer <token>
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `bio` | `String` | 是 | 个人简介，最长 500 个字符 |
+
+返回：`Result<UserDto>`，`data` 为更新后的当前用户信息。
+
+### 修改当前用户生日
+
+```http
+PUT /api/user/birthday?birthday=2000-01-01
+Authorization: Bearer <token>
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `birthday` | `String` | 是 | 生日，格式 `yyyy-MM-dd`，不能晚于当前日期 |
+
+返回：`Result<UserDto>`，`data` 为更新后的当前用户信息。
+
 ### 上传/更新头像
 
 ```http
@@ -258,9 +303,11 @@ Content-Type: multipart/form-data
 
 用法说明：
 
-- 仅允许 `image/*`。
+- 仅允许真实图片文件。
+- 文件扩展名仅允许 `jpg`、`jpeg`、`png`、`gif`。
 - 文件大小不能超过 5MB。
 - 上传成功后更新当前用户头像，并尝试删除旧头像。
+- 如果头像数据库更新失败，会自动删除本次新上传的文件，避免产生垃圾文件。
 
 返回：`Result<String>`。
 
@@ -381,7 +428,7 @@ Authorization: Bearer <token>
 | `status` | `Integer` | 否 | 状态过滤 |
 | `title` | `String` | 否 | 标题关键字 |
 
-返回：`Result<CursorPageResult<Question>>`
+返回：`Result<CursorPageResult<ReturnQuestionDto>>`
 
 `CursorPageResult` 字段：
 
@@ -390,7 +437,27 @@ Authorization: Bearer <token>
 | `records` | `List<T>` | 当前页数据 |
 | `nextCursor` | `Long` | 下一页游标 |
 | `hasNext` | `Boolean` | 是否还有下一页 |
-| `total` | `Long` | 总数 |
+
+`records` 中每条题目为 `ReturnQuestionDto`，用于题目列表页：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `questionId` | `Long` | 题目 ID |
+| `questionTitle` | `String` | 题目标题 |
+| `difficulty` | `Integer` | 难度 |
+| `tags` | `String` | 标签 |
+| `totalSubmit` | `Long` | 总提交数 |
+| `totalAc` | `Long` | AC 数 |
+| `passRate` | `BigDecimal` | 通过率 |
+| `status` | `Integer` | 当前用户做题状态：`0` 未尝试，`1` 已通过，`2` 已尝试但未通过 |
+
+用法说明：
+
+- 第一页不传 `lastId`。
+- 后续页传上一页返回的 `nextCursor`。
+- 该接口不再返回总数，使用 `hasNext` 判断是否继续加载。
+- 如果请求带有有效登录态，后端会根据 `submit_record` 聚合当前用户在本页题目上的提交状态；未登录或无提交记录时状态为 `0`。
+- 状态聚合优先级为：只要该用户该题存在任意一次 `AC`，则返回 `1`；否则只要提交过，返回 `2`。
 
 ### WebSocket 广播测试
 
@@ -841,6 +908,7 @@ Authorization: Bearer <token>
 | --- | --- | --- |
 | `submitRecordId` | `Long` | 提交记录 ID |
 | `questionId` | `Long` | 题目 ID |
+| `questionTitle` | `String` | 题目标题，冗余保存用于提交历史、复习记录展示 |
 | `userId` | `Long` | 用户 ID |
 | `submitTime` | `LocalDateTime` | 提交时间 |
 | `submitContent` | `String` | 提交代码 |

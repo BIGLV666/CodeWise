@@ -78,6 +78,7 @@ create table `submit_record` (
     `submit_record_id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '记录ID',
     -- ========== 关联题目 ==========
     `question_id` BIGINT NOT NULL COMMENT '题目ID',
+    `question_title` varchar(50) COMMENT '题目标题',
     -- ========== 关联用户 ==========
     `user_id` BIGINT NOT NULL COMMENT '用户ID',
     -- ========== 提交时间 ==========
@@ -107,6 +108,7 @@ create table `submit_record` (
     INDEX `idx_question_id` (`question_id`),
     INDEX `idx_user_id` (`user_id`),
     INDEX `idx_submit_time` (`submit_time`),
+    INDEX `idx_user_id_question_id__status` (user_id,question_id,submit_status),
     INDEX `idx_status` (`judge_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='记录表';
 

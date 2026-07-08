@@ -1,14 +1,19 @@
 package org.example.servicequestion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.serviceapi.dto.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.UserDto;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.dto.InsertQuestionDto;
+import org.example.servicequestion.dto.ReturnQuestionDto;
 import org.example.servicequestion.entry.Question;
+import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.mapper.QuestionMapper;
+import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,7 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -29,6 +36,8 @@ public class QuestionService {
     private QuestionMapper questionMapper;
     @Autowired
     private RedissonClient redissonClient;
+    @Autowired
+    private SubmitRecordMapper submitRecordMapper;
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
     @Autowired
@@ -151,7 +160,7 @@ public class QuestionService {
         }
     }
 
-    public CursorPageResult<Question> cursorQuestions(Long lastId, Integer pageSize, Integer difficulty, Integer status, String title) {
+    public CursorPageResult<ReturnQuestionDto> cursorQuestions(Long lastId, Integer pageSize, Integer difficulty, Integer status, String title) {
         LambdaQueryWrapper<Question> wrapper = new LambdaQueryWrapper<>();
 
         // 游标分页：如果传入了 lastId，则查询大于 lastId 的记录（升序）
@@ -179,26 +188,51 @@ public class QuestionService {
         wrapper.last("LIMIT " + (pageSize + 1));
 
         List<Question> list = questionMapper.selectList(wrapper);
+        List<ReturnQuestionDto> returnQuestionDtoList = new ArrayList<>();
+        for(Question question:list){
+            ReturnQuestionDto returnQuestionDto=new ReturnQuestionDto(question);
+            returnQuestionDtoList.add(returnQuestionDto);
+        }
 
-        List<Question> records = new ArrayList<>();
+        List<ReturnQuestionDto> records;
+
         Long nextCursor = null;
         Boolean hasNext = false;
 
         if (list != null && !list.isEmpty()) {
             if (list.size() > pageSize) {
                 // 取前 pageSize 条作为当前页
-                records = list.subList(0, pageSize);
+                records = returnQuestionDtoList.subList(0, pageSize);
                 // 获取最后一条记录的 ID 作为下一页的游标
-                Question lastRecord = records.get(records.size() - 1);
+                ReturnQuestionDto lastRecord = records.get(records.size() - 1);
                 nextCursor = lastRecord.getQuestionId();
                 hasNext = true;
             } else {
-                records = list;
+                records =  returnQuestionDtoList;
                 hasNext = false;
             }
+        } else {
+            records = new ArrayList<>();
+        }
+        List<Long>questionIds = new ArrayList<>();
+        for(ReturnQuestionDto returnQuestionDto:records){
+            questionIds.add(returnQuestionDto.getQuestionId());
         }
 
-        return CursorPageResult.<Question>builder()
+        Map<Long, Integer> questionStatusMap = new HashMap<>();
+        Long userId = UserContext.getUserId();
+        if(userId != null && !questionIds.isEmpty()){
+            List<SubmitRecord> submitRecords = submitRecordMapper.getQuestionSubmitStatusByQuestionIds(userId, questionIds);
+            for(SubmitRecord submitRecord:submitRecords){
+                questionStatusMap.put(submitRecord.getQuestionId(), "AC".equals(submitRecord.getSubmitStatus()) ? 1 : 2);
+            }
+        }
+        for(ReturnQuestionDto record:records){
+            // 0-未尝试，1-已通过，3-尝试过但未通过
+            record.setStatus(questionStatusMap.getOrDefault(record.getQuestionId(), 0));
+        }
+
+        return CursorPageResult.<ReturnQuestionDto>builder()
                 .records(records)
                 .nextCursor(nextCursor)
                 .hasNext(hasNext)

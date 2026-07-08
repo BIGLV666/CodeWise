@@ -7,6 +7,7 @@ import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
+import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.entry.TestCase;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
@@ -29,6 +30,7 @@ public class JudgeService {
     private TestCaseMapper  testCaseMapper;
     @Autowired
     private RabbitTemplate rabbitTemplate;
+
     @Autowired
     private RedisTemplate<String,Object> redisTemplate;
 
@@ -36,10 +38,16 @@ public class JudgeService {
         String code = getCodeDto.getCode();
         String language = getCodeDto.getLanguage();
         Long questionId = getCodeDto.getQuestionId();
+        String title=getCodeDto.getQuestionTitle();
+        if(questionId == null) {
+            throw new IllegalArgumentException("题目不存在");
+        }
+
         String submitScene = "REVIEW".equals(getCodeDto.getSubmitScene()) ? "REVIEW" : "NORMAL";
         SubmitRecord submitRecord = new SubmitRecord();
         submitRecord.setSubmitContent(code);
         submitRecord.setLanguage(language);
+        submitRecord.setQuestionTitle(title);
         submitRecord.setSubmitTime(LocalDateTime.now());
         submitRecord.setJudgeStatus("pending"); //pending/failue/success
         submitRecord.setQuestionId(questionId);

@@ -6,6 +6,7 @@ import lombok.Data;
 public class ReviewJudgeRecordDto {
     private Long userId;
     private Long questionId;
+    private String questionTitle;
     private Long submitRecordId;
     private Long judgeRecordId;
     private Integer acTestTotal;

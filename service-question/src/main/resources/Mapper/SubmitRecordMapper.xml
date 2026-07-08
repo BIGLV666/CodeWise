@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.servicequestion.mapper.SubmitRecordMapper">
+    <select id="getQuestionSubmitStatusByQuestionIds" resultType="org.example.servicequestion.entry.SubmitRecord">
+        select
+            question_id as questionId,
+            case
+                when sum(case when submit_status = 'AC' then 1 else 0 end) > 0 then 'AC'
+                else 'TRIED'
+            end as submitStatus
+        from submit_record
+        where user_id = #{userId}
+          and question_id in
+          <foreach collection="questionIds" item="questionId" open="(" separator="," close=")">
+              #{questionId}
+          </foreach>
+        group by question_id
+    </select>
+</mapper>

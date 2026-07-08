@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/review/review")
@@ -30,7 +31,7 @@ public class ReviewController {
      * </p>
      */
     @GetMapping("/gettodayreview")
-    public Result<List<QuestionDto>> getTodayReviewLegacy(){
+    public Result<Map<String,Object>> getTodayReviewLegacy(){
         return getTodayReview();
     }
 
@@ -38,7 +39,7 @@ public class ReviewController {
      * 获取今日复习计划。
      */
     @GetMapping("/today")
-    public Result<List<QuestionDto>> getTodayReview(){
+    public Result<Map<String,Object>> getTodayReview(){
         return Result.success(reviewService.getAllQuestions());
     }
 

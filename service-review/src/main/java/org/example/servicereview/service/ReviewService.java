@@ -30,9 +30,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 @Service
 @Slf4j
@@ -154,22 +152,28 @@ public class ReviewService {
      *
      * @return 今日复习题目详情列表；如果今天没有待复习题目则返回空列表
      */
-    public List<QuestionDto>getAllQuestions(){
+    public Map<String,Object> getAllQuestions(){
+        Map<String,Object> map = new HashMap<>();
         ReviewRecord reviewRecord=reviewRecordMapper.getTodayRecord(UserContext.getUserId());
         if(reviewRecord!=null){
+            map.put("reviewRecord",reviewRecord);
             List<Long>questionIds=new ArrayList<>();
             if(reviewRecord.getPendingReviewQuestionIds()!=null){
                 questionIds.addAll(reviewRecord.getPendingReviewQuestionIds());
             }
             if(questionIds.isEmpty()){
-                return Collections.emptyList();
+                map.put("questions",Collections.emptyList());
+
+                return map;
             }
             Result<List<QuestionDto>>questionDtoResult= questionFeignClient.getFavorites(questionIds);
         if(questionDtoResult.getCode()!=200){
             throw new IllegalArgumentException(questionDtoResult.getMessage());
         }
-        return questionDtoResult.getData();
+        map.put("questions",questionDtoResult.getData());
+        return map;
         }
+        //今天第一次创建record
         ReviewConfig reviewConfig=reviewConfigMapper.selectOne(new QueryWrapper<ReviewConfig>().eq("user_id", UserContext.getUserId()));
         if(reviewConfig==null){
              reviewConfig=ReviewConfig.builder().userId(UserContext.getUserId()).reviewCount(Integer.MAX_VALUE)
@@ -178,7 +182,8 @@ public class ReviewService {
         }
         List<Review>reviews= reviewMapper.getReviews(reviewConfig.getReviewCount(),UserContext.getUserId());
         if(reviews==null||reviews.isEmpty()){
-            return Collections.emptyList();
+            map.put("questions",Collections.emptyList());
+            return map;
         }
         List<Long>questionIds=reviews.stream().map(Review::getQuestionId).toList();
 
@@ -221,21 +226,24 @@ public class ReviewService {
                 if(concurrentRecord.getCompletedReviewQuestionIds()!=null){
                     concurrentQuestionIds.addAll(concurrentRecord.getCompletedReviewQuestionIds());
                 }
+
                 if(concurrentQuestionIds.isEmpty()){
-                    return Collections.emptyList();
+                    map.put("questions",Collections.emptyList());
+                    return map;
                 }
                 Result<List<QuestionDto>> concurrentResult= questionFeignClient.getFavorites(concurrentQuestionIds);
                 if(concurrentResult.getCode()!=200){
                     throw new IllegalArgumentException(concurrentResult.getMessage());
                 }
-                return concurrentResult.getData();
+                map.put("questions",concurrentResult.getData());
+                return map;
             }
             throw e;
         }
 
-
-
-        return questionDtoResult.getData();
+        map.put("reviewRecord",reviewRecord);
+        map.put("questions",questionDtoResult.getData());
+        return map;
     }
 
 
@@ -284,7 +292,7 @@ public class ReviewService {
                  return;
              }
              Integer q=getQuality(reviewJudgeRecordDto, reviewConfig);
-              if(q==-1){
+              if(q.equals(-1)){
                   log.info("本次复习判题不计入复习计划, userId: {}, questionId: {}, status: {}",
                           reviewJudgeRecordDto.getUserId(), reviewJudgeRecordDto.getQuestionId(), reviewJudgeRecordDto.getStatus());
                   channel.basicAck(tag,false);
@@ -402,7 +410,7 @@ public class ReviewService {
     private Integer getQuality(ReviewJudgeRecordDto reviewJudgeRecordDto, ReviewConfig reviewConfig) {
 
         if (reviewJudgeRecordDto == null) {
-            return 0;
+            return -1;
         }
         //系统内部原因不计入复习
         if(reviewJudgeRecordDto.getErrorMessage().contains("代码不能为空")||reviewJudgeRecordDto.getErrorMessage().contains("不支持的语言")||reviewJudgeRecordDto.getErrorMessage().contains("沙箱环境未就绪，请稍后重试")){
