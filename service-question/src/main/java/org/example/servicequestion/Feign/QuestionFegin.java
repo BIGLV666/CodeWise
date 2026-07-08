@@ -1,10 +1,8 @@
 package org.example.servicequestion.Feign;
 
 import org.example.serviceapi.dto.QuestionDto;
-
 import org.example.serviceapi.dto.Result;
 import org.example.servicequestion.FeugnService.QuestionServiceFeign;
-import org.example.servicequestion.service.QuestionService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,7 +17,7 @@ public class QuestionFegin {
     public Result<QuestionDto> getQuestion(@PathVariable Long questionId) {
         return Result.success(questionServiceFeign.getQuestionById(questionId));
     }
-    @GetMapping("/info/favoritequestions")
+    @PostMapping("/info/favoritequestions")
     public Result<List<QuestionDto>> getFavorites(@RequestBody List<Long> questionIds) {
         return Result.success(questionServiceFeign.getAllFavoritesByUserId(questionIds));
     }

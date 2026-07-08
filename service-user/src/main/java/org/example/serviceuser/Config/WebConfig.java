@@ -5,6 +5,7 @@ import org.example.servicecommon.config.UserAuthInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
@@ -23,9 +24,14 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
                     .excludePathPatterns("/api/user/wechat/callback")
                     .excludePathPatterns("/api/user/updatefromcode")
                     .excludePathPatterns("/api//user/updatepasswordforemail")
+                    .excludePathPatterns("/uploads/**");
                     //.excludePathPatterns("/api/user/emailregister")
             ;
             System.out.println("✅ 拦截器注册完成");
+    } @Override
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+        registry.addResourceHandler("/uploads/**")
+                .addResourceLocations("file:E:/learncard/CodeWise/service-user/static/uploads/");
     }
 
     }

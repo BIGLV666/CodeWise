@@ -22,10 +22,14 @@
         from review
         where user_id = #{userId}
           and status = 0
-          and (next_review_time is null or next_review_time &lt;= current_date)
+          and (
+            next_review_time is null
+                or next_review_time &lt; current_date + interval 1 day
+            )
         order by weight desc, next_review_time asc, update_time asc
         limit #{total}
     </select>
+
 
     <update id="updateReviewBySm2" parameterType="org.example.servicereview.entry.Review">
         update review

@@ -4,9 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceapi.dto.JudgeMqDto;
-import org.example.serviceapi.dto.JudgeResultDto;
-import org.example.serviceapi.dto.TestMessage;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.Mq.MessageHandler;
@@ -112,8 +109,15 @@ public class JudgeServiceHandel implements MessageHandler {
             finalResult.setSubmitRecordId(submissionId);
             finalResult.setCode(submitRecord.getSubmitContent());
             finalResult.setCreateTime(LocalDateTime.now());
+            finalResult.setTestTotal(totalCount);
             judgeRecordMapper.insert(finalResult);
+
+
+            //构建复习队列
+
+
             // 发送结果
+
             rabbitTemplate.convertAndSend(
                     MqContexts.Question_EXCHANGE,
                     MqContexts.QUESTION_SUBMIT_RECORD_ROUTING_KEY, finalResult.getJudgeRecordId());

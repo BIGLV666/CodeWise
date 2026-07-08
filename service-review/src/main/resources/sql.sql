@@ -100,12 +100,16 @@ create table review_record (
     -- ========== 连续复习统计 ==========
     review_days int not null default 0 comment '连续复习天数',
 
+    -- ========== 业务日期 ==========
+    review_date date not null comment '复习日期',
+
     -- ========== 审计字段 ==========
     create_time datetime not null default current_timestamp comment '创建时间',
 
     -- ========== 索引 ==========
-    unique uk_user_create_date (user_id, (cast(create_time as date))),
+    unique uk_user_review_date (user_id, review_date),
     index idx_user_id (user_id),
-    index idx_create_time (create_time)
+    index idx_create_time (create_time),
+    index idx_review_date (review_date)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci comment='每日复习记录表';
 

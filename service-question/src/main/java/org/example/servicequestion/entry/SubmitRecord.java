@@ -19,6 +19,7 @@ public class SubmitRecord {
     @TableId(type = IdType.AUTO)
     private Long submitRecordId;
     private Long questionId;
+    private String questionTitle;
     private Long userId;
     private LocalDateTime submitTime;
     private String submitContent;
@@ -27,5 +28,6 @@ public class SubmitRecord {
     private Integer memoryUsed;
     private String JudgeStatus;
     private String language;
+    private String submitScene="NORMAL";//NORMAL,REVIEW
     private LocalDateTime createTime=LocalDateTime.now();
 }

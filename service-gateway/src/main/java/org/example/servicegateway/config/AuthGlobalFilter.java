@@ -48,13 +48,14 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         // 1. 获取 IP 并构建请求建造器
         String ip = getClientIp(request);
         ServerHttpRequest.Builder requestBuilder = request.mutate()
-                .header("X-Real-IP", ip);
+                .header("X-Real-IP", ip)
+                .header("X-Internal-Token", "codewise-secret-2026");
 
         System.out.println("🔍 请求路径: " + path);
         System.out.println("📌 客户端 IP: " + ip);
 
         // 2. 放行登录/注册
-        if (path.contains("login") || path.contains("register")||path.contains("updatefromcode")||path.contains("updatepasswordforemail")) {
+        if (path.contains("login") || path.contains("register")||path.contains("updatefromcode")||path.contains("updatepasswordforemail")||path.contains("uploads")) {
             System.out.println("✅ 放行: " + path);
             ServerHttpRequest newRequest = requestBuilder.build();
             System.out.println("📌 newRequest 的 X-Real-IP: " + newRequest.getHeaders().getFirst("X-Real-IP"));

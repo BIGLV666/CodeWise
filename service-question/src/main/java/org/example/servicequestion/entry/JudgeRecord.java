@@ -24,7 +24,7 @@ public class JudgeRecord {
     private String userOutput;
     private Integer failIndex;
     private String code;
-
+    private Integer testTotal;
 
     private String inputData;
     private String expectedOutput;

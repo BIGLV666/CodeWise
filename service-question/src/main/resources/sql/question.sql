@@ -78,6 +78,7 @@ create table `submit_record` (
     `submit_record_id` BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '记录ID',
     -- ========== 关联题目 ==========
     `question_id` BIGINT NOT NULL COMMENT '题目ID',
+    `question_title` varchar(50) COMMENT '题目标题',
     -- ========== 关联用户 ==========
     `user_id` BIGINT NOT NULL COMMENT '用户ID',
     -- ========== 提交时间 ==========
@@ -100,12 +101,14 @@ create table `submit_record` (
 
     `time_used`   COMMENT '时间使用(ms)',
     `memory_used` INT  COMMENT '内存使用(MB)',
+    `submit_scene` VARCHAR(10) not null default 'NORMAL' comment '判题来源，复习或者题目页',
     `judge_status` VARCHAR(20) NOT NULL COMMENT '判题状态',
     `language` VARCHAR(20) NOT NULL COMMENT '语言',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_question_id` (`question_id`),
     INDEX `idx_user_id` (`user_id`),
     INDEX `idx_submit_time` (`submit_time`),
+    INDEX `idx_user_id_question_id__status` (user_id,question_id,submit_status),
     INDEX `idx_status` (`judge_status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='记录表';
 
@@ -117,6 +120,7 @@ CREATE TABLE `judge_record` (
                                 `error_msg` VARCHAR(2000) DEFAULT NULL COMMENT '错误信息',
                                 `log` LONGTEXT DEFAULT NULL COMMENT '日志',
                                 `user_output` LONGTEXT DEFAULT NULL COMMENT '用户输出(actual)',
+                                `test_total` INTEGER not null default 0 comment '测试样例总数',
                                 `fail_index` INT DEFAULT 0 COMMENT '失败索引(从0开始)',
                                 `code` LONGTEXT NOT NULL COMMENT '提交的代码',
                                 `input_data` LONGTEXT NOT NULL COMMENT '测试用例输入',

@@ -33,6 +33,9 @@ public class BuildResult {
             String cleanErr = formatRuntimeError(stderr, language);
             return buildResult("RE", output, stdout, timeUsed, memoryUsed, cleanErr, failIndex, testCaseId, stderr, input);
         }
+        if(exitCode==null){
+            return buildResult("CE", output, null, 0, 0, judgeReturnDto.getErrorMsg(), 0, testCaseId, stdout, input);
+        }
 
         String actual = normalizeOutput(stdout);
         String expected = normalizeOutput(output);
@@ -40,6 +43,7 @@ public class BuildResult {
         if (actual.equals(expected)) {
             return buildResult("AC", output, actual, timeUsed, memoryUsed, "执行成功", failIndex, testCaseId, stdout, input);
         }
+
 
         // WA 的情况，像力扣一样告诉用户输入、输出和期望
         String waErr = formatWrongAnswerError(input, expected, actual);

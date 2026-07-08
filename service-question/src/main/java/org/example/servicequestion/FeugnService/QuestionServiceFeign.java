@@ -4,16 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.example.serviceapi.dto.QuestionDto;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.mapper.QuestionMapper;
-import org.example.servicequestion.service.QuestionService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.bind.annotation.RequestParam;
-
-
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class QuestionServiceFeign {
@@ -22,6 +16,7 @@ public class QuestionServiceFeign {
         this.questionMapper = questionMapper;
     }
     private final QuestionMapper questionMapper;
+
     public QuestionDto getQuestionById( Long id) {
         Question question = questionMapper.selectById(id);
       

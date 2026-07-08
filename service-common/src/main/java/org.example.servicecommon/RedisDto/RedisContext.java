@@ -9,5 +9,7 @@ public  class RedisContext {
     //幂等键
     public static final String  REQUEST_ID_KEY = "request_id_key";
     //======收藏键-=======================
+    //============题目缓存键=================
+    public static final String  QUESTION_ID_KEY = "question_id_key";
     
 }

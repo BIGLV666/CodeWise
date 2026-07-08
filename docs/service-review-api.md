@@ -5,7 +5,7 @@
 - 服务名：`service-review`
 - 默认端口：`8085`
 - 主要模块：收藏夹、复习计划
-- 当前已开放 HTTP 接口：收藏夹接口
+- 当前已开放 HTTP 接口：收藏夹接口、复习计划接口、复习配置接口
 - 统一响应结构：`Result<T>`
 - 用户身份：接口通过网关/拦截器写入 `UserContext.getUserId()` 获取当前用户，不需要前端显式传 `userId`
 
@@ -231,14 +231,124 @@
 | `passRate` | `BigDecimal` | 通过率 |
 | `contentHash` | `String` | 内容哈希 |
 
-## 复习模块当前状态
+## 复习计划接口
 
-当前源码中已有复习计划相关 Service、实体和 Mapper，但尚未开放 HTTP Controller。
+基础路径：`/api/review/review`
 
-### 已有核心能力
+### 获取今日复习计划
 
-- `ReviewService#getAllQuestions()`：获取当前用户今天待复习题目；如果今天没有复习记录，会按配置生成当天 `ReviewRecord`。
-- `ReviewService#calculateNextReviewInterval(Review review, Integer quality)`：按 SM-2 算法更新复习间隔、难度因子、下次复习时间。
+- 方法：`GET`
+- 路径：`/api/review/review/today`
+- 请求参数：无
+- 返回：`Result<List<QuestionDto>>`
+
+说明：
+
+- 返回当前用户今天复习快照中的题目详情。
+- 如果当天还没有复习快照，会根据用户复习配置和到期的 `Review` 记录生成当天 `ReviewRecord`。
+- 返回数据包含当天待复习题目和当天已完成题目，方便前端展示完整今日复习列表。
+- 如果今天没有需要复习的题目，返回空列表。
+
+成功示例：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "questionId": 1001,
+      "title": "两数之和",
+      "difficulty": 1,
+      "tags": "数组,哈希表"
+    }
+  ]
+}
+```
+
+### 获取今日复习计划（旧路径兼容）
+
+- 方法：`GET`
+- 路径：`/api/review/review/gettodayreview`
+- 请求参数：无
+- 返回：`Result<List<QuestionDto>>`
+
+说明：
+
+- 该接口为旧路径兼容接口，内部逻辑与 `/api/review/review/today` 相同。
+- 新前端建议优先使用 `/today`。
+
+## 复习配置接口
+
+基础路径：`/api/review/review`
+
+### 获取当前用户复习配置
+
+- 方法：`GET`
+- 路径：`/api/review/review/config`
+- 请求参数：无
+- 返回：`Result<ReviewConfig>`
+
+说明：
+
+- 获取当前用户的复习配置。
+- 如果当前用户还没有配置记录，服务会自动创建一份默认配置。
+
+成功示例：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "reviewConfigId": 1,
+    "userId": 10,
+    "reviewCount": 20,
+    "enableAutoReview": 1,
+    "countCompileError": 1,
+    "minEasinessFactor": 1.30,
+    "initialEasinessFactor": 2.50,
+    "masteredIntervalDays": 30,
+    "createTime": "2026-07-07T18:00:00",
+    "updateTime": "2026-07-07T18:00:00"
+  }
+}
+```
+
+### 新增或更新当前用户复习配置
+
+- 方法：`PUT`
+- 路径：`/api/review/review/config`
+- Content-Type：`application/json`
+- 请求体：`ReviewConfigDto`
+- 返回：`Result<ReviewConfig>`
+
+请求示例：
+
+```json
+{
+  "reviewCount": 20,
+  "enableAutoReview": 1,
+  "countCompileError": 1,
+  "minEasinessFactor": 1.30,
+  "initialEasinessFactor": 2.50,
+  "masteredIntervalDays": 30
+}
+```
+
+说明：
+
+- 如果用户还没有配置记录，则会创建配置。
+- 如果配置已存在，则只更新请求体中非空字段。
+- `reviewCount` 小于 0 时会被修正为 `0`。
+- `enableAutoReview`：`1` 表示开启自动复习推进，`0` 表示关闭。
+- `countCompileError`：`1` 表示 CE 计入复习并按 `quality=0` 处理，`0` 表示 CE 不计入本次复习。
+
+## 复习模块核心能力
+
+- `ReviewService#getAllQuestions()`：获取当前用户今天复习题目；如果今天没有复习记录，会按配置生成当天 `ReviewRecord` 快照。
+- `ReviewService#updateReviewConfig(ReviewConfigDto reviewConfigDto)`：新增或更新当前用户复习配置。
+- `ReviewService#calculateNextReviewInterval(Review review, Integer quality, ReviewConfig reviewConfig)`：按 SM-2 算法和用户配置更新复习间隔、难度因子、下次复习时间。
 
 ### Review
 

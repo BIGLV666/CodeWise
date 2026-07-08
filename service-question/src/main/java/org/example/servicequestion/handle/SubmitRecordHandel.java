@@ -1,12 +1,11 @@
 package org.example.servicequestion.handle;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceapi.dto.JudgeMqDto;
 import org.example.serviceapi.dto.JudgeResultDto;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.SubmitRecord;
@@ -15,9 +14,8 @@ import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.example.servicequestion.service.WebSocketPushService;
 import org.springframework.amqp.core.Message;
-import org.springframework.amqp.support.AmqpHeaders;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +36,8 @@ public class SubmitRecordHandel implements MessageHandler {
     private WebSocketPushService webSocketPushService;
     @Autowired
     private JudgeRecordMapper judgeRecordMapper;
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
 
     @Override
     public String getRoutingKey() {
@@ -110,6 +110,25 @@ public class SubmitRecordHandel implements MessageHandler {
                 log.error("数据库更新失败");
                 channel.basicNack(deliveryTag, false, true);  // 重新入队
                 return;
+            }
+            //构建复习队列
+
+            if(submitRecord.getSubmitScene().equals("REVIEW")){
+                ReviewJudgeRecordDto reviewJudgeRecordDto=new ReviewJudgeRecordDto();
+                reviewJudgeRecordDto.setUserId(submitRecord.getUserId());
+                reviewJudgeRecordDto.setQuestionId(questionId);
+                reviewJudgeRecordDto.setSubmitRecordId(submitRecord.getSubmitRecordId());
+                reviewJudgeRecordDto.setJudgeRecordId(judgeRecord.getJudgeRecordId());
+                reviewJudgeRecordDto.setStatus(judgeRecord.getSubmitStatus());
+                reviewJudgeRecordDto.setErrorMessage(judgeRecord.getErrorMsg());
+                reviewJudgeRecordDto.setAllTestTotal(judgeRecord.getTestTotal());
+                reviewJudgeRecordDto.setAcTestTotal(judgeRecord.getFailIndex()-1);
+                reviewJudgeRecordDto.setQuestionTitle(submitRecord.getQuestionTitle());
+                rabbitTemplate.convertAndSend(
+                        MqContexts.REVIEW_EXCHANGE,
+                        MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY,
+                        reviewJudgeRecordDto
+                );
             }
 
             // ★ 只确认一次，不批量确认

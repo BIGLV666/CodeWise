@@ -48,7 +48,7 @@ public class FavoritesController {
      * 创建收藏夹
      */
     @PostMapping
-    public Result<Void> createFavorites(@RequestParam String favoritesName, @RequestParam String requestId) {
+    public Result<String> createFavorites(@RequestParam String favoritesName, @RequestParam String requestId) {
         favoritesService.createFavorites(favoritesName, requestId);
         return Result.success("创建成功");
     }
