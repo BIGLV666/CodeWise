@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.servicecommon.RedisDto.JudgeReturnRecordDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.config.WebsocketContexts;
+import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.service.WebSocketPushService;
 import org.springframework.amqp.core.Message;
@@ -52,7 +54,15 @@ public class DebugHandle implements MessageHandler {
             if(ress==null||ress.isEmpty()){
                 throw new RuntimeException("判题结果为空");
             }
-            webSocketPushService.pushJudgeResult(ress.getFirst().getUserId(),ress);
+            WebsocketSendDto websocketSendDto = new WebsocketSendDto();
+            websocketSendDto.setQueueName(WebsocketContexts.DEBUG_JUDGE_RESULT);
+            websocketSendDto.setUserId(ress.getFirst().getUserId());
+            websocketSendDto.setResult(ress);
+            rabbitTemplate.convertAndSend(
+                    MqContexts.MESSAGE_EXCHANGE,
+                    MqContexts.WEBSOCKET_ROUTING_KEY,
+                    websocketSendDto
+            );
             redisTemplate.opsForValue().set(RedisContext.QUESTION_SUCCESS_KEY + uuid, "success", 5, TimeUnit.MINUTES);
             channel.basicAck(taskId,false);
             redisTemplate.opsForHash().delete(RedisContext.JUDGE_RESULT_KEY,uuid);

@@ -2,9 +2,10 @@ package org.example.servicecommon.config;
 
 public  class MqContexts {
     // 邮件队列
-    public static final String EMAIL_QUEUE = "email.queue";
-    public static final String EMAIL_EXCHANGE = "email.exchange";
-    public static final String EMAIL_ROUTING_KEY = "email.routing";
+    public static final String MESSAGE_QUEUE_NAME = "message.queue";
+    public static final String MESSAGE_EXCHANGE = "message.exchange";
+    public static final String MESSAGE_ROUTING_KEY = "email.routing";
+    public static final String WEBSOCKET_ROUTING_KEY = "websocket.routing";
 
     //AI队列
     public static final String Ai_QUEUE_NAME = "ai.queue";
@@ -27,4 +28,8 @@ public  class MqContexts {
     public static final String REVIEW_QUEUE_NAME = "reviews.queue";
     public static final String REVIEW_EXCHANGE = "reviews.exchange";
     public static final String REVIEW_JUDGE_RECORD_ROUTING_KEY = "reviews.judge.record.routing";
+    //用户队列
+    public static final String USER_QUEUE_NAME = "user.queue";
+    public static final String USER_EXCHANGE = "user.exchange";
+    public static final String USER_JUDGE_ROUTING_KEY = "user.judge.routing";
 }

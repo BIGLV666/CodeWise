@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: service-message
+  config:
+    import:
+      - optional:nacos:service-email.yaml
+  cloud:
+    nacos:
+      config:
+        server-addr: localhost:8848
+        file-extension: yaml
+        group: DEFAULT_GROUP
+      discovery:
+        server-addr: localhost:8848
+        group: DEFAULT_GROUP
+
+server:
+  port: 8083

@@ -23,8 +23,8 @@ spring:
             max-age: 3600
       routes:
         # 1. WebSocket 路由
-        - id: question-service-ws
-          uri: lb:ws://service-question
+        - id: service-message
+          uri: lb:ws://service-message
           predicates:
             - Path=/websocket/**
 

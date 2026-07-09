@@ -25,7 +25,6 @@ public class User {
     private String password;
     private String email;
     private String phone;
-    @TableField(typeHandler = JacksonTypeHandler.class)
     private String bio;//个人简介
     private String nickName;
     private String avatarUrl;//头像

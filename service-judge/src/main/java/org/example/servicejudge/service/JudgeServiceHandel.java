@@ -5,9 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.servicecommon.config.MqContexts;
-import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.Mq.MessageHandler;
-import org.example.servicejudge.Util.BuildResult;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.SubmitRecord;
 import org.example.servicejudge.entry.TestCase;
@@ -49,7 +47,11 @@ public class JudgeServiceHandel implements MessageHandler {
 
     @Override
     public void handle(String message, Channel channel, Message amqpMessage) {
+        long start = System.currentTimeMillis();
         long deliveryTag = amqpMessage.getMessageProperties().getDeliveryTag();
+        long testSelect = 0;
+        long forstart=0;
+        long forstartend=0;
         try {
             Long submissionId = objectMapper.readValue(message, Long.class);
             SubmitRecord submitRecord=submitRecordMapper.selectById(submissionId);
@@ -63,6 +65,7 @@ public class JudgeServiceHandel implements MessageHandler {
                 return;
             }
             List<TestCase>testMessages=testCaseMapper.selectList(new QueryWrapper<TestCase>().eq("question_id",submitRecord.getQuestionId()));
+            testSelect=System.currentTimeMillis();
             log.info("收到判题请求, submissionId: {}, 测试用例数: {}", submissionId,
                     testMessages != null ? testMessages.size() : 0);
 
@@ -72,40 +75,11 @@ public class JudgeServiceHandel implements MessageHandler {
                 return;
             }
 
-            // ★ 循环执行所有测试用例
-            JudgeRecord finalResult = null;
-            int passedCount = 0;
             int totalCount = testMessages.size();
-
-            for (int i = 0; i < testMessages.size(); i++) {
-                TestCase testMessage = testMessages.get(i);
-                JudgeReturnDto resultDto = judge.executeCode(submitRecord.getSubmitContent(), submitRecord.getLanguage(), testMessage.getInputData());
-                JudgeRecord result= BuildResult.buildResult(resultDto,testMessage.getCaseId(),testMessage.getInputData(),testMessage.getExpectedOutput(),i+1,submitRecord.getLanguage());
-
-                log.info("测试用例 {}/{}: {}", i + 1, totalCount, result.getSubmitStatus());
-
-
-                    // ...
-
-                // 如果某个用例失败，记录失败信息
-                if (!"AC".equals(result.getSubmitStatus())) {
-
-                    result.setFailIndex(i + 1);  // 失败索引从1开始
-                    finalResult = result;
-                    break;
-                }
-
-                // 更新最后成功的结果
-                finalResult = result;
-                passedCount++;
-            }
-
-            // 所有用例都通过
-            if (passedCount == totalCount && finalResult != null) {
-                finalResult.setSubmitRecordId(submissionId);
-                finalResult.setSubmitStatus("AC");
-                finalResult.setFailIndex(0);
-            }
+            forstart=System.currentTimeMillis();
+            JudgeRecord finalResult = judge.batchExecuteCode(submitRecord.getSubmitContent(), submitRecord.getLanguage(), testMessages);
+            forstartend=System.currentTimeMillis();
+            int passedCount = "AC".equals(finalResult.getSubmitStatus()) ? totalCount : Math.max(finalResult.getFailIndex() - 1, 0);
             finalResult.setSubmitRecordId(submissionId);
             finalResult.setCode(submitRecord.getSubmitContent());
             finalResult.setCreateTime(LocalDateTime.now());
@@ -125,6 +99,8 @@ public class JudgeServiceHandel implements MessageHandler {
 
 
             log.info("判题完成, submissionId: {}, 通过: {}/{}", submissionId, passedCount, totalCount);
+            long end = System.currentTimeMillis();
+            log.info("查询结束用时{},循环用时{}，总{}", ( testSelect- start),(forstartend-forstart),(end-start));
 
         } catch (Exception e) {
             log.error("判题处理失败", e);

@@ -9,7 +9,9 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.example.serviceapi.dto.JudgeResultDto;
 import org.example.servicejudge.Dto.JudgeReturnDto;
+import org.example.servicejudge.Util.BuildResult;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.TestCase;
 import org.example.servicejudge.interfaces.JudgeInterface;
@@ -20,9 +22,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -102,11 +102,20 @@ public class JudgeService implements JudgeInterface {
             try {
                 Files.writeString(workspace.resolve(spec.sourceFile()), code, StandardCharsets.UTF_8);
                 Files.writeString(workspace.resolve("input.txt"), input == null ? "" : input, StandardCharsets.UTF_8);
+                Files.writeString(workspace.resolve("compile.sh"), spec.buildCompileScript(), StandardCharsets.UTF_8);
                 Files.writeString(workspace.resolve("run.sh"), spec.buildRunScript(), StandardCharsets.UTF_8);
+                workspace.resolve("compile.sh").toFile().setExecutable(true);
                 workspace.resolve("run.sh").toFile().setExecutable(true);
 
                 copyWorkspaceToContainer(containerId, workspace);
-                Integer exitCode = executeInContainer(containerId);
+                Integer compileExitCode = executeScriptInContainer(containerId, "/workspace/compile.sh");
+                if (compileExitCode == null || compileExitCode != 0) {
+                    int timeUsed = (int) (System.currentTimeMillis() - start);
+                    String stderr = readFileFromContainer(containerId, "/workspace/stderr.txt");
+                    return formatJudgeReturnDto(2, timeUsed, stderr, "编译失败", null, 0);
+                }
+
+                Integer exitCode = executeScriptInContainer(containerId, "/workspace/run.sh");
                 int timeUsed = (int) (System.currentTimeMillis() - start);
 
                 String stdout = readFileFromContainer(containerId, "/workspace/stdout.txt");
@@ -149,6 +158,116 @@ public class JudgeService implements JudgeInterface {
         }
 
     }
+
+    @Override
+    public JudgeRecord batchExecuteCode(String code, String language, List<TestCase> testCases) throws IOException {
+        if (testCases == null || testCases.isEmpty()) {
+            return BuildResult.buildResult(formatJudgeReturnDto(null, 0, null, "测试用例为空", null, 0),null,null,null,0,language);
+        }
+        if (code == null || code.isBlank()) {
+            return BuildResult.buildResult(formatJudgeReturnDto(null, 0, null, "代码不能为空", null, 0),testCases.get(0).getCaseId(),testCases.get(0).getInputData(),testCases.get(0).getExpectedOutput(),1,language);
+        }
+
+        LanguageSpec spec = LanguageSpec.of(language);
+        if (spec == null) {
+            return BuildResult.buildResult(formatJudgeReturnDto(null, 0, null, "不支持的语言", null, 0),testCases.get(0).getCaseId(),testCases.get(0).getInputData(),testCases.get(0).getExpectedOutput(),1,language);
+
+        }
+
+        String containerId = containerPool.get(language);
+        if (containerId == null) {
+
+           return BuildResult.buildResult(formatJudgeReturnDto(null, 0, null, "沙箱环境未就绪，请稍后重试", null, 0),testCases.get(0).getCaseId(),testCases.get(0).getInputData(),testCases.get(0).getExpectedOutput(),1,language);
+
+        }
+        cleanContainerWorkspace(containerId);
+
+        Path workspace=Files.createTempDirectory("codewise-judge-");
+        try {
+            Files.writeString(workspace.resolve(spec.sourceFile()), code, StandardCharsets.UTF_8);
+            Files.writeString(workspace.resolve("compile.sh"),spec.buildCompileScript(), StandardCharsets.UTF_8);
+            Files.writeString(workspace.resolve("run.sh"), spec.buildRunScript(), StandardCharsets.UTF_8);
+            workspace.resolve("compile.sh").toFile().setExecutable(true);
+            workspace.resolve("run.sh").toFile().setExecutable(true);
+
+            copyWorkspaceToContainer(containerId, workspace);
+
+            long compileStart = System.currentTimeMillis();
+            Integer compileExitCode = executeScriptInContainer(containerId, "/workspace/compile.sh");
+            if (compileExitCode == null || compileExitCode != 0) {
+                int timeUsed = (int) (System.currentTimeMillis() - compileStart);
+                String stderr = readFileFromContainer(containerId, "/workspace/stderr.txt");
+                JudgeReturnDto compileDto = formatJudgeReturnDto(2, timeUsed, stderr, "编译失败", null, 0);
+                JudgeRecord compileResult = BuildResult.buildResult(compileDto, testCases.get(0).getCaseId(), testCases.get(0).getInputData(), testCases.get(0).getExpectedOutput(), 1, language);
+                compileResult.setTestTotal(testCases.size());
+                return compileResult;
+            }
+
+            JudgeRecord lastResult = null;
+            for(int i = 0; i < testCases.size(); i++) {
+                TestCase testCase = testCases.get(i);
+
+                writeInputToContainer(containerId,testCase.getInputData());
+
+                long caseStart=System.currentTimeMillis();
+                Integer runExitCode = executeScriptInContainer(containerId, "/workspace/run.sh");
+                int timeUsed = (int) (System.currentTimeMillis() - caseStart);
+                String stdout = readFileFromContainer(containerId, "/workspace/stdout.txt");
+                String stderr = readFileFromContainer(containerId, "/workspace/stderr.txt");
+
+                JudgeReturnDto judgeReturnDto= formatJudgeReturnDto(runExitCode,timeUsed,stderr,formatRuntimeError(stderr,language),stdout,0);
+
+                JudgeRecord judgeRecord= BuildResult.buildResult(judgeReturnDto,testCase.getCaseId(),testCase.getInputData(),testCase.getExpectedOutput(),i+1,language);
+
+                if (!"AC".equals(judgeRecord.getSubmitStatus())) {
+                    judgeRecord.setFailIndex(i + 1);
+                    judgeRecord.setTestTotal(testCases.size());
+                    return judgeRecord;
+                }
+                lastResult = judgeRecord;
+            }
+            if (lastResult == null) {
+                return BuildResult.buildResult(formatJudgeReturnDto(null, 0, null, "测试用例为空", null, 0),null,null,null,0,language);
+            }
+            lastResult.setSubmitStatus("AC");
+            lastResult.setFailIndex(0);
+            lastResult.setTestTotal(testCases.size());
+            return lastResult;
+        }finally {
+            deleteDirectory(workspace);
+        }
+
+
+
+
+
+
+    }
+
+
+    /**
+     * 打包输入复制到docker
+     */
+    private void writeInputToContainer(String containerId, String input) throws IOException {
+        Path temp = Files.createTempDirectory("codewise-judge-input");
+        try {
+            Files.writeString(temp.resolve("input.txt"),input==null?"":input, StandardCharsets.UTF_8);
+            copyWorkspaceToContainer(containerId, temp);
+        }finally {
+            deleteDirectory(temp);
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
     /**
      * 使用 Docker Java API 获取容器内存使用量 (KB)
      */
@@ -170,8 +289,8 @@ public class JudgeService implements JudgeInterface {
                                 received[0] = true;
                             }
                         }
-                    })
-                    .awaitCompletion(2, TimeUnit.SECONDS);
+                    });
+                    //.awaitCompletion(2, TimeUnit.SECONDS);
 
             return memoryKB[0];
         } catch (Exception e) {
@@ -252,11 +371,14 @@ public class JudgeService implements JudgeInterface {
     private void cleanContainerWorkspace(String containerId) {
         try {
             // 删除 /workspace 下的所有文件
-            dockerClient.execCreateCmd(containerId)
+            var execCmd = dockerClient.execCreateCmd(containerId)
                     .withCmd("sh", "-c", "rm -rf /workspace/*")
                     .withAttachStdout(true)
                     .withAttachStderr(true)
                     .exec();
+            dockerClient.execStartCmd(execCmd.getId())
+                    .exec(new ResultCallback.Adapter<>())
+                    .awaitCompletion(2, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.warn("清理容器工作目录失败", e);
         }
@@ -302,9 +424,13 @@ public class JudgeService implements JudgeInterface {
 
     // ========== 在容器中执行命令 ==========
     private Integer executeInContainer(String containerId) {
+        return executeScriptInContainer(containerId, "/workspace/run.sh");
+    }
+
+    private Integer executeScriptInContainer(String containerId, String scriptPath) {
         try {
             var execCmd = dockerClient.execCreateCmd(containerId)
-                    .withCmd("sh", "/workspace/run.sh")
+                    .withCmd("sh", scriptPath)
                     .withAttachStdout(true)
                     .withAttachStderr(true)
                     .exec();
@@ -379,6 +505,23 @@ public class JudgeService implements JudgeInterface {
                 .collect(Collectors.joining("\n"));
     }
 
+    private void deleteDirectory(Path directory) {
+        if (directory == null || !Files.exists(directory)) {
+            return;
+        }
+        try {
+            Files.walk(directory)
+                    .sorted((a, b) -> b.compareTo(a))
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException ignored) {
+                        }
+                    });
+        } catch (IOException ignored) {
+        }
+    }
+
 
 
     // ========== 语言配置 ==========
@@ -393,11 +536,21 @@ public class JudgeService implements JudgeInterface {
                     echo 2 > exitcode.txt
                     exit 2
                 fi
-                timeout %ds java -Xmx256m Main < input.txt > stdout.txt 2>> stderr.txt
+                echo 0 > exitcode.txt
+                """,
+                """
+                #!/bin/sh
+                cd /workspace
+                timeout %ds java -Xmx256m Main < input.txt > stdout.txt 2> stderr.txt
                 echo $? > exitcode.txt
                 """.formatted(TIME_LIMIT_MS / 1000)),
 
         PYTHON("python", "solution.py", "python:3.11-alpine",
+                """
+                #!/bin/sh
+                cd /workspace
+                echo 0 > exitcode.txt
+                """,
                 """
                 #!/bin/sh
                 cd /workspace
@@ -414,9 +567,14 @@ public class JudgeService implements JudgeInterface {
                     echo 2 > exitcode.txt
                     exit 2
                 fi
-                timeout %ds ./solution < input.txt > stdout.txt 2>> stderr.txt
+                echo 0 > exitcode.txt
+                """,
+                """
+                #!/bin/sh
+                cd /workspace
+                timeout %ds ./solution < input.txt > stdout.txt 2> stderr.txt
                 echo $? > exitcode.txt
-                """.formatted(TIME_LIMIT_MS / 2000)),
+                """.formatted(TIME_LIMIT_MS / 1000)),
 
         C("c", "solution.c", "gcc:13",
                 """
@@ -427,24 +585,35 @@ public class JudgeService implements JudgeInterface {
                     echo 2 > exitcode.txt
                     exit 2
                 fi
-                timeout %ds ./solution < input.txt > stdout.txt 2>> stderr.txt
+                echo 0 > exitcode.txt
+                """,
+                """
+                #!/bin/sh
+                cd /workspace
+                timeout %ds ./solution < input.txt > stdout.txt 2> stderr.txt
                 echo $? > exitcode.txt
-                """.formatted(TIME_LIMIT_MS / 2000));
+                """.formatted(TIME_LIMIT_MS / 1000));
 
         private final String language;
         private final String sourceFile;
         private final String image;
+        private final String compileScript;
         private final String runScript;
 
-        LanguageSpec(String language, String sourceFile, String image, String runScript) {
+        LanguageSpec(String language, String sourceFile, String image, String compileScript, String runScript) {
             this.language = language;
             this.sourceFile = sourceFile;
             this.image = image;
+            this.compileScript = compileScript;
             this.runScript = runScript;
         }
 
         String sourceFile() {
             return sourceFile;
+        }
+
+        String buildCompileScript() {
+            return compileScript;
         }
 
         String buildRunScript() {

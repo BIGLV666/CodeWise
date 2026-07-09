@@ -23,13 +23,13 @@ public class MqConfig {
     @Bean
     public Queue emailQueue() {
         System.out.println("✅ 创建 email.queue 队列");
-        return new Queue(EMAIL_QUEUE, true);
+        return new Queue(MESSAGE_QUEUE_NAME, true);
     }
 
     @Bean
     public DirectExchange emailExchange() {
         System.out.println("✅ 创建 email.exchange 交换机");
-        return new DirectExchange(EMAIL_EXCHANGE, true, false);
+        return new DirectExchange(MESSAGE_EXCHANGE, true, false);
     }
 
     @Bean
@@ -38,7 +38,14 @@ public class MqConfig {
         return BindingBuilder
                 .bind(emailQueue())
                 .to(emailExchange())
-                .with(EMAIL_ROUTING_KEY);
+                .with(MESSAGE_ROUTING_KEY);
+    }
+    @Bean
+    public Binding websocketBinding() {
+        return BindingBuilder
+                .bind(emailQueue())
+                .to(emailExchange())
+                .with(WEBSOCKET_ROUTING_KEY);
     }
     // ========== 判题队列 ==========
     @Bean
@@ -139,6 +146,23 @@ public class MqConfig {
                 .bind(reviewQueue())
                 .to(reviewExchange())
                 .with(REVIEW_JUDGE_RECORD_ROUTING_KEY);
+    }
+    //===============用户队列================
+    @Bean
+    public Queue userQueue() {
+        return QueueBuilder.durable(USER_QUEUE_NAME).build();
+    }
+    @Bean
+    public DirectExchange userExchange() {
+        return new DirectExchange(USER_EXCHANGE, true, false);
+    }
+    @Bean
+    public Binding userBinding() {
+        return BindingBuilder
+                .bind(userQueue())
+                .to(userExchange())
+                .with(USER_JUDGE_ROUTING_KEY);
+
     }
 
 }

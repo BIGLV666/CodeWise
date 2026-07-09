@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: service-community
+  config:
+    import: optional:nacos:service-community.yaml   # ? Nacos ???
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+      config:
+        server-addr: localhost:8848
+        file-extension: yaml
+server:
+  port: 8087

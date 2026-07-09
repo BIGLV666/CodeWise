@@ -4,7 +4,7 @@ create table user(
     password VARCHAR(64) NOT NULL ,
     email VARCHAR(30),
     phone VARCHAR(20) ,
-    bio JSON ,
+    bio TEXT ,
     nick_name VARCHAR(30) NOT NULL ,
     avatar_url VARCHAR(100),
     birthday DATE ,

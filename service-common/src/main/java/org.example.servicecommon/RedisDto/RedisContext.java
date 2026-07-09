@@ -11,5 +11,6 @@ public  class RedisContext {
     //======收藏键-=======================
     //============题目缓存键=================
     public static final String  QUESTION_ID_KEY = "question_id_key";
+    public static final String  QUESTION_TOTAL_KEY = "question_total_key";
     
 }

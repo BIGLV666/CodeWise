@@ -17,8 +17,8 @@ public class EmailService {
     public void sendEmail(String to, String subject, String content) {
         EmailMessage message = new EmailMessage(to, subject, content);
         rabbitTemplate.convertAndSend(
-                MqContexts.EMAIL_EXCHANGE,
-                MqContexts.EMAIL_ROUTING_KEY,
+                MqContexts.MESSAGE_EXCHANGE,
+                MqContexts.MESSAGE_ROUTING_KEY,
                 message
         );
         System.out.println("邮件任务已发送: " + to);

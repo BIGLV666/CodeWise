@@ -5,7 +5,9 @@ import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.JudgeResultDto;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
+import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.SubmitRecord;
@@ -133,7 +135,20 @@ public class SubmitRecordHandel implements MessageHandler {
 
             // ★ 只确认一次，不批量确认
             channel.basicAck(deliveryTag, false);
-            webSocketPushService.pushJudgeResult(submitRecord.getUserId(), judgeResultDto);
+
+
+            WebsocketSendDto websocketSendDto = new WebsocketSendDto();
+            websocketSendDto.setQueueName(WebsocketContexts.JUDGE_RESULT);
+            websocketSendDto.setUserId(submitRecord.getUserId());
+            websocketSendDto.setResult(judgeResultDto);
+            rabbitTemplate.convertAndSend(
+                    MqContexts.MESSAGE_EXCHANGE,
+                    MqContexts.WEBSOCKET_ROUTING_KEY,
+                    websocketSendDto
+            );
+
+
+
             log.info("判题结果处理成功, submissionId: {}", judgeResultDto.getSubmissionId());
 
         } catch (Exception e) {

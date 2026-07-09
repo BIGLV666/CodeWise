@@ -67,4 +67,8 @@ public class QuestionController {
         CursorPageResult<ReturnQuestionDto> result = questionService.cursorQuestions(lastId, pageSize, difficulty, status, title);
         return Result.success(result);
     }
+    @GetMapping("/total")
+    private Result<Long>getTotal() throws InterruptedException {
+        return Result.success(questionService.getTotalQuestionCount());
+    }
 }

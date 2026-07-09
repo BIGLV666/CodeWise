@@ -2,10 +2,12 @@ package org.example.servicequestion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.UserDto;
 import org.example.serviceapi.feign.UserFeignClient;
+import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.dto.InsertQuestionDto;
@@ -29,6 +31,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
 public class QuestionService {
     private final String LOCK_ADD_QUESTION = "lock_add_question";
@@ -42,6 +45,34 @@ public class QuestionService {
     private RedisTemplate<String, Object> redisTemplate;
     @Autowired
     private UserFeignClient userFeignClient;
+
+
+    public Long getTotalQuestionCount() throws InterruptedException {
+
+        Object total =redisTemplate.opsForValue().get(RedisContext.QUESTION_TOTAL_KEY);
+        if (total == null) {
+            boolean tryLock = redissonClient.getLock(LOCK_ADD_QUESTION).tryLock();
+            RLock lock = redissonClient.getLock(LOCK_ADD_QUESTION);
+            if (tryLock) {
+
+                try {
+                    Long count = Long.parseLong(questionMapper.selectCount(new QueryWrapper<Question>().eq("status", 1)).toString());
+                    redisTemplate.opsForValue().set(RedisContext.QUESTION_TOTAL_KEY, count);
+                    return count;
+                } catch (Exception e) {
+
+                    log.error("获取总数失败{}",e.getMessage());
+                    throw new RuntimeException(e);
+                    //throw new IllegalStateException("获取题目总数失败，请稍后重试");
+                } finally {
+                    lock.unlock();
+                }
+
+            }
+        }
+
+        return 0L;
+    }
 
     @Transactional
     public Question addQuestion(InsertQuestionDto insertQuestionDto) {

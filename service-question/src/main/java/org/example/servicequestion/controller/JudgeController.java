@@ -45,6 +45,7 @@ public class JudgeController {
         return Result.success(records);
     }
 
+
     @GetMapping("/getsubmitrecordsbyuserid")
     public Result<CursorPageResult<SubmitRecord>> getSubmitRecordsByUserId(
             @RequestParam(required = false) Long lastId,
