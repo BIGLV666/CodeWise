@@ -1,4 +1,5 @@
 package org.example.serviceuser.mq;
+
 import com.rabbitmq.client.Channel;
 import jakarta.annotation.PostConstruct;
 import org.example.servicecommon.config.MqContexts;
@@ -6,7 +7,6 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
-
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 
@@ -53,7 +53,7 @@ public class Mq {
                 // 娉ㄦ剰锛欰CK鎿嶄綔寤鸿鏀惧湪鍏蜂綋鐨凥andler涓墽琛岋紝鎴栬€呭湪杩欓噷缁熶竴鎵ц
                 // 濡傛灉鍦ㄨ繖閲岀粺涓€鎵ц锛孒andler灏变笉瑕佹墽琛孉CK浜?
             } else {
-                System.err.println("娌℃湁鎵惧埌澶勭悊璺敱閿?[" + routingKey + "] 鐨勫鐞嗗櫒锛?);
+                System.err.println("娌℃湁鎵惧埌澶勭悊璺敱閿?[" + routingKey + "] 鐨勫鐞嗗櫒锛?");
                 // 娌℃湁瀵瑰簲鐨勫鐞嗗櫒锛屾嫆缁濇秷鎭紝涓嶉噸鏂板叆闃燂紙false琛ㄧず涓嶉噸鏂板叆闃燂級
                 channel.basicNack(deliveryTag, false, false);
             }

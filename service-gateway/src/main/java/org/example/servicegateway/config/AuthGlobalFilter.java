@@ -117,10 +117,13 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         }
 
         Long userId = jwtUtil.getUserIdFromToken(token);
+        String userName = jwtUtil.getUserNameFromToken(token);
+
 
         // 4. 在同一个 requestBuilder 上继续添加请求头
         ServerHttpRequest newRequest = requestBuilder
                 .header("X-User-Id", String.valueOf(userId))
+                .header("X-User-Name", String.valueOf(userName))
                 .header("X-Internal-Token", "codewise-secret-2026")
                 .build();
 

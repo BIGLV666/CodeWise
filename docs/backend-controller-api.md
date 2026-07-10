@@ -5,6 +5,7 @@
 - `service-user`
 - `service-question`
 - `service-review`
+- `service-community`
 - 服务间内部 HTTP 接口
 
 ## 调用约定
@@ -17,6 +18,7 @@
 | `service-user` | `8081` | `/api/user/**` | 用户、登录、头像接口 |
 | `service-question` | `8084` | `/api/question/**` | 题目、测试点、提交、调试接口 |
 | `service-review` | `8085` | 当前未配置 | 收藏夹/复习服务，当前需直连或补 gateway 路由 |
+| `service-community` | `8087` | 当前未配置 | 帖子、评论和点赞，当前需直连或补 gateway 路由 |
 
 通过网关调用示例：
 
@@ -786,6 +788,25 @@ Content-Type: application/json
 - 其余字段传 `null` 时不更新。
 
 返回：`Result<String>`。
+
+## service-community 社区模块
+
+基础路径：`/api/community`，当前需要直连 `http://localhost:8087`。所有接口均需登录。
+
+| 方法 | 路径 | 用途 | 返回数据 |
+| --- | --- | --- | --- |
+| `GET` | `/request-id` | 获取帖子或评论发布请求 ID | `String` |
+| `POST` | `/posts?requestId=...` | 发布帖子，请求体为 `PostDto` | `Post` |
+| `GET` | `/posts` | 游标分页查询帖子 | `CursorPageResult<HomePostVo>` |
+| `GET` | `/posts/{postId}` | 查询帖子详情和相关推荐 | `PostVo` |
+| `POST` | `/comments?requestId=...` | 发布评论或回复，请求体为 `CommentDto` | `Comment` |
+| `GET` | `/comments` | 游标分页查询评论或指定根评论的回复 | `CursorPageResult<CommentVo>` |
+| `PUT` | `/likes/posts/{postId}` | 切换帖子点赞状态 | `Boolean` |
+| `PUT` | `/likes/comments/{commentId}` | 切换评论点赞状态 | `Boolean` |
+
+分页接口的 `pageSize` 默认 20，允许范围为 1 到 100；首次不传 `lastId`，后续传上页返回的 `nextCursor`。点赞返回值表示操作后的状态：`true` 为已点赞，`false` 为已取消。
+
+完整请求示例、参数和 DTO 字段见 [社区模块接口文档](service-community-api.md)。
 
 ## 内部服务接口
 

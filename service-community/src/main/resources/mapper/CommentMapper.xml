@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.servicecommunity.mapper.CommentMapper">
+    <update id="updateLikeCount">
+        update comment
+        set like_count = greatest(
+            like_count + case comment_id
+            <foreach collection="likeMap" index="commentId" item="count">
+                when #{commentId} then #{count}
+            </foreach>
+            else 0 end,
+            0
+        )
+        where comment_id in
+        <foreach collection="likeMap" index="commentId" item="count" open="(" separator="," close=")">
+            #{commentId}
+        </foreach>
+    </update>
+</mapper>

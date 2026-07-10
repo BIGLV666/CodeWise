@@ -54,6 +54,9 @@ public class JwtUntil {
     public Long getUserIdFromToken(String token) {
         return Long.parseLong(parseToken(token).getSubject());
     }
+    public String getUserNameFromToken(String token) {
+        return parseToken(token).get("userName").toString();
+    }
 
     /**
      * 验证 Token 是否有效

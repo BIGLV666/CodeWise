@@ -55,6 +55,11 @@ spring:
           uri: lb://service-user
           predicates:
             - Path=/uploads/**
+        #7-社区
+        - id: service-community
+          uri: lb://service-community
+          predicates:
+            - Path=/api/community/**
 
 
 jwt:

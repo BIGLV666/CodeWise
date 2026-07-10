@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.servicecommunity.mapper.PostMapper">
+    <resultMap id="PostResultMap" type="org.example.servicecommunity.entry.Post">
+        <id property="postId" column="post_id"/>
+        <result property="postTitle" column="post_title"/>
+        <result property="postContent" column="post_content"/>
+        <result property="userId" column="user_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="likeCount" column="like_count"/>
+        <result property="commentCount" column="comment_count"/>
+        <result property="status" column="status"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <select id="BatchSelectTitlesForId" resultMap="PostResultMap">
+        select
+            post_id,
+            post_title
+        from post
+        where post_id in
+        <foreach collection="postIds" item="postId" open="(" separator="," close=")">
+            #{postId}
+        </foreach>
+    </select>
+    <update id="updateCommentTotal">
+        update post set comment_count=comment_count+#{count} where post_id=#{postId}
+    </update>
+
+    <update id="updateLikeCount">
+        update post
+        set like_count = greatest(
+            like_count + case post_id
+            <foreach collection="likeMap" index="postId" item="count">
+                when #{postId} then #{count}
+            </foreach>
+            else 0 end,
+            0
+        )
+        where post_id in
+        <foreach collection="likeMap" index="postId" item="count" open="(" separator="," close=")">
+            #{postId}
+        </foreach>
+    </update>
+</mapper>

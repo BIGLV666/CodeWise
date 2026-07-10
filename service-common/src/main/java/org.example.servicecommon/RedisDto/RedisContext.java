@@ -12,5 +12,10 @@ public  class RedisContext {
     //============题目缓存键=================
     public static final String  QUESTION_ID_KEY = "question_id_key";
     public static final String  QUESTION_TOTAL_KEY = "question_total_key";
+    //===========点赞=========================
+    public static final String LIKE_POST_BUCKET_KEY ="like_bucket_key";
+    public static final String LIKE_COMMENT_BUCKET_KEY ="like_comment_bucket_key";
+    public static final String LIKE_POST_KEY = "like_post_key";
+    public static final String LIKE_COMMENT_KEY = "like_comment_key";
     
 }
