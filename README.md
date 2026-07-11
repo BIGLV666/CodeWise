@@ -85,3 +85,5 @@ cd service-message
 - `submit_record` 已补充 `question_title`，用于提交历史、复习记录和通知展示。
 - `service-message` 是后续通知能力的统一承载模块，邮件和 WebSocket 都应逐步收口到这里。
 - `service-community` 已提供帖子、评论和点赞接口；当前需直连 `8087`，网关路由后续补充。
+- `service-community` 已补充热点排行、标题模糊搜索、标签搜索、帖子修改，以及帖子和评论的异步级联删除能力。
+- 社区热点榜使用 Redis ZSet，按点赞、评论和发布时间衰减计算，并每 5 分钟从数据库重建一次。

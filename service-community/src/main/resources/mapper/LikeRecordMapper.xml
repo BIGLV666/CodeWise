@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.servicecommunity.mapper.LikeRecordMapper">
+    <resultMap id="LikeRecordResultMap" type="org.example.servicecommunity.entry.LikeRecord">
+        <id property="likeRecordId" column="like_record_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="postId" column="post_id"/>
+        <result property="type" column="type"/>
+    </resultMap>
+
+    <select id="selectBatchIdsForUserId" resultMap="LikeRecordResultMap">
+        select
+            like_record_id,
+            user_id,
+            post_id,
+            type
+        from like_record
+        where user_id = #{userId}
+          and type = 'COMMENT'
+        <choose>
+            <when test="commentIds != null and !commentIds.isEmpty()">
+                and post_id in
+                <foreach collection="commentIds" item="commentId" open="(" separator="," close=")">
+                    #{commentId}
+                </foreach>
+            </when>
+            <otherwise>
+                and 1 = 0
+            </otherwise>
+        </choose>
+    </select>
+</mapper>

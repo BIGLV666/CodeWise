@@ -4,10 +4,10 @@ import org.example.serviceapi.dto.Result;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/user")
@@ -18,5 +18,9 @@ public class User {
     public Result<UserDto> getUserInfo(@PathVariable Long userId) {
         UserDto user = userService.getUserById(userId);
         return Result.success(user);
+    }
+    @PostMapping("/info/list")
+    public Result<Map<Long, org.example.serviceapi.dto.UserDto>> getUserList(@RequestBody List<Long> userIds) {
+        return Result.success(userService.BatchSelectUser(userIds));
     }
 }

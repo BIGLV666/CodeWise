@@ -16,5 +16,7 @@
         <foreach collection="likeMap" index="commentId" item="count" open="(" separator="," close=")">
             #{commentId}
         </foreach>
+        and like_count>-1
     </update>
+
 </mapper>

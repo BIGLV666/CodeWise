@@ -24,6 +24,7 @@ public class LikeRecordService {
     public boolean PostLike(Long postId){
         String key= String.valueOf(postId +"--"+ UserContext.getUserId());
         RLock  lock = redissonClient.getLock(key);
+        Number bucketId=(Number) redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY);
         try{
             boolean tryLock = lock.tryLock();
             if (!tryLock){
@@ -37,12 +38,14 @@ public class LikeRecordService {
                 likeRecord.setType("POST");
                 likeRecordMapper.insert(likeRecord);
                 redisTemplate.opsForHash().increment(
-                        RedisContext.LIKE_POST_KEY+RedisContext.LIKE_POST_BUCKET_KEY,postId,1
+                        RedisContext.LIKE_POST_KEY+"-"+bucketId,postId.toString(),1
                 );
+                redisTemplate.opsForZSet().incrementScore(RedisContext.HOST_POST_KEY,postId.toString(),0.5);
                 return true;
             }else {
+                redisTemplate.opsForZSet().incrementScore(RedisContext.HOST_POST_KEY,postId.toString(),-0.5);
                 redisTemplate.opsForHash().increment(
-                        RedisContext.LIKE_POST_KEY+RedisContext.LIKE_POST_BUCKET_KEY,postId,-1
+                        RedisContext.LIKE_POST_KEY+"-"+bucketId,postId.toString(),-1
                 );
                 return false;
             }
@@ -57,8 +60,9 @@ public class LikeRecordService {
     }
 
     public boolean CommentLike(Long postId){
-        String key= String.valueOf(postId + "--"+UserContext.getUserId());
+        String key= postId + "--" + UserContext.getUserId();
         RLock  lock = redissonClient.getLock(key);
+        Number bucketID=(Number) redisTemplate.opsForValue().get(RedisContext.LIKE_COMMENT_BUCKET_KEY);
         try{
             boolean tryLock = lock.tryLock();
             if (!tryLock){
@@ -72,18 +76,19 @@ public class LikeRecordService {
                 likeRecord.setType("COMMENT");
                 likeRecordMapper.insert(likeRecord);
                 redisTemplate.opsForHash().increment(
-                        RedisContext.LIKE_COMMENT_KEY+RedisContext.LIKE_COMMENT_BUCKET_KEY,postId,1
+                        RedisContext.LIKE_COMMENT_KEY+"-"+bucketID,postId.toString(),1
                 );
                 return true;
             }else {
                 redisTemplate.opsForHash().increment(
-                        RedisContext.LIKE_COMMENT_KEY+RedisContext.LIKE_COMMENT_BUCKET_KEY,postId,-1
+                        RedisContext.LIKE_COMMENT_KEY+"-"+bucketID,postId.toString(),-1
                 );
                 return false;
             }
 
         }catch (Exception e){
-            throw new IllegalArgumentException("修改失败");
+            throw e;
+            //throw new IllegalArgumentException("修改失败");
         }
         finally {
             if(lock.isHeldByCurrentThread()){

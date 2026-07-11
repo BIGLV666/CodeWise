@@ -14,9 +14,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -187,6 +185,27 @@ public class UserService {
         }
         return new UserDto(user);
 
+    }
+    //批量查寻用户
+    public Map<Long, org.example.serviceapi.dto.UserDto> BatchSelectUser(List<Long> userIds) {
+        List<User> users = userMapper.selectBatchIds(userIds);
+        Map<Long, org.example.serviceapi.dto.UserDto> map = new HashMap<>();
+        for (User user : users) {
+            org.example.serviceapi.dto.UserDto userDto = new org.example.serviceapi.dto.UserDto();
+            userDto.setAvatarUrl(user.getAvatarUrl());
+            userDto.setNickName(user.getNickName());
+            userDto.setPhone(user.getPhone());
+            userDto.setEmail(user.getEmail());
+            userDto.setBirthday(user.getBirthday());
+            userDto.setCreateTime(user.getCreateTime());
+            userDto.setUserName(user.getUserName());
+            userDto.setTotalSubmit(user.getTotalSubmit());
+            userDto.setTotalAc(user.getTotalAc());
+            userDto.setRating(user.getRating());
+            userDto.setUserId(user.getUserId());
+            map.put(user.getUserId(),userDto);
+        }
+        return map;
     }
 
 }

@@ -1,5 +1,7 @@
 package org.example.servicecommunity.entry;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -12,6 +14,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Comment {
+    @TableId(type = IdType.AUTO)
     private Long commentId;
     private String comment;
     private Long userId;

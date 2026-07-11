@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 public class CommentVo {
     private Long commentId;
     private String comment;
-    private Long userId;
+    private String userId;
     private String userName;
     private Long postId;
     private Long rootCommentId;
@@ -27,7 +27,7 @@ public class CommentVo {
     public  CommentVo(Comment comment) {
         this.commentId = comment.getCommentId();
         this.comment = comment.getComment();
-        this.userId = comment.getUserId();
+        this.userId = comment.getUserId().toString();
         this.userName = comment.getUserName();
         this.postId = comment.getPostId();
         this.rootCommentId = comment.getRootCommentId();

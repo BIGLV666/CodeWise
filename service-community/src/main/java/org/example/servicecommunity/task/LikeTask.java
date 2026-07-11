@@ -30,23 +30,36 @@ public class LikeTask {
         redisTemplate.opsForValue().set(RedisContext.LIKE_COMMENT_BUCKET_KEY,0);
     }
     @Transactional
-    @Scheduled(cron = "0 */5 * * * *")
+    @Scheduled(cron = "0 */1 * * * *")
     public void updatePostLike(){
-        Map<Object, Object> postMap=redisTemplate.opsForHash().entries(RedisContext.LIKE_POST_KEY+RedisContext.LIKE_POST_BUCKET_KEY);
-        redisTemplate.opsForValue().set(RedisContext.LIKE_POST_BUCKET_KEY,((Integer)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY)+1)%2);
-        int r=postMapper.updateLikeCount(postMap);
-        if(r< postMap.size()){
-            log.info("更新失败,桶为{},map{}",((Integer)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY)-1)%2,postMap);
+        Number bucketId=(Number) redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY);
+        Map<Object, Object> postMap=redisTemplate.opsForHash().entries(RedisContext.LIKE_POST_KEY+"-"+bucketId);
+
+
+            redisTemplate.opsForValue().set(RedisContext.LIKE_POST_BUCKET_KEY,(bucketId.intValue()+1)%2);
+        if(postMap.isEmpty()){
+            return;
         }
+        int r=postMapper.updateLikeCount(postMap);
+        if(r==0){
+            log.info("更新失败,桶为{},map{}",bucketId,postMap);
+        }
+        redisTemplate.delete(RedisContext.LIKE_POST_KEY+"-"+bucketId);
     }
     @Transactional
-    @Scheduled(cron = "0 */5 * * * *")
+    @Scheduled(cron = "0 */1 * * * *")
     public void updateCommentLike(){
-        Map<Object, Object> Map =redisTemplate.opsForHash().entries(RedisContext.LIKE_COMMENT_KEY+RedisContext.LIKE_COMMENT_BUCKET_KEY);
-        redisTemplate.opsForValue().set(RedisContext.LIKE_COMMENT_BUCKET_KEY,((Integer)redisTemplate.opsForValue().get(RedisContext.LIKE_COMMENT_BUCKET_KEY)+1)%2);
-        int r=commentMapper.updateLikeCount(Map);
-        if(r< Map.size()){
-            log.info("更新失败,桶为{},map{}",((Integer)redisTemplate.opsForValue().get(RedisContext.LIKE_COMMENT_BUCKET_KEY)-1)%2, Map);
+        Number bucketId=(Number) redisTemplate.opsForValue().get(RedisContext.LIKE_COMMENT_BUCKET_KEY);
+        Map<Object, Object> Map =redisTemplate.opsForHash().entries(RedisContext.LIKE_COMMENT_KEY+"-"+bucketId);
+        redisTemplate.opsForValue().set(RedisContext.LIKE_COMMENT_BUCKET_KEY,(bucketId.intValue()+1)%2);
+        if(Map.isEmpty()){
+            log.info("无点赞");
+            return;
         }
+        int r=commentMapper.updateLikeCount(Map);
+        if(r==0){
+            log.info("更新失败,桶为{},map{}",bucketId ,Map);
+        }
+        redisTemplate.delete(RedisContext.LIKE_COMMENT_KEY+"-"+bucketId);
     }
 }

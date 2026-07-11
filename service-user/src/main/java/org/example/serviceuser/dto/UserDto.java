@@ -15,8 +15,7 @@ public class UserDto {
 
     private String email;
     private String phone;
-
-    private String bio;//个人简介
+    private String bio;
     private String nickName;
     private String avatarUrl;//头像
     private LocalDate birthday;
