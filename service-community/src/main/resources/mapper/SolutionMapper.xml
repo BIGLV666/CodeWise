@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.example.servicecommunity.mapper.SolutionMapper">
+    <update id="updateCommentTotal">
+        update solution
+        set comment_count = greatest(comment_count + #{count}, 0)
+        where solution_id = #{solutionId}
+    </update>
+
+    <update id="updateLookCount">
+        update solution
+        set look_count = look_count + case solution_id
+        <foreach collection="lookMap" index="solutionId" item="count">
+            when #{solutionId} then #{count}
+        </foreach>
+        else 0 end
+        where solution_id in
+        <foreach collection="lookMap" index="solutionId" item="count" open="(" separator="," close=")">
+            #{solutionId}
+        </foreach>
+        and status = 1
+    </update>
+
+    <update id="updateLikeCount">
+        update solution
+        set like_count = greatest(
+        like_count + case solution_id
+        <foreach collection="likeMap" index="solutionId" item="count">
+            when #{solutionId} then #{count}
+        </foreach>
+        else 0 end,
+        0
+        )
+        where solution_id in
+        <foreach collection="likeMap" index="solutionId" item="count" open="(" separator="," close=")">
+            #{solutionId}
+        </foreach>
+        and status = 1
+    </update>
+</mapper>

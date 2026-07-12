@@ -13,6 +13,7 @@ import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
 import org.example.servicecommunity.entry.Tags;
+import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
 import org.example.servicecommunity.mapper.PostMapper;
@@ -26,12 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -88,7 +84,7 @@ public class PostService {
         if (postDto.getTags() != null) {
             for (String tag : postDto.getTags()) {
                 if (tag != null && tag.length() < 20) {
-                    tags.add(Tags.builder().tagName(tag).postId(post.getPostId()).build());
+                    tags.add(Tags.builder().tagName(tag).postId(post.getPostId()).type(PostType.POST).build());
                 }
             }
         }
@@ -166,13 +162,16 @@ public class PostService {
     public PostVo getPostById(Long postId) {
         PostVo postvo = (PostVo) redisTemplate.opsForHash().get(RedisContext.POST_VO_KEY,postId.toString());
         if(postvo != null) {
+            postvo.setLikeCount(Long.parseLong(redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId)==null? String.valueOf(0L) : redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId).toString())+postvo.getLikeCount());
             return postvo;
         }
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Post::getPostId, postId);
          Post post = postMapper.selectOne(wrapper);
 
-        List<Tags> tags = tagsMapper.selectList(new LambdaQueryWrapper<Tags>().eq(Tags::getPostId, postId));
+        List<Tags> tags = tagsMapper.selectList(new LambdaQueryWrapper<Tags>()
+                .eq(Tags::getPostId, postId)
+                .eq(Tags::getType, PostType.POST));
         List<Tags> relatedTags = tags.isEmpty() ? Collections.emptyList() : tagsMapper.BatchSelectPostFromTagName(tags);
         Map<String, List<Long>> map = new HashMap<>();
         for (Tags tag : relatedTags) {
@@ -203,7 +202,9 @@ public class PostService {
     }
 
     public List<HomePostVo> getPostByUserId(String tag) {
-        List<Tags> tags = tagsMapper.selectList(new QueryWrapper<Tags>().eq("tag_name", tag));
+        List<Tags> tags = tagsMapper.selectList(new QueryWrapper<Tags>()
+                .eq("tag_name", tag)
+                .eq("type", PostType.POST.getType()));
         List<Long> postIds = new ArrayList<>();
         for (Tags tag1 : tags) {
             postIds.add(tag1.getPostId());
@@ -240,6 +241,7 @@ public class PostService {
         String normalizedTag = validateSearchValue(tag, "tag");
         List<Tags> tags = tagsMapper.selectList(new LambdaQueryWrapper<Tags>()
                 .eq(Tags::getTagName, normalizedTag)
+                .eq(Tags::getType, PostType.POST)
                 .last("LIMIT " + limit));
         if (tags.isEmpty()) {
             return new ArrayList<>();
@@ -328,7 +330,10 @@ public class PostService {
                 }
             }
         }
-        tagsMapper.delete(new QueryWrapper<Tags>().eq("post_id", post.getPostId()));
+        tags.forEach(tag -> tag.setType(PostType.POST));
+        tagsMapper.delete(new QueryWrapper<Tags>()
+                .eq("post_id", post.getPostId())
+                .eq("type", PostType.POST.getType()));
         if (!tags.isEmpty()) {
             int r = tagsMapper.batchInsert(tags);
             if (r != tags.size()) {
@@ -359,7 +364,9 @@ public class PostService {
             throw new IllegalArgumentException("no permission to delete this post");
         }
 
-        List<Comment> comments = commentMapper.selectList(new QueryWrapper<Comment>().eq("post_id", postId));
+        List<Comment> comments = commentMapper.selectList(new QueryWrapper<Comment>()
+                .eq("post_id", postId)
+                .eq("type", PostType.POST.getType()));
         List<Long> commentIds = comments.stream().map(Comment::getCommentId).toList();
         int result = postMapper.deleteById(postId);
         if (result == 0) {
@@ -375,8 +382,12 @@ public class PostService {
             redisTemplate.opsForValue().set(deleteCommentKey, "pending", 30, TimeUnit.MINUTES);
             redisTemplate.opsForValue().set(deleteLikeRecordKey, "pending", 30, TimeUnit.MINUTES);
             try {
-                tagsMapper.delete(new QueryWrapper<Tags>().eq("post_id", postId));
-                commentMapper.delete(new QueryWrapper<Comment>().eq("post_id", postId));
+                tagsMapper.delete(new QueryWrapper<Tags>()
+                        .eq("post_id", postId)
+                        .eq("type", PostType.POST.getType()));
+                commentMapper.delete(new QueryWrapper<Comment>()
+                        .eq("post_id", postId)
+                        .eq("type", PostType.POST.getType()));
                 likeRecordMapper.delete(new QueryWrapper<LikeRecord>().eq("post_id", postId).eq("type", "POST"));
                 if (!commentIds.isEmpty()) {
                     likeRecordMapper.delete(new QueryWrapper<LikeRecord>()

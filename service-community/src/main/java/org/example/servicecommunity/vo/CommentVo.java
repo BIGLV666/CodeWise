@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.example.servicecommunity.entry.Comment;
+import org.example.servicecommunity.enums.PostType;
 
 import java.time.LocalDateTime;
 @Data
@@ -22,6 +23,7 @@ public class CommentVo {
     private String replyUserName;
     private Long likeCount;
     private Boolean isLike;
+    private PostType type;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
     public  CommentVo(Comment comment) {
@@ -34,6 +36,7 @@ public class CommentVo {
         this.replyUserId = comment.getReplyUserId();
         this.replyUserName = comment.getReplyUserName();
         this.likeCount = comment.getLikeCount();
+        this.type = comment.getType();
         this.createTime = comment.getCreateTime();
         this.updateTime = comment.getUpdateTime();
     }

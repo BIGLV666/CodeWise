@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.entry.LikeRecord;
+import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
+import org.example.servicecommunity.vo.PostVo;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +39,8 @@ public class LikeRecordService {
                 likeRecord.setUserId(UserContext.getUserId());
                 likeRecord.setType("POST");
                 likeRecordMapper.insert(likeRecord);
+
+
                 redisTemplate.opsForHash().increment(
                         RedisContext.LIKE_POST_KEY+"-"+bucketId,postId.toString(),1
                 );
@@ -95,5 +99,46 @@ public class LikeRecordService {
                 lock.unlock();}
         }
     }
+
+
+    /**
+     *  为题解点赞
+     *
+     */
+    public boolean SolutionLike(Long postId){
+        String key= "solution-like--" + postId + "--" + UserContext.getUserId();
+        RLock lock = redissonClient.getLock(key);
+        Number bucketID=(Number) redisTemplate.opsForValue().get(RedisContext.LIKE_SOLUTION_BUCKET_KEY);
+        try {
+            boolean tryLock = lock.tryLock();
+            if (!tryLock){
+                throw new IllegalArgumentException("操作过于频繁，请稍后重试");
+            }
+            int r = likeRecordMapper.delete(new QueryWrapper<LikeRecord>().eq("post_id",postId).eq("user_id",UserContext.getUserId()).eq("type", PostType.SOLUTION));
+                if(r==0){
+                    LikeRecord likeRecord=new LikeRecord();
+                    likeRecord.setPostId(postId);
+                    likeRecord.setUserId(UserContext.getUserId());
+                    likeRecord.setType(PostType.SOLUTION.getType());
+                    likeRecordMapper.insert(likeRecord);
+                    redisTemplate.opsForHash().increment(
+                            RedisContext.LIKE_SOLUTION_KEY+"-"+bucketID,postId.toString(),1
+                    );
+                    return true;
+                }else {
+                    redisTemplate.opsForHash().increment(
+                            RedisContext.LIKE_SOLUTION_KEY+"-"+bucketID,postId.toString(),-1
+                    );
+                    return false;
+                }
+            }catch (Exception e){
+            throw e;
+        }finally {
+            if(lock.isHeldByCurrentThread()){
+                lock.unlock();
+            }
+        }
+    }
+
 
 }

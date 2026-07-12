@@ -6,13 +6,14 @@
         <id property="tagId" column="tag_id"/>
         <result property="tagName" column="tag_name"/>
         <result property="postId" column="post_id"/>
+        <result property="type" column="type"/>
     </resultMap>
 
     <insert id="batchInsert">
-        insert into tags (tag_name, post_id)
+        insert into tags (tag_name, post_id, type)
         values
         <foreach collection="list" item="tag" separator=",">
-            (#{tag.tagName}, #{tag.postId})
+            (#{tag.tagName}, #{tag.postId}, #{tag.type})
         </foreach>
     </insert>
 
@@ -21,11 +22,13 @@
             tag_id,
             tag_name,
             post_id
+            , type
         from tags
         where post_id in
         <foreach collection="postIds" item="postId" open="(" separator="," close=")">
             #{postId}
         </foreach>
+        and type = 'POST'
     </select>
 
     <select id="BatchSelectPostFromTagName" resultMap="TagsResultMap">
@@ -33,11 +36,13 @@
             tag_id,
             tag_name,
             post_id
+            , type
         from (
             select
                 t.tag_id,
                 t.tag_name,
                 t.post_id,
+                t.type,
                 row_number() over (
                     partition by t.tag_name
                     order by p.like_count desc, p.comment_count desc, p.create_time desc
@@ -45,6 +50,7 @@
             from tags t
             inner join post p on p.post_id = t.post_id
             where p.status = 1
+              and t.type = 'POST'
               and t.tag_name in
               <foreach collection="tags" item="tag" open="(" separator="," close=")">
                   #{tag.tagName}

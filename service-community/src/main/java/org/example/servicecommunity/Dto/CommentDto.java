@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.example.servicecommunity.enums.PostType;
 
 @Data
 @AllArgsConstructor
@@ -16,4 +17,6 @@ public class CommentDto {
     private Long rootCommentId;
     private Long replyUserId;
     private String replyUserName;
+    /** 评论目标类型，不传时默认评论社区帖子。 */
+    private PostType type;
 }

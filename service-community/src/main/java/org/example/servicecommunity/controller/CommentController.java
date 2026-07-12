@@ -3,6 +3,7 @@ package org.example.servicecommunity.controller;
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommunity.Dto.CommentDto;
 import org.example.servicecommunity.entry.Comment;
+import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.service.CommentService;
 import org.example.servicecommunity.vo.CommentVo;
 import org.example.servicecommunity.vo.CursorPageResult;
@@ -24,7 +25,8 @@ public class CommentController {
     private CommentService commentService;
 
     /**
-     * 发布评论或回复。requestId 通过 /api/community/request-id 获取。
+     * 发布评论或回复。type 不传时默认 POST；评论题解时传 SOLUTION。
+     * requestId 通过 /api/community/request-id 获取。
      */
     @PostMapping
     public Result<Comment> createComment(@RequestBody CommentDto commentDto,
@@ -33,18 +35,21 @@ public class CommentController {
     }
 
     /**
-     * 查询帖子评论。rootCommentId=-1 不按根评论筛选，否则查询指定根评论的回复。
+     * 查询帖子或题解评论。type 不传时默认 POST。
+     * rootCommentId=-1 不按根评论筛选，否则查询指定根评论的回复。
      */
     @GetMapping
     public Result<CursorPageResult<CommentVo>> listComments(
             @RequestParam Long postId,
+            @RequestParam(defaultValue = "POST") PostType type,
             @RequestParam(defaultValue = "-1") Long rootCommentId,
             @RequestParam(required = false) Long lastId,
             @RequestParam(defaultValue = "20") Integer pageSize) {
         validatePageSize(pageSize);
-        return Result.success(commentService.cursorQuestions(lastId, pageSize, postId, rootCommentId));
+        return Result.success(commentService.cursorQuestions(lastId, pageSize, postId, rootCommentId, type));
     }
 
+    /** 删除自己的评论；若删除根评论，会一并删除该根评论下的回复。 */
     @DeleteMapping("/{commentId}")
     public Result<String> deleteComment(@PathVariable Long commentId) {
         commentService.deleteComment(commentId);

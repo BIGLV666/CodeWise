@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.example.servicecommunity.enums.PostType;
 
 import java.time.LocalDateTime;
 
@@ -24,6 +25,7 @@ public class Comment {
     private Long replyUserId;
     private String replyUserName;
     private Long likeCount;
+    private PostType type;
     private Integer status;//0-审核1-删除2-下架
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

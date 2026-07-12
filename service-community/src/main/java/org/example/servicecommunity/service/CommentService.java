@@ -9,9 +9,12 @@ import org.example.servicecommunity.Dto.CommentDto;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
+import org.example.servicecommunity.entry.Solution;
+import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
 import org.example.servicecommunity.mapper.PostMapper;
+import org.example.servicecommunity.mapper.SolutionMapper;
 import org.example.servicecommunity.vo.CommentVo;
 import org.example.servicecommunity.vo.CursorPageResult;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,6 +40,8 @@ public class CommentService {
     private PostMapper postMapper;
     @Autowired
     private LikeRecordMapper likeRecordMapper;
+    @Autowired
+    private SolutionMapper solutionMapper;
 
     @Transactional
     public Comment createComment(CommentDto commentDto, String uuid) {
@@ -48,6 +53,21 @@ public class CommentService {
             return null;
         }
 
+        PostType type = commentDto.getType() == null ? PostType.POST : commentDto.getType();
+        Post post = null;
+        Solution solution = null;
+        if (type == PostType.POST) {
+            post = postMapper.selectById(commentDto.getPostId());
+            if (post == null || !Integer.valueOf(1).equals(post.getStatus())) {
+                throw new IllegalArgumentException("post not found");
+            }
+        } else {
+            solution = solutionMapper.selectById(commentDto.getPostId());
+            if (solution == null || !Integer.valueOf(1).equals(solution.getStatus())) {
+                throw new IllegalArgumentException("solution not found");
+            }
+        }
+
         Comment comment = Comment.builder()
                 .comment(commentDto.getComment())
                 .userId(UserContext.getUserId())
@@ -57,6 +77,7 @@ public class CommentService {
                 .replyUserId(commentDto.getReplyUserId())
                 .replyUserName(commentDto.getReplyUserName())
                 .likeCount(0L)
+                .type(type)
                 .status(1)
                 .build();
         int result = commentMapper.insert(comment);
@@ -64,13 +85,14 @@ public class CommentService {
             throw new IllegalArgumentException("create comment failed");
         }
 
-        Post post = postMapper.selectById(comment.getPostId());
-        if (post == null) {
-            throw new IllegalArgumentException("post not found");
+        int r;
+        if (type == PostType.POST) {
+            // 社区帖子评论会影响热点排行。
+            redisTemplate.opsForZSet().incrementScore(RedisContext.HOST_POST_KEY, post.getPostId().toString(), 2.0);
+            r = postMapper.updateCommentTotal(1, comment.getPostId());
+        } else {
+            r = solutionMapper.updateCommentTotal(1, solution.getSolutionId());
         }
-        //为排行榜加分
-        redisTemplate.opsForZSet().incrementScore(RedisContext.HOST_POST_KEY, post.getPostId().toString(), 2.0);
-        int r = postMapper.updateCommentTotal(1, comment.getPostId());
         if (r == 0) {
             throw new IllegalArgumentException("create comment failed");
         }
@@ -78,7 +100,8 @@ public class CommentService {
         return comment;
     }
 
-    public CursorPageResult<CommentVo> cursorQuestions(Long lastId, Integer pageSize, Long postId, Long rootCommentId) {
+    public CursorPageResult<CommentVo> cursorQuestions(Long lastId, Integer pageSize, Long postId,
+                                                       Long rootCommentId, PostType type) {
         LambdaQueryWrapper<Comment> wrapper = new LambdaQueryWrapper<>();
         List<CommentVo> res = new ArrayList<>();
 
@@ -87,9 +110,10 @@ public class CommentService {
         }
 
         wrapper.eq(Comment::getPostId, postId);
+        wrapper.eq(Comment::getType, type == null ? PostType.POST : type);
         wrapper.orderByAsc(Comment::getCommentId);
         wrapper.last("LIMIT " + (pageSize + 1));
-        if (!rootCommentId.equals(-1L)) {
+        if (rootCommentId != null && !rootCommentId.equals(-1L)) {
             wrapper.eq(Comment::getRootCommentId, rootCommentId);
         }
 
@@ -115,7 +139,7 @@ public class CommentService {
         List<Long> commentIds = new ArrayList<>(records.stream().map(Comment::getCommentId).toList());
         Map<Long, LikeRecord> map = commentIds.isEmpty()
                 ? new HashMap<>()
-                : likeRecordMapper.selectBatchIdsForUserId(commentIds, UserContext.getUserId());
+                : likeRecordMapper.selectBatchIdsForUserId(commentIds,PostType.COMMENT.getType(),UserContext.getUserId());
         for (Comment comment : records) {
             CommentVo commentVo = new CommentVo(comment);
             commentVo.setIsLike(map.containsKey(comment.getCommentId()));
@@ -137,21 +161,26 @@ public class CommentService {
         if (!comment.getUserId().equals(UserContext.getUserId())) {
             throw new IllegalArgumentException("no permission to delete this comment");
         }
-        Post post = postMapper.selectById(comment.getPostId());
-
-        if (post == null) {
-            throw new IllegalArgumentException("post not found");
-        }
+        PostType type = comment.getType() == null ? PostType.POST : comment.getType();
         List<Comment> comments = commentMapper.selectList(new QueryWrapper<Comment>()
-                .eq("comment_id", commentId)
-                .or()
-                .eq("root_comment_id", commentId));
+                .eq("type", type.getType())
+                .and(wrapper -> wrapper.eq("comment_id", commentId)
+                        .or()
+                        .eq("root_comment_id", commentId)));
         List<Long> commentIds = comments.stream().map(Comment::getCommentId).toList();
-        redisTemplate.opsForZSet().incrementScore(
-                RedisContext.HOST_POST_KEY,
-                post.getPostId().toString(),
-                -2.0 * commentIds.size()
-        );
+        if (type == PostType.POST) {
+            Post post = postMapper.selectById(comment.getPostId());
+            if (post == null) {
+                throw new IllegalArgumentException("post not found");
+            }
+            redisTemplate.opsForZSet().incrementScore(
+                    RedisContext.HOST_POST_KEY,
+                    post.getPostId().toString(),
+                    -2.0 * commentIds.size()
+            );
+        } else if (solutionMapper.selectById(comment.getPostId()) == null) {
+            throw new IllegalArgumentException("solution not found");
+        }
 
         CompletableFuture.runAsync(() -> {
             String deleteCommentKey = RedisContext.DELETE_COMMENT_KEY + commentId;
@@ -164,7 +193,11 @@ public class CommentService {
                     likeRecordMapper.delete(new QueryWrapper<LikeRecord>()
                             .eq("type", "COMMENT")
                             .in("post_id", commentIds));
-                    postMapper.updateCommentTotal(-commentIds.size(), comment.getPostId());
+                    if (type == PostType.POST) {
+                        postMapper.updateCommentTotal(-commentIds.size(), comment.getPostId());
+                    } else {
+                        solutionMapper.updateCommentTotal(-commentIds.size(), comment.getPostId());
+                    }
                 }
                 redisTemplate.opsForValue().set(deleteCommentKey, "success", 30, TimeUnit.MINUTES);
                 redisTemplate.opsForValue().set(deleteLikeRecordKey, "success", 30, TimeUnit.MINUTES);

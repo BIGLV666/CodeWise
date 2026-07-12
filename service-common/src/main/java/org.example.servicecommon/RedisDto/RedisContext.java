@@ -17,8 +17,13 @@ public  class RedisContext {
     //===========点赞=========================
     public static final String LIKE_POST_BUCKET_KEY ="like_bucket_key";
     public static final String LIKE_COMMENT_BUCKET_KEY ="like_comment_bucket_key";
+    public static final String LIKE_SOLUTION_BUCKET_KEY ="like_solution_bucket_key";
     public static final String LIKE_POST_KEY = "like_post_key";
     public static final String LIKE_COMMENT_KEY = "like_comment_key";
+    public static final String LIKE_SOLUTION_KEY = "like_solution_key";
+    //===========题解浏览量=====================
+    public static final String SOLUTION_LOOK_BUCKET_KEY = "solution_look_bucket_key";
+    public static final String SOLUTION_LOOK_KEY = "solution_look_key";
     //===============异步删除评论和点赞键====================
     public static final String DELETE_COMMENT_KEY = "delete_comment_key";
     public static final String DELETE_LIKE_RECORD_KEY = "delete_like_record_key";

@@ -30,4 +30,11 @@ public class LikeController {
     public Result<Boolean> toggleCommentLike(@PathVariable Long commentId) {
         return Result.success(likeRecordService.CommentLike(commentId));
     }
+    /**
+     * 切换当前用户对题解的点赞状态，true 表示已点赞，false 表示已取消。
+     */
+    @PutMapping("/solution/{solutionId}")
+    public Result<Boolean> toggleSolutionLike(@PathVariable Long solutionId) {
+        return Result.success(likeRecordService.SolutionLike(solutionId));
+    }
 }

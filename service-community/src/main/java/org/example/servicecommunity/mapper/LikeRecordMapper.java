@@ -13,5 +13,6 @@ import java.util.Map;
 public interface LikeRecordMapper extends BaseMapper<LikeRecord> {
     @MapKey("postId")
     Map<Long,LikeRecord> selectBatchIdsForUserId(@Param("commentIds") List<Long> commentIds,
+                                                 @Param("type")String type,
                                                  @Param("userId") Long userId);
 }

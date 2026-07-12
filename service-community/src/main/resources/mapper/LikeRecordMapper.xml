@@ -17,7 +17,7 @@
             type
         from like_record
         where user_id = #{userId}
-          and type = 'COMMENT'
+          and type = #{type}
         <choose>
             <when test="commentIds != null and !commentIds.isEmpty()">
                 and post_id in

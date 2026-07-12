@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.example.servicecommunity.enums.PostType;
 
 @Data
 @Builder
@@ -16,5 +17,5 @@ public class Tags {
     private Long tagId;
     private String tagName;
     private Long postId;
-
+    private PostType type;
 }

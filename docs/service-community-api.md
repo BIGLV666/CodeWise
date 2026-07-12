@@ -259,6 +259,47 @@ Authorization: Bearer <token>
 
 异步删除状态会短暂保存在 Redis 中。接口返回成功表示删除任务已经受理；若异步级联 SQL 失败，服务会记录错误并将任务状态标记为 `failed`。
 
+## 题解接口
+
+题解使用 `/api/community/solutions`，题解标签和评论通过 `type=SOLUTION` 与普通社区帖子隔离。
+
+```http
+POST /api/community/solutions
+GET /api/community/solutions?questionId=100&pageSize=20&lastId=200
+GET /api/community/solutions/{solutionId}
+PUT /api/community/solutions/{solutionId}
+DELETE /api/community/solutions/{solutionId}
+```
+
+发布和修改题解的请求体：
+
+```json
+{
+  "questionId": "100",
+  "solutionTitle": "动态规划状态设计",
+  "solutionContent": "题解正文",
+  "tags": ["动态规划", "状态机"]
+}
+```
+
+查询题解详情会累计一次浏览量。浏览增量使用 Redis 双桶记录，定时任务通过 Lua 原子切换桶并批量回写 MySQL。修改和删除操作仅允许题解作者执行；删除题解时会清理该题解的标签、评论和评论点赞。
+
+评论社区帖子时 `type` 可以省略；评论题解时必须传 `SOLUTION`：
+
+```json
+{
+  "comment": "这里的状态转移可以再解释一下吗？",
+  "postId": "200",
+  "type": "SOLUTION"
+}
+```
+
+查询题解评论：
+
+```http
+GET /api/community/comments?postId=200&type=SOLUTION&pageSize=20
+```
+
 ### PostVo
 
 `PostVo` 在 `HomePostVo` 的主要帖子字段基础上增加：
