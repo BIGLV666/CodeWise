@@ -46,7 +46,8 @@ create table review (
     unique uk_user_question (user_id, question_id),
     index idx_next_review_time (next_review_time),
     index idx_user_id (user_id),
-    index idx_status (status)
+    index idx_status (status),
+    index idx_review_schedule (user_id, status, next_review_time)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci comment='复习记录表(SM-2算法)';
 
 -- ==========================================================

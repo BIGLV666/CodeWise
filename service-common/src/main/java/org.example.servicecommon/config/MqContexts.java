@@ -32,4 +32,10 @@ public  class MqContexts {
     public static final String USER_QUEUE_NAME = "user.queue";
     public static final String USER_EXCHANGE = "user.exchange";
     public static final String USER_JUDGE_ROUTING_KEY = "user.judge.routing";
+    //收件箱队列
+    public static final String NOTIFICATION_QUEUE_NAME = "notification.queue";
+    public static final String NOTIFICATION_EXCHANGE = "notification.exchange";
+    public static final String NOTIFICATION_LIKE_ROUTING_KEY = "notification.like.routing";
+    public static final String NOTIFICATION_REVIEW_ROUTING_KEY = "notification.review.routing";
+
 }

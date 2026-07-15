@@ -46,5 +46,24 @@
           and user_id = #{userId}
           and question_id = #{questionId}
     </update>
+    <select id="getNotRecord" resultType="org.example.servicereview.dto.ReviewReminderDto">
+        select
+        r.user_id,
+        least(count(*), coalesce(rc.review_count, 2147483647)) AS pending_count
+        from review r
+        left join review_record rr
+        on rr.user_id = r.user_id
+        and rr.review_date = current_date
+        left join review_config rc
+        on rc.user_id = r.user_id
+        where rr.review_record_id is null
+        and r.status = 0
+        and (
+        r.next_review_time is null
+        or r.next_review_time &lt; current_date + interval 1 day
+        )
+        and coalesce(rc.enable_auto_review, 1) = 1
+        group by r.user_id;
+    </select>
 
 </mapper>

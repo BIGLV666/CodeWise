@@ -29,5 +29,16 @@ public  class RedisContext {
     public static final String DELETE_LIKE_RECORD_KEY = "delete_like_record_key";
     //=================排行================================
     public static final String HOST_POST_KEY = "host_post_key";
-    
+    //=============mq多次消费失败=========================
+    public static final String MQ_LIKE_FAILED_KEY = "mq_like_failed_key";
+    public static final String MQ_LIKE_RETRY_COUNT_KEY = "mq_like_retry_count_key";
+    public static final String MQ_REVIEW_FAILED_KEY = "mq_review_failed_key";
+    public static final String MQ_REVIEW_RETRY_COUNT_KEY = "mq_review_retry_count_key";
+    public static final String NOTIFICATION_IDEMPOTENT_KEY = "notification:idempotent:";
+    public static final String REVIEW_JUDGE_RETRY_COUNT_KEY = "review:judge:retry-count";
+    public static final String REVIEW_JUDGE_FAILED_KEY = "review:judge:failed";
+    //===============点赞作者id缓存=========================
+    public static final String POST_AND_USER_ID_KEY = "post_and_user_id_key";
+    public static final String COMMENT_AND_USER_ID = "comment_and_user_id_key";
+    public static final String SOLUTION_AND_USER_ID = "solution_judge_id_key";
 }

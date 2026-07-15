@@ -596,6 +596,14 @@ AIService 请求 AIServiceManager 获取可用模型
 - 多模型自动故障切换
 - 后续题解、学习建议、复习推荐扩展
 
+### 14.8 消息与通知模块
+
+- 邮件验证码与系统邮件。
+- 点赞通知和每日复习提醒消费。
+- 站内通知倒序游标分页、未读数、详情自动已读和软删除。
+- WebSocket 握手鉴权与用户队列实时推送。
+- Redis 短期幂等与数据库 `message_id` 唯一索引兜底。
+
 ---
 
 ## 15. 整体流程图
@@ -681,3 +689,21 @@ service-review 更新 Review / ReviewRecord
 
 - `ReviewJudgeRecordDto` 携带 `questionTitle`，复习模块收到判题结果后可以直接用于推送和复习记录展示。
 - 复习提交继续通过 `submitScene = REVIEW` 区分，普通提交保持 `NORMAL`。
+
+## 18. 2026-07-15 通知与复习提醒维护记录
+
+### 18.1 点赞通知
+
+帖子、评论和题解新增点赞后，由 `service-community` 获取内容作者并异步发布通知事件。固定消息 ID 保证同一用户对同一内容只提醒一次，自赞不产生通知。
+
+### 18.2 复习提醒
+
+`service-review` 在每天 10:00 查询未创建今日计划的用户，在 21:00 查询已创建但仍有待完成题目的用户。多实例通过 Redisson 日期锁竞争执行权。
+
+### 18.3 通知中心
+
+`service-message` 消费点赞和复习消息，先写入 `codewise_message.notification_center`，再尝试 WebSocket 推送。列表只返回通知摘要，详情返回正文与 JSON 扩展数据并自动标记已读。
+
+### 18.4 Long 精度
+
+跨服务 `UserDto.userId` 和通知中心直接返回前端的 ID 使用字符串表示，避免雪花 ID 超过 JavaScript `Number.MAX_SAFE_INTEGER` 后发生精度丢失。

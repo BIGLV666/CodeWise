@@ -180,7 +180,7 @@ public class QuestionService {
             throw new RuntimeException(userDto.getMessage());
         }
         System.out.println(userDto+"----"+UserContext.getUserId());
-        if(!Objects.equals(userDto.getData().getUserId(), UserContext.getUserId())){
+        if(!Objects.equals(userDto.getData().getUserId(), UserContext.getUserId().toString())){
             if(userDto.getData().getRoleId()==1)
                 throw  new RuntimeException("无资格删除非己题目");
         }

@@ -344,6 +344,40 @@
 - `enableAutoReview`：`1` 表示开启自动复习推进，`0` 表示关闭。
 - `countCompileError`：`1` 表示 CE 计入复习并按 `quality=0` 处理，`0` 表示 CE 不计入本次复习。
 
+## 复习记录与长期复习项接口
+
+基础路径：`/api/review/review`
+
+| 方法 | 路径 | 说明 | 返回 |
+| --- | --- | --- | --- |
+| `POST` | `/addquestiontoreview?questionId=...` | 将题目加入当前用户长期复习计划 | `Result<String>` |
+| `GET` | `/allrecord` | 查询当前用户全部每日复习快照 | `Result<List<ReviewRecord>>` |
+| `GET` | `/record/{reviewRecordId}` | 查询一条快照并聚合题目信息 | `Result<ReviewRecordVo>` |
+| `PUT` | `/review/{reviewId}` | 修改权重或状态 | `Result<Review>` |
+| `GET` | `/allreview` | 查询长期复习项并聚合题目信息 | `Result<List<ReviewVo>>` |
+
+修改长期复习项请求体 `UpdateReviewDto`：
+
+```json
+{
+  "weight": 5,
+  "status": 0
+}
+```
+
+接口只允许操作当前用户自己的复习项。`ReviewRecordVo` 和 `ReviewVo` 用于向前端提供题目信息与复习状态的组合结果，避免直接暴露仅含题目 ID 的内部快照。
+
+## 每日复习提醒
+
+`ReviewMessageTask` 提供两个多实例安全的定时任务：
+
+| 时间 | 查询对象 | 提醒类型 |
+| --- | --- | --- |
+| 每天 10:00（Asia/Shanghai） | 当天有到期题目但尚未创建 `review_record` 的用户 | `NOTRECORD` |
+| 每天 21:00（Asia/Shanghai） | 已创建记录但待复习列表仍不为空的用户 | `HAVERECORD` |
+
+任务通过 Redisson 日期锁避免多实例重复执行，并向 `notification.exchange` 发布复习通知。上午和晚间消息使用不同固定 ID，由消息服务完成幂等入库和 WebSocket 推送。
+
 ## 复习模块核心能力
 
 - `ReviewService#getAllQuestions()`：获取当前用户今天复习题目；如果今天没有复习记录，会按配置生成当天 `ReviewRecord` 快照。

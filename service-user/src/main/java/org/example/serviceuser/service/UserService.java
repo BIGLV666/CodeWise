@@ -202,7 +202,7 @@ public class UserService {
             userDto.setTotalSubmit(user.getTotalSubmit());
             userDto.setTotalAc(user.getTotalAc());
             userDto.setRating(user.getRating());
-            userDto.setUserId(user.getUserId());
+            userDto.setUserId(user.getUserId().toString());
             map.put(user.getUserId(),userDto);
         }
         return map;

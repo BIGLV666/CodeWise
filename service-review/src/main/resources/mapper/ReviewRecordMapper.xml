@@ -49,5 +49,13 @@
         order by review_date desc
         limit 1
     </select>
+    <select id="getHaveRecord" resultType="org.example.servicereview.dto.ReviewReminderDto">
+        select
+            user_id,
+            json_length(pending_review_question_ids) as pending_count
+        from review_record
+        where review_date = current_date
+          and json_length(pending_review_question_ids) > 0
+    </select>
 
 </mapper>

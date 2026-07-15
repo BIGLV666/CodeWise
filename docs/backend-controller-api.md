@@ -791,7 +791,7 @@ Content-Type: application/json
 
 ## service-community 社区模块
 
-基础路径：`/api/community`，当前需要直连 `http://localhost:8087`。所有接口均需登录。
+基础路径：`/api/community`，可通过网关 `http://localhost:8082` 访问。所有接口均需登录。
 
 | 方法 | 路径 | 用途 | 返回数据 |
 | --- | --- | --- | --- |
@@ -803,10 +803,53 @@ Content-Type: application/json
 | `GET` | `/comments` | 游标分页查询评论或指定根评论的回复 | `CursorPageResult<CommentVo>` |
 | `PUT` | `/likes/posts/{postId}` | 切换帖子点赞状态 | `Boolean` |
 | `PUT` | `/likes/comments/{commentId}` | 切换评论点赞状态 | `Boolean` |
+| `PUT` | `/likes/solution/{solutionId}` | 切换题解点赞状态 | `Boolean` |
 
 分页接口的 `pageSize` 默认 20，允许范围为 1 到 100；首次不传 `lastId`，后续传上页返回的 `nextCursor`。点赞返回值表示操作后的状态：`true` 为已点赞，`false` 为已取消。
 
 完整请求示例、参数和 DTO 字段见 [社区模块接口文档](service-community-api.md)。
+
+## service-review 复习计划模块
+
+基础路径：`/api/review/review`，可通过网关访问，均从登录上下文获取当前用户。
+
+| 方法 | 路径 | 用途 | 返回数据 |
+| --- | --- | --- | --- |
+| `POST` | `/addquestiontoreview?questionId=...` | 将题目加入长期复习计划 | `String` |
+| `GET` | `/today` | 获取或生成今日复习快照 | `Map<String,Object>` |
+| `GET` | `/gettodayreview` | 今日复习计划旧路径兼容 | `Map<String,Object>` |
+| `GET` | `/config` | 获取当前用户复习配置 | `ReviewConfig` |
+| `PUT` | `/config` | 新增或更新复习配置 | `ReviewConfig` |
+| `GET` | `/allrecord` | 查询当前用户全部每日复习记录 | `List<ReviewRecord>` |
+| `GET` | `/record/{reviewRecordId}` | 查询一条每日复习记录详情 | `ReviewRecordVo` |
+| `PUT` | `/review/{reviewId}` | 修改长期复习项的权重或状态 | `Review` |
+| `GET` | `/allreview` | 查询长期复习项及题目信息 | `List<ReviewVo>` |
+
+完整字段和复习流程见 [复习模块接口文档](service-review-api.md)。
+
+## service-message 通知中心模块
+
+基础路径：`/api/message/notifications`。HTTP 请求通过网关的 `lb://service-message` 路由转发，WebSocket `/websocket/**` 使用独立 WS 路由。
+
+| 方法 | 路径 | 用途 | 返回数据 |
+| --- | --- | --- | --- |
+| `GET` | `/api/message/notifications` | 倒序游标分页查询通知摘要 | `NotificationCursorPageVo` |
+| `GET` | `/api/message/notifications/unread-count` | 查询未读通知数 | `Long` |
+| `GET` | `/api/message/notifications/{notificationId}` | 查询详情并自动标记已读 | `NotificationDetailVo` |
+| `PUT` | `/api/message/notifications/{notificationId}/read` | 标记单条通知已读 | `String` |
+| `PUT` | `/api/message/notifications/read-all` | 全部已读，可选 `type` | `String` |
+| `DELETE` | `/api/message/notifications/{notificationId}` | 软删除自己的通知 | `String` |
+
+列表查询参数：
+
+| 参数 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `lastId` | 否 | - | 首次不传，后续传 `nextCursor` |
+| `pageSize` | 否 | `20` | 范围 1 到 100 |
+| `type` | 否 | - | `LIKE` 或 `REVIEW` |
+| `unreadOnly` | 否 | `false` | 是否只返回未读通知 |
+
+列表响应不包含正文和扩展数据。详情响应包含 `content` 和已解析成 JSON 对象的 `extraData`。通知 ID、业务 ID、用户 ID 和下一页游标均按字符串返回。
 
 ## 内部服务接口
 
@@ -858,7 +901,7 @@ Authorization: Bearer <token>
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `userId` | `Long` | 用户 ID |
+| `userId` | `String` | 用户 ID，按字符串返回以避免 JavaScript 精度丢失 |
 | `userName` | `String` | 用户名 |
 | `email` | `String` | 邮箱 |
 | `phone` | `String` | 手机号 |

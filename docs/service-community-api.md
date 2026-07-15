@@ -118,6 +118,20 @@ Authorization: Bearer <token>
 
 ## 点赞接口
 
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `PUT` | `/api/community/likes/posts/{postId}` | 切换帖子点赞状态 |
+| `PUT` | `/api/community/likes/comments/{commentId}` | 切换评论点赞状态 |
+| `PUT` | `/api/community/likes/solution/{solutionId}` | 切换题解点赞状态 |
+
+返回 `true` 表示操作后已点赞，`false` 表示已取消。新增点赞后，社区服务异步生成点赞通知：
+
+- 接收人从内容作者缓存获取，缓存未命中时回源对应业务表并回填。
+- 自己点赞自己的内容不生成通知。
+- 消息 ID 由业务类型、点赞用户和目标 ID 组成，同一用户对同一内容仅提醒一次。
+- 通知发送到 `notification.exchange`，由 `service-message` 持久化并尝试 WebSocket 推送。
+- 点赞计数仍通过 Redis 增量桶定时批量回写 MySQL。
+
 点赞接口为状态切换操作。返回 `true` 表示操作后已点赞，返回 `false` 表示操作后已取消点赞。
 
 ```http

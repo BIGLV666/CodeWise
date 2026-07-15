@@ -8,15 +8,21 @@ import org.example.serviceapi.dto.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.ReviewConfigDto;
+import org.example.servicereview.dto.UpdateReviewDto;
 import org.example.servicereview.entry.Review;
 import org.example.servicereview.entry.ReviewConfig;
 import org.example.servicereview.entry.ReviewRecord;
 import org.example.servicereview.mapper.ReviewConfigMapper;
 import org.example.servicereview.mapper.ReviewMapper;
 import org.example.servicereview.mapper.ReviewRecordMapper;
+import org.example.servicereview.vo.ReviewRecordVo;
+import org.example.servicereview.vo.ReviewVo;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
@@ -24,13 +30,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.util.DigestUtils;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @Slf4j
@@ -44,6 +53,12 @@ public class ReviewService {
     @Autowired
     private QuestionFeignClient  questionFeignClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+    @Autowired
+    private RedisTemplate<String, Object> redisTemplate;
+    @Autowired
+    private RedissonClient redissonClient;
     private final BigDecimal EFLOW= BigDecimal.valueOf(1.3);
     private final BigDecimal DEFAULT_EASINESS_FACTOR = BigDecimal.valueOf(2.5);
 
@@ -241,7 +256,7 @@ public class ReviewService {
             throw e;
         }
 
-        map.put("reviewRecord",reviewRecord);
+        map.put("reviewRecord",record);
         map.put("questions",questionDtoResult.getData());
         return map;
     }
@@ -270,9 +285,10 @@ public class ReviewService {
      * @param routingKey 当前消息实际使用的路由键
      */
     @RabbitListener(queues = MqContexts.REVIEW_QUEUE_NAME)
+
     public void setReview(Message amqpMessage, Channel channel,
                           @Header(AmqpHeaders.RECEIVED_ROUTING_KEY) String routingKey){
-        Long tag=amqpMessage.getMessageProperties().getDeliveryTag();
+        long tag=amqpMessage.getMessageProperties().getDeliveryTag();
 
         try{
              if(!MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY.equals(routingKey)){
@@ -281,8 +297,11 @@ public class ReviewService {
                  return;
              }
              ReviewJudgeRecordDto reviewJudgeRecordDto=objectMapper.readValue(amqpMessage.getBody(),ReviewJudgeRecordDto.class);
-             if(reviewJudgeRecordDto==null){
-                 throw new RuntimeException("消费体为空");
+             if(reviewJudgeRecordDto == null
+                     || reviewJudgeRecordDto.getUserId() == null || reviewJudgeRecordDto.getQuestionId() == null){
+                 channel.basicNack(tag, false, false);
+                 log.error("复习判题消息缺少必要字段");
+                 return;
              }
              ReviewConfig reviewConfig=getReviewConfig(reviewJudgeRecordDto.getUserId());
              if(Integer.valueOf(0).equals(reviewConfig.getEnableAutoReview())){
@@ -298,27 +317,92 @@ public class ReviewService {
                   channel.basicAck(tag,false);
                   return;
               }
-              Review review=reviewMapper.selectOne(new QueryWrapper<Review>().eq("user_id", reviewJudgeRecordDto.getUserId()).eq("question_id", reviewJudgeRecordDto.getQuestionId()));
-             Review r= calculateNextReviewInterval(review,q, reviewConfig);
-             if(r==null){
-                 throw new RuntimeException("更新失败");
-             }
-              int updateResult=reviewMapper.updateById(r);
-              if(updateResult==0){
-                  throw new RuntimeException("更新复习记录失败");
-              }
-              updateTodayReviewRecord(reviewJudgeRecordDto);
+              processReviewWithLock(reviewJudgeRecordDto, q, reviewConfig);
+              clearReviewRetry(amqpMessage);
               channel.basicAck(tag,false);
 
         } catch (Exception e){
             log.error(e.getMessage(),e);
              try {
-                 channel.basicNack(tag,false,true);
-             } catch (IOException ex) {
-                 log.error("复习判题消息 NACK 失败", ex);
+                 String retryId = getReviewMessageRetryId(amqpMessage);
+                 Long retryCount = redisTemplate.opsForHash().increment(
+                         RedisContext.REVIEW_JUDGE_RETRY_COUNT_KEY, retryId, 1
+                 );
+                 boolean exhausted = retryCount != null && retryCount >= 3;
+                 if (exhausted) {
+                     redisTemplate.opsForHash().put(
+                             RedisContext.REVIEW_JUDGE_FAILED_KEY,
+                             retryId,
+                             new String(amqpMessage.getBody(), java.nio.charset.StandardCharsets.UTF_8)
+                     );
+                 }
+                 channel.basicNack(tag,false,!exhausted);
+             } catch (Exception nackException) {
+                 log.error("复习判题消息失败处理异常", nackException);
              }
 
         }
+    }
+
+    private String getReviewMessageRetryId(Message message) {
+        return DigestUtils.md5DigestAsHex(message.getBody());
+    }
+
+    private void clearReviewRetry(Message message) {
+        redisTemplate.opsForHash().delete(
+                RedisContext.REVIEW_JUDGE_RETRY_COUNT_KEY,
+                getReviewMessageRetryId(message)
+        );
+    }
+
+    /** 使用用户当天快照对应的分布式锁，保护完整的读改写过程。 */
+    private void processReviewWithLock(ReviewJudgeRecordDto dto, Integer quality, ReviewConfig reviewConfig)
+            throws InterruptedException {
+        String lockKey = "review:record:" + dto.getUserId() + ":" + LocalDate.now();
+        RLock lock = redissonClient.getLock(lockKey);
+        boolean locked = lock.tryLock(3, TimeUnit.SECONDS);
+        if (!locked) {
+            throw new IllegalStateException("复习记录正在更新，请稍后重试");
+        }
+        try {
+            Boolean updated = transactionTemplate.execute(status -> updateReviewState(dto, quality, reviewConfig));
+            if (Boolean.FALSE.equals(updated)) {
+                log.info("复习题目已完成或不属于今日计划，跳过更新，userId={}，questionId={}",
+                        dto.getUserId(), dto.getQuestionId());
+            }
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
+    }
+
+    /** 在同一事务中更新 SM-2 状态和当天复习快照。 */
+    private boolean updateReviewState(ReviewJudgeRecordDto dto, Integer quality, ReviewConfig reviewConfig) {
+        ReviewRecord todayRecord = reviewRecordMapper.getTodayRecord(dto.getUserId());
+        if (todayRecord == null) {
+            return false;
+        }
+        List<Long> pending = todayRecord.getPendingReviewQuestionIds() == null
+                ? new ArrayList<>() : new ArrayList<>(todayRecord.getPendingReviewQuestionIds());
+        List<Long> completed = todayRecord.getCompletedReviewQuestionIds() == null
+                ? new ArrayList<>() : new ArrayList<>(todayRecord.getCompletedReviewQuestionIds());
+        if (completed.contains(dto.getQuestionId()) || !pending.contains(dto.getQuestionId())) {
+            return false;
+        }
+
+        Review review = reviewMapper.selectOne(new QueryWrapper<Review>()
+                .eq("user_id", dto.getUserId())
+                .eq("question_id", dto.getQuestionId()));
+        if (review == null) {
+            throw new IllegalArgumentException("未找到对应的复习记录");
+        }
+        Review calculated = calculateNextReviewInterval(review, quality, reviewConfig);
+        if (reviewMapper.updateById(calculated) == 0) {
+            throw new RuntimeException("更新复习记录失败");
+        }
+        updateTodayReviewRecord(dto, todayRecord, pending, completed);
+        return true;
     }
 
     /**
@@ -340,40 +424,17 @@ public class ReviewService {
      *
      * @param reviewJudgeRecordDto 复习判题结果事件，包含 userId、questionId、status 等上下文
      */
-    private void updateTodayReviewRecord(ReviewJudgeRecordDto reviewJudgeRecordDto) {
-        ReviewRecord todayRecord = reviewRecordMapper.getTodayRecord(reviewJudgeRecordDto.getUserId());
-        if (todayRecord == null) {
-            log.warn("未找到今日复习记录, userId: {}, questionId: {}",
-                    reviewJudgeRecordDto.getUserId(), reviewJudgeRecordDto.getQuestionId());
-            return;
-        }
-
+    private void updateTodayReviewRecord(ReviewJudgeRecordDto reviewJudgeRecordDto,
+                                         ReviewRecord todayRecord,
+                                         List<Long> pendingQuestionIds,
+                                         List<Long> completedQuestionIds) {
         Long questionId = reviewJudgeRecordDto.getQuestionId();
-        List<Long> pendingQuestionIds = todayRecord.getPendingReviewQuestionIds() == null
-                ? new ArrayList<>()
-                : new ArrayList<>(todayRecord.getPendingReviewQuestionIds());
-        List<Long> completedQuestionIds = todayRecord.getCompletedReviewQuestionIds() == null
-                ? new ArrayList<>()
-                : new ArrayList<>(todayRecord.getCompletedReviewQuestionIds());
         List<Long> acQuestionIds = todayRecord.getAcQuestionIds() == null
                 ? new ArrayList<>()
                 : new ArrayList<>(todayRecord.getAcQuestionIds());
 
-        boolean inPending = pendingQuestionIds.contains(questionId);
-        boolean inCompleted = completedQuestionIds.contains(questionId);
-
-        if (!inPending && !inCompleted) {
-            log.warn("题目不属于今日复习快照，跳过今日复习记录更新, userId: {}, questionId: {}, reviewRecordId: {}",
-                    reviewJudgeRecordDto.getUserId(), questionId, todayRecord.getReviewRecordId());
-            return;
-        }
-
-        if (inPending) {
-            pendingQuestionIds.remove(questionId);
-        }
-        if (!inCompleted) {
-            completedQuestionIds.add(questionId);
-        }
+        pendingQuestionIds.remove(questionId);
+        completedQuestionIds.add(questionId);
         if ("AC".equals(reviewJudgeRecordDto.getStatus()) && !acQuestionIds.contains(questionId)) {
             acQuestionIds.add(questionId);
         }
@@ -413,7 +474,10 @@ public class ReviewService {
             return -1;
         }
         //系统内部原因不计入复习
-        if(reviewJudgeRecordDto.getErrorMessage().contains("代码不能为空")||reviewJudgeRecordDto.getErrorMessage().contains("不支持的语言")||reviewJudgeRecordDto.getErrorMessage().contains("沙箱环境未就绪，请稍后重试")){
+        String errorMessage = reviewJudgeRecordDto.getErrorMessage();
+        if(errorMessage != null && (errorMessage.contains("代码不能为空")
+                || errorMessage.contains("不支持的语言")
+                || errorMessage.contains("沙箱环境未就绪，请稍后重试"))){
             return -1;
         }
         String status = reviewJudgeRecordDto.getStatus();
@@ -522,7 +586,6 @@ public class ReviewService {
         if (quality == null || quality < 0 || quality > 5) {
             throw new IllegalArgumentException("quality 必须在 0 到 5 之间");
         }
-
         LocalDateTime now = LocalDateTime.now();
         BigDecimal initialEf = reviewConfig != null && reviewConfig.getInitialEasinessFactor() != null
                 ? reviewConfig.getInitialEasinessFactor()
@@ -636,5 +699,126 @@ public class ReviewService {
         }
         return reviewConfig;
     }
+    /**
+     * 获取用户所有的复习记录
+     */
+    public List<ReviewRecord>getAllRecord(){
+        return reviewRecordMapper.selectList(new QueryWrapper<ReviewRecord>().eq("user_id",UserContext.getUserId()).orderByDesc("create_time"));
+    }
+    /**
+     * 获取某一天的记录
+     */
+    public ReviewRecordVo getRecordById(Long id){
+        ReviewRecord reviewRecord = reviewRecordMapper.selectById(id);
+        if(reviewRecord==null){
+            throw new IllegalArgumentException("未找到该日的复习计划");
+        }
+        ReviewRecordVo reviewRecordVo=new ReviewRecordVo(reviewRecord);
+        List<Long>allQuestionIds=new ArrayList<>();
+        allQuestionIds.addAll(reviewRecord.getPendingReviewQuestionIds());
+        allQuestionIds.addAll(reviewRecord.getCompletedReviewQuestionIds());
+        reviewRecordVo.setAllQuestionIds(allQuestionIds);
+        Result<List<QuestionDto>>result= questionFeignClient.getFavorites(allQuestionIds);
+        if(!result.getCode().equals(200)){
+            throw new IllegalArgumentException("获取题目信息失败");
+        }
+        Map<Long,String>map=new HashMap<>();
+        for(QuestionDto questionDto:result.getData()){
+            map.put(questionDto.getQuestionId(),questionDto.getTitle());
+        }
+        reviewRecordVo.setAllQuestionTitles(map);
+        return reviewRecordVo;
+    }
+    /**
+     * 获取所有待复习的计划
+      */
+    public List<ReviewVo>getAllReview(){
+
+        List<Review>reviews= reviewMapper.selectList(new QueryWrapper<Review>().eq("user_id",UserContext.getUserId()).orderByDesc("last_review_time"));
+        List<Long> allQuestionIds =new ArrayList<>();
+        for(Review review:reviews){
+            allQuestionIds.add(review.getQuestionId());
+        }
+        Result<List<QuestionDto>> questionDtoResult=questionFeignClient.getFavorites(allQuestionIds);
+        List<ReviewVo> reviewVoList=new ArrayList<>();
+        if(!questionDtoResult.getCode().equals(200)){
+
+            return ToReviewVoList(reviews);
+        }
+        Map<Long,Review>map=new HashMap<>();
+        for(Review review:reviews){
+            map.put(review.getQuestionId(),review);
+        }
+
+        for(QuestionDto questionDto:questionDtoResult.getData()){
+            Review review= map.getOrDefault(questionDto.getQuestionId(),null);
+            if(review==null){
+                continue;
+            }
+            ReviewVo reviewVo=new ReviewVo(review);
+            reviewVo.setQuestionTitle(questionDto.getTitle());
+            reviewVoList.add(reviewVo);
+
+        }
+        return reviewVoList;
+    }
+    private List<ReviewVo>ToReviewVoList(List<Review> reviews){
+        List<ReviewVo> reviewVoList=new ArrayList<>();
+        for(Review review:reviews){
+            ReviewVo reviewVo=new ReviewVo(review);
+            reviewVoList.add(reviewVo);
+        }
+        return reviewVoList;
+    }
+    /**
+     * 修改某题的复习权重或者是否暂停
+     */
+    public Review updateReview(Long reviewId, UpdateReviewDto updateReviewDto) {
+        if(updateReviewDto==null){
+            return null;
+        }
+        Review review = reviewMapper.selectById(reviewId);
+        if(review==null){
+            throw new IllegalArgumentException("未找到该题目的复习计划");
+        }
+        if(!review.getUserId().equals(UserContext.getUserId())){
+            throw new IllegalArgumentException("无权操作他人复习记录");
+        }
+        ReviewRecord reviewRecord = reviewRecordMapper.getTodayRecord(UserContext.getUserId());
+        if(reviewRecord!=null){
+            if(reviewRecord.getPendingReviewQuestionIds().contains(review.getQuestionId())||reviewRecord.getCompletedReviewQuestionIds().contains(review.getQuestionId())){
+                throw new IllegalArgumentException("该题目在今日复习计划暂不支持更改");
+            }
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if(updateReviewDto.getNextReviewData()!=null&&updateReviewDto.getNextReviewData().isAfter(now)){
+            review.setNextReviewTime(updateReviewDto.getNextReviewData());
+        }
+
+        if(updateReviewDto.getStatus()!=null&&(updateReviewDto.getStatus()==0||updateReviewDto.getStatus()==2)){
+            if(review.getStatus()==1){
+                throw new IllegalArgumentException("该题目已掌握");
+            }
+
+            review.setStatus(updateReviewDto.getStatus());
+        }else {
+            throw new IllegalArgumentException("未知状态");
+        }
+
+        if(updateReviewDto.getWeight()!=null&&(updateReviewDto.getWeight() == 0 || updateReviewDto.getWeight() == 1)){
+            review.setWeight(updateReviewDto.getWeight());
+        }else {
+            throw new IllegalArgumentException("未知权重");
+        }
+
+        int r=reviewMapper.updateById(review);
+        if(r==0){
+            throw new IllegalArgumentException("更新失败请稍后重试");
+        }
+        return review;
+
+    }
+
+
 
 }

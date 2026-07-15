@@ -28,6 +28,12 @@ spring:
           predicates:
             - Path=/websocket/**
 
+        # 通知中心 HTTP 接口
+        - id: service-message-http
+          uri: lb://service-message
+          predicates:
+            - Path=/api/message/**
+
         # 2. 用户服务
         - id: service-user
           uri: lb://service-user

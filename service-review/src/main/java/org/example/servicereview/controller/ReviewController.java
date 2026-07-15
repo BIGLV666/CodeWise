@@ -1,10 +1,14 @@
 package org.example.servicereview.controller;
 
-import org.example.serviceapi.dto.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.servicereview.dto.ReviewConfigDto;
+import org.example.servicereview.dto.UpdateReviewDto;
+import org.example.servicereview.entry.Review;
 import org.example.servicereview.entry.ReviewConfig;
+import org.example.servicereview.entry.ReviewRecord;
 import org.example.servicereview.service.ReviewService;
+import org.example.servicereview.vo.ReviewRecordVo;
+import org.example.servicereview.vo.ReviewVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -58,5 +62,22 @@ public class ReviewController {
     public Result<ReviewConfig> updateReviewConfig(@RequestBody ReviewConfigDto reviewConfigDto){
         return Result.success(reviewService.updateReviewConfig(reviewConfigDto));
     }
+    @GetMapping("/allrecord")
+    public Result<List<ReviewRecord>> getAllReviewRecord(){
+        return Result.success(reviewService.getAllRecord());
+    }
+    @GetMapping("/record/{reviewrecordId}")
+    public Result<ReviewRecordVo> getReviewRecord(@PathVariable Long reviewrecordId){
+        return Result.success(reviewService.getRecordById(reviewrecordId));
+    }
+    @PutMapping("/review/{reviewId}")
+    public Result<Review>updateReview(@RequestBody UpdateReviewDto review, @PathVariable Long reviewId){
+        return Result.success(reviewService.updateReview(reviewId, review));
+    }
+    @GetMapping("/allreview")
+    public Result<List<ReviewVo>> getAllReview(){
+        return Result.success(reviewService.getAllReview());
+    }
+
 
 }

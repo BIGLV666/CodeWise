@@ -165,4 +165,29 @@ public class MqConfig {
 
     }
 
+    //========================收件箱队列====================
+
+    @Bean
+    public Queue NotificationQueue() {
+        return QueueBuilder.durable(NOTIFICATION_QUEUE_NAME).build();
+    }
+    @Bean
+    public DirectExchange NotificationExchange() {
+        return new DirectExchange(NOTIFICATION_EXCHANGE, true, false);
+    }
+    @Bean
+    public Binding notificationLikeBinding() {
+        return BindingBuilder
+                .bind(NotificationQueue())
+                .to(NotificationExchange())
+                .with(NOTIFICATION_LIKE_ROUTING_KEY);
+    }
+    @Bean
+    public Binding notificationReviewBinding() {
+        return BindingBuilder
+                .bind(NotificationQueue())
+                .to(NotificationExchange())
+                .with(NOTIFICATION_REVIEW_ROUTING_KEY);
+    }
+
 }

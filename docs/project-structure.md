@@ -69,9 +69,11 @@ CodeWise/
 |       |   |-- controller/            # 复习与收藏接口
 |       |   |-- service/               # 复习计划业务
 |       |   |-- mapper/                # 复习数据访问
-|       |   `-- config/                # WebSocket 配置
+|       |   |-- task/                  # 上午/晚间复习提醒定时任务
+|       |   `-- vo/                    # 复习计划与记录响应模型
 |       `-- resources/
 |           |-- mapper/                # MyBatis XML
+|           |-- migration/             # 复习表增量索引
 |           `-- sql.sql                # 复习库结构
 |
 |-- service-community/
@@ -93,9 +95,15 @@ CodeWise/
 |           `-- sql.sql                # 社区库完整结构
 |
 |-- service-message/
-|   `-- src/main/java/org/example/servicemessage/
-|       |-- mq/                        # 通知消息消费
-|       `-- websocket/                 # WebSocket 会话与推送
+|   `-- src/main/
+|       |-- java/org/example/servicemessage/
+|       |   |-- config/                # 异步线程池与 Web 配置
+|       |   |-- email/                 # 验证码与系统邮件
+|       |   |-- mq/                    # routing key 分派与消息消费
+|       |   |-- notificationcenter/    # 通知接口、持久化、消费者与 VO
+|       |   `-- websocket/             # 握手鉴权、会话与实时推送
+|       `-- resources/
+|           `-- sql.sql                # codewise_message 表结构
 |
 |-- service-ai/
 |   `-- src/main/java/org/example/serviceai/
@@ -118,6 +126,8 @@ service-question ---> RabbitMQ ---> service-judge
 service-judge    ---> RabbitMQ ---> service-question / service-message
 service-community ---> service-user / service-question
 service-review    ---> service-question / service-user
+service-community ---> RabbitMQ ---> service-message
+service-review    ---> RabbitMQ ---> service-message
 ```
 
 `service-api` 和 `service-common` 应保持低业务耦合。新增跨服务接口时，优先把契约放入 `service-api`，通用基础设施放入 `service-common`，具体业务实现仍留在所属服务。
@@ -129,6 +139,7 @@ service-user      -> codewise_user
 service-question  -> codewise_question
 service-review    -> codewise_review
 service-community -> codewise_community
+service-message   -> codewise_message
 service-judge     -> 独立判题相关存储或配置
 ```
 

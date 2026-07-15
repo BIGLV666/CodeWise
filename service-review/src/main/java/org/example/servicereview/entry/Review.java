@@ -33,7 +33,8 @@ public class Review {
     /**
      * 权重，0为默认，1为先展示，用户自己选择是否先复习
      */
-    private Integer weight=0;
+    @Builder.Default
+    private Integer weight = 0;
 
     /**
      * 难度因子 Easiness Factor (EF)

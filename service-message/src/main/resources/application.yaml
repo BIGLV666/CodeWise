@@ -4,6 +4,7 @@ spring:
   config:
     import:
       - optional:nacos:service-email.yaml
+      - optional:nacos:service-message.yaml
   cloud:
     nacos:
       config:
