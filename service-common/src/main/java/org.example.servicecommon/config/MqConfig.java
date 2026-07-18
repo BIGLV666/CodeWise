@@ -94,6 +94,13 @@ public class MqConfig {
                 .to(aiExchange())
                 .with(Ai_TESTCASE_ROUTING_KEY);
     }
+    @Bean
+    public Binding REAdviceBinding() {
+        return BindingBuilder
+                .bind(aiQueue())
+                .to(aiExchange())
+                .with(AI_WA_ADVICE_ROUTING_KEY);
+    }
     //======================================题目队列==========================
     @Bean
     public Queue questionQueue() {
@@ -188,6 +195,13 @@ public class MqConfig {
                 .bind(NotificationQueue())
                 .to(NotificationExchange())
                 .with(NOTIFICATION_REVIEW_ROUTING_KEY);
+    }
+    @Bean
+    public Binding notificationAiAdviceBinding() {
+        return BindingBuilder
+                .bind(NotificationQueue())
+                .to(NotificationExchange())
+                .with(NOTIFICATION_AI_ADVICE_ROUTING_KEY);
     }
 
 }

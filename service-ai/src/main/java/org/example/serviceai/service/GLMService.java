@@ -12,6 +12,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.function.Consumer;
 
 @Slf4j
 @Service
@@ -24,7 +25,16 @@ public class GLMService implements CallAi {
         return "GLM";
     }
     @Override
-    public String callAi(String prompt)
+    public String callAi(String prompt){
+        StringBuilder result = new StringBuilder();
+
+        streamAi(prompt, result::append);
+
+        return result.toString();
+    }
+
+    @Override
+    public void streamAi(String prompt, Consumer<String> onChunk)
 
      {
         try {
@@ -72,7 +82,7 @@ public class GLMService implements CallAi {
                                 JSONObject delta = choice.getJSONObject("delta");
                                 String content = delta.getStr("content");
                                 if (content != null) {
-                                    fullResponse.append(content);
+                                    onChunk.accept(content);
                                     // 实时打印进度
                                     if (fullResponse.length() % 100 == 0) {
                                         log.info("已接收 {} 字符", fullResponse.length());
@@ -90,7 +100,6 @@ public class GLMService implements CallAi {
             connection.disconnect();
 
             log.info("流式响应总长度: {}", fullResponse.length());
-            return fullResponse.toString();
 
         } catch (Exception e) {
             log.error("流式调用失败: {}", e.getMessage(), e);
@@ -102,7 +111,7 @@ public class GLMService implements CallAi {
 
     @Override
     public int getPriority() {
-        return 0;
+        return 1;
     }
 
     @Override

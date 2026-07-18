@@ -1,8 +1,11 @@
 package org.example.serviceuser.controller;
 
+import org.example.serviceapi.dto.ai.AiAdviceWADto;
 import org.example.serviceapi.dto.Result;
+import org.example.servicecommon.config.MqContexts;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.service.UserService;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,6 +16,8 @@ import java.util.Map;
 public class UserController {
     @Autowired
     private UserService userService;
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
     @GetMapping("/hello")
     public String hello(){
         return "hello";

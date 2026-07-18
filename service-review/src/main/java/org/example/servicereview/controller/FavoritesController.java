@@ -1,6 +1,6 @@
 package org.example.servicereview.controller;
 
-import org.example.serviceapi.dto.QuestionDto;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.servicereview.dto.ReceiveDto;
 import org.example.servicereview.entry.Favorites;

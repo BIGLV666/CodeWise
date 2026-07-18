@@ -3,7 +3,7 @@ package org.example.servicequestion.handle;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceapi.dto.JudgeResultDto;
+import org.example.serviceapi.dto.judge.JudgeResultDto;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;

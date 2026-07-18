@@ -1,5 +1,7 @@
 package org.example.serviceai.intifer;
 
+import java.util.function.Consumer;
+
 public interface CallAi {
     /**
      * 获取AI模型名称
@@ -10,6 +12,12 @@ public interface CallAi {
      * 调用AI服务
      */
     String callAi(String prompt);
+    /**
+     * 流式调用ai
+     */
+    default void streamAi(String prompt, Consumer<String> onChunk) {
+        onChunk.accept(callAi(prompt));
+    }
 
     /**
      * 检查服务是否可用（健康检查）

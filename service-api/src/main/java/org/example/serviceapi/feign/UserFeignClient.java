@@ -1,6 +1,6 @@
 package org.example.serviceapi.feign;
 
-import org.example.serviceapi.dto.UserDto;
+import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.dto.Result;
 
 

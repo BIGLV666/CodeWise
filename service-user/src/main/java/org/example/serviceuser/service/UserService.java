@@ -187,11 +187,11 @@ public class UserService {
 
     }
     //批量查寻用户
-    public Map<Long, org.example.serviceapi.dto.UserDto> BatchSelectUser(List<Long> userIds) {
+    public Map<Long, org.example.serviceapi.dto.user.UserDto> BatchSelectUser(List<Long> userIds) {
         List<User> users = userMapper.selectBatchIds(userIds);
-        Map<Long, org.example.serviceapi.dto.UserDto> map = new HashMap<>();
+        Map<Long, org.example.serviceapi.dto.user.UserDto> map = new HashMap<>();
         for (User user : users) {
-            org.example.serviceapi.dto.UserDto userDto = new org.example.serviceapi.dto.UserDto();
+            org.example.serviceapi.dto.user.UserDto userDto = new org.example.serviceapi.dto.user.UserDto();
             userDto.setAvatarUrl(user.getAvatarUrl());
             userDto.setNickName(user.getNickName());
             userDto.setPhone(user.getPhone());

@@ -1,7 +1,7 @@
 package org.example.servicequestion.service;
 
 import lombok.NonNull;
-import org.example.serviceapi.dto.TestMessage;
+import org.example.serviceapi.dto.question.TestMessage;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;

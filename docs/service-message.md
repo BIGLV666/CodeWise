@@ -131,5 +131,7 @@ STOMP 端点：
 
 - RabbitMQ 消费端已有数据库幂等和有限重试。
 - WebSocket 失败不会影响站内信持久化。
+- AI 建议是题目侧边栏的瞬时推送，不写入通知中心收件箱；完整回答由 `service-ai` 自己持久化。
+- AI 建议使用独立 `AI_ADVICE` 用户队列，并用 Redis 事件键避免重复推送。
 - 生产端尚未完整接入 publisher confirm、Outbox 和死信补偿。
 - Redis 失败记录目前需要人工或后续补偿任务处理。

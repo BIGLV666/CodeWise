@@ -9,7 +9,7 @@ import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
-import org.example.serviceapi.dto.JudgeResultDto;
+import org.example.serviceapi.dto.judge.JudgeResultDto;
 import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.Util.BuildResult;
 import org.example.servicejudge.entry.JudgeRecord;

@@ -851,6 +851,37 @@ Content-Type: application/json
 
 列表响应不包含正文和扩展数据。详情响应包含 `content` 和已解析成 JSON 对象的 `extraData`。通知 ID、业务 ID、用户 ID 和下一页游标均按字符串返回。
 
+## service-ai AI 会话模块
+
+基础路径：`/api/ai/advice`。
+
+| 方法 | 路径 | 用途 | 返回数据 |
+| --- | --- | --- | --- |
+| `GET` | `/api/ai/advice` | 查询当前用户所有题目根会话 | `List<HomeConversationVo>` |
+| `POST` | `/api/ai/advice/ask` | 在会话中追问并使用 SSE 返回 | `text/event-stream` |
+| `GET` | `/api/ai/advice/{conversationId}/messages` | 游标分页查询会话消息 | `CursorPageResult<Message>` |
+
+追问请求：
+
+```json
+{
+  "conversationId": 12,
+  "question": "为什么这里会越界？",
+  "code": "当前代码"
+}
+```
+
+SSE 事件：
+
+| 事件 | 数据 | 说明 |
+| --- | --- | --- |
+| `chunk` | 模型增量文本 | 前端实时追加 |
+| `answer` | 已入库的 `Message` | 用数据库 `messageId` 替换临时消息 |
+| `done` | `[DONE]` | 正常结束 |
+| `error` | 错误信息 | 调用失败或连接异常 |
+
+该接口为 `POST + SSE`，浏览器原生 `EventSource` 不支持 POST，前端应使用 `fetch()` 读取 `response.body`。
+
 ## 内部服务接口
 
 以下接口也由 `@RestController` 暴露，但主要用于 Feign 服务间调用。

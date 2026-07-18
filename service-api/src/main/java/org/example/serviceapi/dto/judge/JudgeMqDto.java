@@ -1,10 +1,12 @@
-package org.example.serviceapi.dto;
+package org.example.serviceapi.dto.judge;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 
 import java.io.Serializable;
 import java.util.List;
+
+import org.example.serviceapi.dto.question.TestMessage;
 
 @Data
 @JsonIgnoreProperties(ignoreUnknown = true)

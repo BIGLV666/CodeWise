@@ -5,5 +5,6 @@ import lombok.Setter;
 @Getter
 public enum NotificationCenterType {
     LIKE,
-    REVIEW;
+    REVIEW,
+    AI_ADVICE
 }

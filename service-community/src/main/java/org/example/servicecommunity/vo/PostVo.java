@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.example.serviceapi.dto.UserDto;
+import org.example.serviceapi.dto.user.UserDto;
 import org.example.servicecommunity.entry.Post;
 
 import java.time.LocalDateTime;

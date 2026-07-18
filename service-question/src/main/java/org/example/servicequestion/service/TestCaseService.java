@@ -2,7 +2,7 @@ package org.example.servicequestion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.serviceapi.dto.Result;
-import org.example.serviceapi.dto.UserDto;
+import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.InsertTestCaseDto;

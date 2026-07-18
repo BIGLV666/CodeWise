@@ -20,7 +20,7 @@ public class User {
         return Result.success(user);
     }
     @PostMapping("/info/list")
-    public Result<Map<Long, org.example.serviceapi.dto.UserDto>> getUserList(@RequestBody List<Long> userIds) {
+    public Result<Map<Long, org.example.serviceapi.dto.user.UserDto>> getUserList(@RequestBody List<Long> userIds) {
         return Result.success(userService.BatchSelectUser(userIds));
     }
 }

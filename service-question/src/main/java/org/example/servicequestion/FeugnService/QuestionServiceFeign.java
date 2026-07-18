@@ -1,7 +1,7 @@
 package org.example.servicequestion.FeugnService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import org.example.serviceapi.dto.QuestionDto;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.springframework.stereotype.Service;

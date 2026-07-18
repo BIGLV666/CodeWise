@@ -13,6 +13,8 @@ CodeWise/
 |   |-- service-community-api.md
 |   |-- service-message.md
 |   |-- service-review-api.md
+|   |-- AI_MODULE_GUIDE.md
+|   |-- project-metrics.md
 |   `-- technical-design.md
 |
 |-- service-api/
@@ -106,9 +108,15 @@ CodeWise/
 |           `-- sql.sql                # codewise_message 表结构
 |
 |-- service-ai/
-|   `-- src/main/java/org/example/serviceai/
-|       |-- handle/                    # 不同模型处理器
-|       `-- MQ/                        # AI 任务消息处理
+|   `-- src/main/
+|       |-- java/org/example/serviceai/
+|       |   |-- controller/            # SSE 追问和会话查询接口
+|       |   |-- conversation/          # Prompt、会话、记忆和仓储
+|       |   |-- entry/                 # 会话、消息和摘要实体
+|       |   |-- mapper/                # MyBatis-Plus Mapper
+|       |   |-- handle/                # 判题失败 AI 消费者
+|       |   `-- service/               # 多模型调用与流式适配
+|       `-- resources/sql/             # codewise_ai 建表与迁移脚本
 |
 |-- pom.xml                            # Maven 父工程与版本管理
 |-- mvnw
@@ -140,6 +148,7 @@ service-question  -> codewise_question
 service-review    -> codewise_review
 service-community -> codewise_community
 service-message   -> codewise_message
+service-ai        -> codewise_ai
 service-judge     -> 独立判题相关存储或配置
 ```
 

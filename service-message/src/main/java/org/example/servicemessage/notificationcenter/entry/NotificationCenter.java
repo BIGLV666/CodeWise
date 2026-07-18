@@ -9,7 +9,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.example.serviceapi.enums.BusinessType;
 import org.example.serviceapi.enums.NotificationCenterType;
-import org.example.serviceapi.mqMessages.NotificationDto;
+import org.example.serviceapi.dto.notification.NotificationDto;
 
 import java.time.LocalDateTime;
 

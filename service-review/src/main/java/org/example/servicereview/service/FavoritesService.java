@@ -1,7 +1,7 @@
 package org.example.servicereview.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import org.example.serviceapi.dto.QuestionDto;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;

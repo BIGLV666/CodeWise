@@ -4,18 +4,21 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.dto.notification.NotificationLikeDto;
 import org.example.serviceapi.dto.Result;
-import org.example.serviceapi.dto.UserDto;
+import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.enums.BusinessType;
 import org.example.serviceapi.enums.NotificationCenterType;
 import org.example.serviceapi.feign.UserFeignClient;
-import org.example.serviceapi.mqMessages.NotificationDto;
+import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.until.UserContext;
-
+import org.example.servicecommunity.Dto.LikeTargetMetaDto;
+import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
-
+import org.example.servicecommunity.entry.Post;
+import org.example.servicecommunity.entry.Solution;
 import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
@@ -81,19 +84,22 @@ public class LikeRecordService {
                 CompletableFuture.runAsync(() -> {
                         log.info("点赞通知异步任务开始，type=POST，targetId={}", postId);
                         String messageId = LIKE + ":" + BusinessType.POST + ":" + likeRecord.getUserId() + ":" + postId;
-                        Long postUserId=getPostUserID(postId,BusinessType.POST);
-                        if (likeRecord.getUserId().equals(postUserId)) {
+                        LikeTargetMetaDto targetMeta = getLikeTargetMeta(postId, BusinessType.POST);
+                        if (likeRecord.getUserId().equals(targetMeta.getOwnerUserId())) {
                             return;
                         }
                         Result<UserDto> userDtoResult = userFeignClient.getUserInfo(likeRecord.getUserId());
                         NotificationDto notificationDto = new NotificationDto();
-                        notificationDto.setUserId(postUserId);
+                        notificationDto.setUserId(targetMeta.getOwnerUserId());
                         notificationDto.setMessageId(messageId);
                         notificationDto.setType(NotificationCenterType.LIKE);
                         notificationDto.setBusinessType(BusinessType.POST);
                         notificationDto.setBusinessId(postId);
                         try {
-                            notificationDto.setExtraData(objectMapper.writeValueAsString(userDtoResult.getData()));
+                            NotificationLikeDto notificationLikeDto = buildNotificationLikeDto(
+                                    userDtoResult.getData(), targetMeta
+                            );
+                            notificationDto.setExtraData(objectMapper.writeValueAsString(notificationLikeDto));
                         } catch (JsonProcessingException e) {
                             log.error("点赞通知用户数据序列化失败，type=POST，targetId={}", postId, e);
                             return;
@@ -153,19 +159,22 @@ public class LikeRecordService {
                 CompletableFuture.runAsync(() -> {
                     log.info("点赞通知异步任务开始，type=COMMENT，targetId={}", postId);
                     String messageId=LIKE+":"+BusinessType.COMMENT+":"+likeRecord.getUserId()+":"+postId;
-                    Long commentUserId=getPostUserID(postId,BusinessType.COMMENT);
-                    if (likeRecord.getUserId().equals(commentUserId)) {
+                    LikeTargetMetaDto targetMeta = getLikeTargetMeta(postId, BusinessType.COMMENT);
+                    if (likeRecord.getUserId().equals(targetMeta.getOwnerUserId())) {
                         return;
                     }
                     Result<UserDto>userDtoResult=userFeignClient.getUserInfo(likeRecord.getUserId());
                     NotificationDto notificationDto=new NotificationDto();
-                    notificationDto.setUserId(commentUserId);
+                    notificationDto.setUserId(targetMeta.getOwnerUserId());
                     notificationDto.setMessageId(messageId);
                     notificationDto.setType(NotificationCenterType.LIKE);
                     notificationDto.setBusinessType(BusinessType.COMMENT);
                     notificationDto.setBusinessId(postId);
                     try {
-                        notificationDto.setExtraData(objectMapper.writeValueAsString(userDtoResult.getData()));
+                        NotificationLikeDto notificationLikeDto = buildNotificationLikeDto(
+                                userDtoResult.getData(), targetMeta
+                        );
+                        notificationDto.setExtraData(objectMapper.writeValueAsString(notificationLikeDto));
                     } catch (JsonProcessingException e) {
                        log.error("点赞通知用户数据序列化失败，type=COMMENT，targetId={}", postId, e);
                        return;
@@ -230,19 +239,22 @@ public class LikeRecordService {
                         log.info("点赞通知异步任务开始，线程={}，targetId={}",
                                 Thread.currentThread().getName(), postId);
                         String messageId=LIKE+":"+BusinessType.SOLUTION+":"+likeRecord.getUserId()+":"+postId;
-                        Long commentUserId=getPostUserID(postId,BusinessType.SOLUTION);
-                        if (likeRecord.getUserId().equals(commentUserId)) {
+                        LikeTargetMetaDto targetMeta = getLikeTargetMeta(postId, BusinessType.SOLUTION);
+                        if (likeRecord.getUserId().equals(targetMeta.getOwnerUserId())) {
                             return;
                         }
                         Result<UserDto>userDtoResult=userFeignClient.getUserInfo(likeRecord.getUserId());
                         NotificationDto notificationDto=new NotificationDto();
-                        notificationDto.setUserId(commentUserId);
+                        notificationDto.setUserId(targetMeta.getOwnerUserId());
                         notificationDto.setMessageId(messageId);
                         notificationDto.setType(NotificationCenterType.LIKE);
                         notificationDto.setBusinessType(BusinessType.SOLUTION);
                         notificationDto.setBusinessId(postId);
                         try {
-                            notificationDto.setExtraData(objectMapper.writeValueAsString(userDtoResult.getData()));
+                            NotificationLikeDto notificationLikeDto = buildNotificationLikeDto(
+                                    userDtoResult.getData(), targetMeta
+                            );
+                            notificationDto.setExtraData(objectMapper.writeValueAsString(notificationLikeDto));
                         } catch (JsonProcessingException e) {
                             log.error("点赞通知用户数据序列化失败，targetId={}", postId, e);
                             return;
@@ -279,81 +291,114 @@ public class LikeRecordService {
 
 
 
-
-    private Long getPostUserID(Long postId,BusinessType businessType){
+    private LikeTargetMetaDto getLikeTargetMeta(Long targetId, BusinessType businessType) {
         String ownerCacheKey = getOwnerCacheKey(businessType);
-        Long ownerId = (Long) redisTemplate.opsForHash().get(ownerCacheKey, postId.toString());
-        if (ownerId != null) {
-            return ownerId;
+        LikeTargetMetaDto targetMeta = (LikeTargetMetaDto) redisTemplate.opsForHash()
+                .get(ownerCacheKey, targetId.toString());
+        if (targetMeta != null) {
+            return targetMeta;
         }
 
         RLock lock = redissonClient.getLock(
-                "lock:community:owner:" + businessType + ":" + postId
+                "lock:community:owner:" + businessType + ":" + targetId
         );
-
         boolean locked = false;
         try {
             locked = lock.tryLock(1, 5, TimeUnit.SECONDS);
-
             if (locked) {
-                // 双重检查，可能前一个线程已经写入缓存
-                switch (businessType) {
-                    case POST-> ownerId = (Long) redisTemplate.opsForHash().get(RedisContext.POST_AND_USER_ID_KEY, postId.toString());
-                    case COMMENT->ownerId = (Long) redisTemplate.opsForHash().get(RedisContext.COMMENT_AND_USER_ID, postId.toString());
-                    case SOLUTION -> ownerId = (Long) redisTemplate.opsForHash().get(RedisContext.SOLUTION_AND_USER_ID, postId.toString());
+                // 双重检查，避免多个实例同时回源数据库。
+                targetMeta = (LikeTargetMetaDto) redisTemplate.opsForHash()
+                        .get(ownerCacheKey, targetId.toString());
+                if (targetMeta != null) {
+                    return targetMeta;
                 }
 
-                if (ownerId != null) {
-                    return ownerId;
-                }
-                if(BusinessType.POST.equals(businessType)){
-                    ownerId =postMapper.selectById(postId).getUserId();}
-                if(BusinessType.COMMENT.equals(businessType)){
-                    ownerId =commentMapper.selectById(postId).getUserId();
-                }
-                if(BusinessType.SOLUTION.equals(businessType)){
-                    ownerId=solutionMapper.selectById(postId).getSolutionUserId();
-                }
-
-                switch (businessType) {
-                    case POST->  redisTemplate.opsForHash().put(RedisContext.POST_AND_USER_ID_KEY,postId.toString(),ownerId);
-                    case COMMENT->redisTemplate.opsForHash().put(RedisContext.COMMENT_AND_USER_ID,postId.toString(),ownerId);
-                    case SOLUTION ->redisTemplate.opsForHash().put(RedisContext.SOLUTION_AND_USER_ID,postId.toString(),ownerId);
-                }
-                return ownerId;
+                targetMeta = loadLikeTargetMeta(targetId, businessType);
+                redisTemplate.opsForHash().put(ownerCacheKey, targetId.toString(), targetMeta);
+                return targetMeta;
             }
 
-            // 没抢到说明其他线程大概率正在重建，短暂等待后再读
+            // 其他实例正在重建缓存时短暂等待；超时后仍会查库兜底，不丢通知。
             for (int i = 0; i < 5; i++) {
                 Thread.sleep(50);
-                switch (businessType) {
-                    case POST-> ownerId = (Long) redisTemplate.opsForHash().get(RedisContext.POST_AND_USER_ID_KEY, postId.toString());
-                    case COMMENT->ownerId = (Long) redisTemplate.opsForHash().get(RedisContext.COMMENT_AND_USER_ID, postId.toString());
-                    case SOLUTION -> ownerId = (Long) redisTemplate.opsForHash().get(RedisContext.SOLUTION_AND_USER_ID, postId.toString());
-                }
-                if (ownerId != null) {
-                    return ownerId;
+                targetMeta = (LikeTargetMetaDto) redisTemplate.opsForHash()
+                        .get(ownerCacheKey, targetId.toString());
+                if (targetMeta != null) {
+                    return targetMeta;
                 }
             }
-
-            // 最终兜底查数据库，不能直接退出，否则通知会丢
-            if(BusinessType.POST.equals(businessType)){
-                ownerId =postMapper.selectById(postId).getUserId();}
-            if(BusinessType.COMMENT.equals(businessType)){
-                ownerId =commentMapper.selectById(postId).getUserId();
-            }
-            if(BusinessType.SOLUTION.equals(businessType)){
-                ownerId=solutionMapper.selectById(postId).getSolutionUserId();
-            }
-            return ownerId;
+            return loadLikeTargetMeta(targetId, businessType);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("获取内容作者被中断");
+            throw new IllegalStateException("获取点赞目标信息被中断", e);
         } finally {
             if (locked && lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
         }
+    }
+
+    private LikeTargetMetaDto loadLikeTargetMeta(Long targetId, BusinessType businessType) {
+        return switch (businessType) {
+            case POST -> {
+                Post post = postMapper.selectById(targetId);
+                if (post == null) {
+                    throw new IllegalArgumentException("帖子不存在");
+                }
+                yield new LikeTargetMetaDto(post.getUserId(), post.getPostId(), PostType.POST, null, null);
+            }
+            case COMMENT -> {
+                Comment comment = commentMapper.selectById(targetId);
+                if (comment == null) {
+                    throw new IllegalArgumentException("评论不存在");
+                }
+                PostType rootType = comment.getType() == null ? PostType.POST : comment.getType();
+                Long rootCommentId = comment.getRootCommentId();
+                if (rootCommentId == null || rootCommentId <= 0) {
+                    rootCommentId = comment.getCommentId();
+                }
+                Long questionId = null;
+                if (rootType == PostType.SOLUTION) {
+                    Solution solution = solutionMapper.selectById(comment.getPostId());
+                    if (solution == null) {
+                        throw new IllegalArgumentException("评论所属题解不存在");
+                    }
+                    questionId = solution.getQuestionId();
+                }
+                yield new LikeTargetMetaDto(
+                        comment.getUserId(), comment.getPostId(), rootType, rootCommentId, questionId
+                );
+            }
+            case SOLUTION -> {
+                Solution solution = solutionMapper.selectById(targetId);
+                if (solution == null) {
+                    throw new IllegalArgumentException("题解不存在");
+                }
+                yield new LikeTargetMetaDto(
+                        solution.getSolutionUserId(), solution.getSolutionId(), PostType.SOLUTION,
+                        null, solution.getQuestionId()
+                );
+            }
+            default -> throw new IllegalArgumentException("不支持的点赞业务类型：" + businessType);
+        };
+    }
+
+    private NotificationLikeDto buildNotificationLikeDto(UserDto actor, LikeTargetMetaDto targetMeta) {
+        if (actor == null) {
+            throw new IllegalArgumentException("未找到点赞用户信息");
+        }
+        NotificationLikeDto dto = new NotificationLikeDto();
+        dto.setUserId(actor.getUserId());
+        dto.setUserName(actor.getUserName());
+        dto.setNickName(actor.getNickName());
+        dto.setAvatarUrl(actor.getAvatarUrl());
+        dto.setRootId(targetMeta.getRootId().toString());
+        dto.setRootType(targetMeta.getRootType().name());
+        dto.setRootCommentId(targetMeta.getRootCommentId() == null
+                ? null : targetMeta.getRootCommentId().toString());
+        dto.setQuestionId(targetMeta.getQuestionId() == null
+                ? null : targetMeta.getQuestionId().toString());
+        return dto;
     }
 
     private String getOwnerCacheKey(BusinessType businessType) {

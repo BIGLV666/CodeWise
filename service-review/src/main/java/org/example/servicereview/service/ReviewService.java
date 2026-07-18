@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceapi.dto.QuestionDto;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;

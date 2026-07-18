@@ -1,4 +1,4 @@
-package org.example.serviceapi.dto;
+package org.example.serviceapi.dto.notification;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;

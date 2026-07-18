@@ -8,4 +8,6 @@ public enum BusinessType {
     COMMENT,
     SOLUTION,
     REVIEW_RECORD,
+    SUBMIT_RECORD,
+    QUESTION
 }

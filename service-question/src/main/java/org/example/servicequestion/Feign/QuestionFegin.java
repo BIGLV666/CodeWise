@@ -1,6 +1,6 @@
 package org.example.servicequestion.Feign;
 
-import org.example.serviceapi.dto.QuestionDto;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.servicequestion.FeugnService.QuestionServiceFeign;
 import org.springframework.beans.factory.annotation.Autowired;

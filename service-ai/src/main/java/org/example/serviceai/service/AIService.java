@@ -6,72 +6,156 @@ import org.example.serviceai.intifer.CallAi;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.function.Consumer;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 @Service
 @Slf4j
-public class AIService  {
+public class AIService {
+
     @Autowired
     private AIServiceManager serviceManager;
 
-    /**
-     * 调用AI服务（带自动故障切换）
-     */
     public String callAi(String prompt) {
-        CallAi service = null;
+        CallAi first = serviceManager.getAvailableService();
+        if (first == null) {
+            throw new IllegalStateException("No healthy AI provider available");
+        }
 
+        long start = System.currentTimeMillis();
         try {
-            // 获取可用的服务
-            service = serviceManager.getAvailableService();
-            log.info("使用 {} 服务", service.getModelName());
-
-            // 调用
-            long startTime = System.currentTimeMillis();
-            String result = service.callAi(prompt);
-            long cost = System.currentTimeMillis() - startTime;
-
-            // 记录成功
-            serviceManager.recordSuccess(service);
-            log.info("{} 服务调用成功，耗时: {}ms", service.getModelName(), cost);
-
+            log.info("Calling AI provider {}", first.getModelName());
+            String result = first.callAi(prompt);
+            serviceManager.recordSuccess(first);
+            log.info("AI provider {} succeeded in {}ms",
+                    first.getModelName(), elapsed(start));
             return result;
-
-        } catch (Exception e) {
-            log.error("AI服务调用失败: {}", e.getMessage());
-
-            if (service != null) {
-                // 记录失败
-                serviceManager.recordFailure(service);
-            }
-
-            // 尝试切换到下一个服务重试
-            return retryWithNextService(prompt, service);
+        } catch (Exception firstFailure) {
+            logFailure("AI provider " + first.getModelName(), start, firstFailure);
+            serviceManager.recordFailure(first);
+            return retry(prompt, first, firstFailure);
         }
     }
 
-    /**
-     * 切换到下一个服务重试
-     */
-    private String retryWithNextService(String prompt, CallAi failedService) {
-        // 切换服务
+    private String retry(String prompt, CallAi first, Exception firstFailure) {
         serviceManager.switchToNext();
+        CallAi next = serviceManager.getAvailableService();
+        if (next == null || next == first) {
+            throw combinedFailure(first, firstFailure, null, null);
+        }
 
+        long start = System.currentTimeMillis();
         try {
-            CallAi nextService = serviceManager.getAvailableService();
-
-            // 如果是同一个服务，说明没有其他可用服务
-            if (nextService == failedService) {
-                log.error("没有其他可用服务");
-                throw new RuntimeException("所有AI服务都不可用");
-            }
-
-            log.info("切换到 {} 服务重试", nextService.getModelName());
-            String result = nextService.callAi(prompt);
-            serviceManager.recordSuccess(nextService);
+            log.info("Retrying AI with provider {}", next.getModelName());
+            String result = next.callAi(prompt);
+            serviceManager.recordSuccess(next);
+            log.info("AI provider {} retry succeeded in {}ms",
+                    next.getModelName(), elapsed(start));
             return result;
-
-        } catch (Exception e) {
-            log.error("重试也失败: {}", e.getMessage());
-            throw new RuntimeException("AI服务调用失败: " + e.getMessage());
+        } catch (Exception retryFailure) {
+            logFailure("AI provider " + next.getModelName() + " retry", start, retryFailure);
+            serviceManager.recordFailure(next);
+            throw combinedFailure(first, firstFailure, next, retryFailure);
         }
     }
 
+    public void streamAi(String prompt, Consumer<String> onChunk) {
+        CallAi first = serviceManager.getAvailableService();
+        if (first == null) {
+            throw new IllegalStateException("No healthy AI provider available");
+        }
+
+        long start = System.currentTimeMillis();
+        AtomicBoolean emitted = new AtomicBoolean(false);
+        try {
+            log.info("Streaming AI with provider {}", first.getModelName());
+            first.streamAi(prompt, chunk -> {
+                emitted.set(true);
+                onChunk.accept(chunk);
+            });
+            serviceManager.recordSuccess(first);
+            log.info("Streaming AI provider {} succeeded in {}ms",
+                    first.getModelName(), elapsed(start));
+        } catch (Exception firstFailure) {
+            logFailure("Streaming AI provider " + first.getModelName(), start, firstFailure);
+            serviceManager.recordFailure(first);
+
+            // Once a provider has emitted text, do not append another model's
+            // answer to the already visible partial response.
+            if (emitted.get()) {
+                throw combinedFailure(first, firstFailure, null, null);
+            }
+
+            serviceManager.switchToNext();
+            CallAi next = serviceManager.getAvailableService();
+            if (next == null || next == first) {
+                throw combinedFailure(first, firstFailure, null, null);
+            }
+
+            long retryStart = System.currentTimeMillis();
+            try {
+                log.info("Retrying streaming AI with provider {}", next.getModelName());
+                next.streamAi(prompt, onChunk);
+                serviceManager.recordSuccess(next);
+                log.info("Streaming AI provider {} retry succeeded in {}ms",
+                        next.getModelName(), elapsed(retryStart));
+            } catch (Exception retryFailure) {
+                logFailure("Streaming AI provider " + next.getModelName() + " retry",
+                        retryStart, retryFailure);
+                serviceManager.recordFailure(next);
+                throw combinedFailure(first, firstFailure, next, retryFailure);
+            }
+        }
+    }
+
+    private void logFailure(String provider, long start, Throwable failure) {
+        log.error("{} failed after {}ms, timeout={}, rootCause={}",
+                provider, elapsed(start), isTimeout(failure), rootCause(failure), failure);
+    }
+
+    private long elapsed(long start) {
+        return System.currentTimeMillis() - start;
+    }
+
+    private boolean isTimeout(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            String className = current.getClass().getName().toLowerCase();
+            if (className.contains("timeout")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String rootCause(Throwable failure) {
+        Throwable current = failure;
+        while (current != null && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current == null
+                ? "unknown"
+                : current.getClass().getSimpleName() + ": " + current.getMessage();
+    }
+
+    private RuntimeException combinedFailure(
+            CallAi first,
+            Exception firstFailure,
+            CallAi second,
+            Exception secondFailure
+    ) {
+        String message = "AI providers failed: first=" + first.getModelName()
+                + ", firstCause=" + rootCause(firstFailure);
+        if (second != null && secondFailure != null) {
+            message += ", retry=" + second.getModelName()
+                    + ", retryCause=" + rootCause(secondFailure);
+        }
+        RuntimeException result = new RuntimeException(message,
+                secondFailure == null ? firstFailure : secondFailure);
+        if (secondFailure != null) {
+            result.addSuppressed(firstFailure);
+        }
+        return result;
+    }
 }

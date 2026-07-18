@@ -12,6 +12,8 @@ public  class MqContexts {
     public static final String Ai_EXCHANGE = "ai.exchange";
     public static final String Ai_ROUTING_KEY = "ai.routing";
     public static final String Ai_TESTCASE_ROUTING_KEY = "ai.testcase.routing";
+    //ai建议队列
+    public static final String AI_WA_ADVICE_ROUTING_KEY = "ai.wa-advice.routing";
     //题目队列
     public static final String Question_QUEUE_NAME = "question.queue";
     public static final String Question_EXCHANGE = "question.exchange";
@@ -37,5 +39,6 @@ public  class MqContexts {
     public static final String NOTIFICATION_EXCHANGE = "notification.exchange";
     public static final String NOTIFICATION_LIKE_ROUTING_KEY = "notification.like.routing";
     public static final String NOTIFICATION_REVIEW_ROUTING_KEY = "notification.review.routing";
+    public static final String NOTIFICATION_AI_ADVICE_ROUTING_KEY = "notification.ai.advice.routing";
 
 }

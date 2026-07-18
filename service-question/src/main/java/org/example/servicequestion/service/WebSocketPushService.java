@@ -1,7 +1,7 @@
 package org.example.servicequestion.service;
 
 
-import org.example.serviceapi.dto.JudgeResultDto;
+import org.example.serviceapi.dto.judge.JudgeResultDto;
 import org.example.servicecommon.RedisDto.JudgeReturnRecordDto;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;

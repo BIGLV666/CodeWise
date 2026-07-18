@@ -2,9 +2,9 @@ package org.example.servicequestion.Task;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.NonNull;
-import org.example.serviceapi.dto.JudgeMqDto;
-import org.example.serviceapi.dto.JudgeResultDto;
-import org.example.serviceapi.dto.TestMessage;
+import org.example.serviceapi.dto.judge.JudgeMqDto;
+import org.example.serviceapi.dto.judge.JudgeResultDto;
+import org.example.serviceapi.dto.question.TestMessage;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.entry.TestCase;

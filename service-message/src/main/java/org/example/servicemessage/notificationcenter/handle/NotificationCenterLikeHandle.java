@@ -4,9 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceapi.dto.UserDto;
+import org.example.serviceapi.dto.notification.NotificationLikeDto;
+import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.enums.WebSocketQueueName;
-import org.example.serviceapi.mqMessages.NotificationDto;
+import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicemessage.mq.MessageHandler;
@@ -66,7 +67,7 @@ public class NotificationCenterLikeHandle implements MessageHandler {
         }
 
         try {
-            UserDto actor = objectMapper.readValue(notificationDto.getExtraData(), UserDto.class);
+            NotificationLikeDto actor = objectMapper.readValue(notificationDto.getExtraData(), NotificationLikeDto.class);
             String actorName = actor.getNickName() == null ? "用户" : actor.getNickName();
             String businessName = Type.valueOf(notificationDto.getBusinessType().name()).getName();
 
@@ -76,6 +77,9 @@ public class NotificationCenterLikeHandle implements MessageHandler {
             notificationCenterMapper.insert(notification);
 
             markSuccess(notificationDto.getMessageId(), idempotentKey);
+            // 点赞通知当前只写入站内收件箱，实时 WebSocket 推送暂不启用。
+            // 前端通过通知中心接口读取 extraData 后，结合 businessType/businessId
+            // 与 rootType/rootId/rootCommentId/questionId 完成页面跳转。
 //            try {
 //                webSocketPushService.pushToUserQueue(
 //                        notification.getUserId(), WebSocketQueueName.INBOX_LIKE.name(), notification

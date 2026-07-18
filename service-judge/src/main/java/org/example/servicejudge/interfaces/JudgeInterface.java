@@ -1,6 +1,6 @@
 package org.example.servicejudge.interfaces;
 
-import org.example.serviceapi.dto.JudgeResultDto;
+import org.example.serviceapi.dto.judge.JudgeResultDto;
 import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.TestCase;

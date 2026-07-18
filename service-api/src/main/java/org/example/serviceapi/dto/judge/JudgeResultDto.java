@@ -1,4 +1,4 @@
-package org.example.serviceapi.dto;
+package org.example.serviceapi.dto.judge;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
