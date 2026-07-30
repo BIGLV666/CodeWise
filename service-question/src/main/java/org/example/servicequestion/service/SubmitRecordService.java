@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.CursorPageResult;
-import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 @Service
@@ -29,11 +29,39 @@ public class SubmitRecordService {
     }
 
     public SubmitRecord getSubmitRecordById(Long submitRecordId) {
-        SubmitRecord submitRecord = submitRecordMapper.selectById(submitRecordId);
+        if (submitRecordId == null) {
+            throw new IllegalArgumentException("提交记录 ID 不能为空");
+        }
+        SubmitRecord submitRecord = submitRecordMapper.selectOne(
+                new LambdaQueryWrapper<SubmitRecord>()
+                        .eq(SubmitRecord::getSubmitRecordId, submitRecordId)
+                        .eq(SubmitRecord::getUserId, UserContext.getUserId())
+        );
         if (submitRecord == null) {
             throw new RuntimeException("提交记录不存在");
         }
         return submitRecord;
+    }
+
+    public List<SubmitRecord> getSubmitRecordsByIds(List<Long> submitRecordIds) {
+        if (submitRecordIds == null || submitRecordIds.isEmpty()) {
+            throw new IllegalArgumentException("提交记录 ID 列表不能为空");
+        }
+
+        List<Long> distinctIds = new ArrayList<>(new LinkedHashSet<>(submitRecordIds));
+        if (distinctIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new IllegalArgumentException("提交记录 ID 必须为正整数");
+        }
+        if (distinctIds.size() > 10) {
+            throw new IllegalArgumentException("一次最多查询 10 条提交记录");
+        }
+
+        return submitRecordMapper.selectList(
+                new LambdaQueryWrapper<SubmitRecord>()
+                        .in(SubmitRecord::getSubmitRecordId, distinctIds)
+                        .eq(SubmitRecord::getUserId, UserContext.getUserId())
+                        .orderByDesc(SubmitRecord::getSubmitTime)
+        );
     }
 
     @Transactional
@@ -67,10 +95,11 @@ public class SubmitRecordService {
 
     public CursorPageResult<SubmitRecord> cursorSubmitRecord(Long lastId, Integer pageSize) {
         LambdaQueryWrapper<SubmitRecord> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SubmitRecord::getUserId, UserContext.getUserId());
 
-        // 游标分页：如果传入了 lastId，则查询大于 lastId 的记录（升序）
+        // 按 ID 倒序分页，下一页继续查询小于上一页末尾 ID 的记录。
         if (lastId != null) {
-            wrapper.gt(SubmitRecord::getSubmitRecordId, lastId);  // 改为 gt（大于），从前往后
+            wrapper.lt(SubmitRecord::getSubmitRecordId, lastId);
         }
 
 //        // 难度筛选
@@ -94,7 +123,7 @@ public class SubmitRecordService {
                 records = list.subList(0, pageSize);
                 // 获取最后一条记录的 ID 作为下一页的游标
                 SubmitRecord lastRecord = records.getLast();
-                nextCursor = lastRecord.getQuestionId();
+                nextCursor = lastRecord.getSubmitRecordId();
                 hasNext = true;
             } else {
                 records = list;

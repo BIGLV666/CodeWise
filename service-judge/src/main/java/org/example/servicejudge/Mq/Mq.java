@@ -22,7 +22,7 @@ public class Mq {
 
 
     private final List<MessageHandler> handlers;
-    private Map<String, MessageHandler> handlerMap = new HashMap<>();
+    private final Map<String, MessageHandler> handlerMap = new HashMap<>();
     // Spring 自动注入所有 MessageHandler 的实现类
     public Mq(List<MessageHandler> handlers) {
         this.handlers = handlers;

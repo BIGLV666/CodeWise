@@ -34,3 +34,8 @@ build/
 
 ### Runtime uploads ###
 service-user/static/uploads/**
+service-question/src/main/resources/static/uploads/**
+
+### Runtime artifacts ###
+/data/
+hs_err_pid*.log

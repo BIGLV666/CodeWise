@@ -10,6 +10,7 @@ import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.service.WebSocketPushService;
+import org.example.servicequestion.service.FunctionTestCaseGenerationService;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,8 @@ public class DebugHandle implements MessageHandler {
     private RedisTemplate<String, Object> redisTemplate;
     @Autowired
     private WebSocketPushService webSocketPushService;
+    @Autowired
+    private FunctionTestCaseGenerationService functionTestCaseGenerationService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     @Override
     public String getRoutingKey() {
@@ -53,6 +56,19 @@ public class DebugHandle implements MessageHandler {
             List<JudgeReturnRecordDto> ress= (List<JudgeReturnRecordDto>) redisTemplate.opsForHash().get(RedisContext.JUDGE_RESULT_KEY,uuid);
             if(ress==null||ress.isEmpty()){
                 throw new RuntimeException("判题结果为空");
+            }
+            if (functionTestCaseGenerationService.isGenerationTask(uuid)) {
+                try {
+                    functionTestCaseGenerationService.complete(uuid, ress);
+                } catch (Exception exception) {
+                    functionTestCaseGenerationService.fail(uuid, exception.getMessage());
+                    log.error("随机测试生成失败, taskId={}", uuid, exception);
+                }
+                redisTemplate.opsForValue().set(RedisContext.QUESTION_SUCCESS_KEY + uuid, "success", 5, TimeUnit.MINUTES);
+                redisTemplate.opsForHash().delete(RedisContext.JUDGE_RESULT_KEY,uuid);
+                redisTemplate.opsForHash().delete(RedisContext.JUDGE_DEBUG_KEY,uuid);
+                channel.basicAck(taskId,false);
+                return;
             }
             WebsocketSendDto websocketSendDto = new WebsocketSendDto();
             websocketSendDto.setQueueName(WebsocketContexts.DEBUG_JUDGE_RESULT);

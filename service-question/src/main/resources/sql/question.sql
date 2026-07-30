@@ -15,6 +15,7 @@ CREATE TABLE `question` (
     -- ========== 难度与标签 ==========
                             `difficulty` INTEGER DEFAULT 1 COMMENT '难度: 简单/中等/困难',
                             `tags` VARCHAR(255) DEFAULT NULL COMMENT '标签（逗号分隔）',
+                            `question_type` VARCHAR(20) default 'ACM' not null  comment '题目模式',
 
     -- ========== 时间/内存限制 ==========
                             `time_limit` INT DEFAULT 1000 COMMENT '时间限制(ms)',

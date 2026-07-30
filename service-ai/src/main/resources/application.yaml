@@ -13,3 +13,5 @@ spring:
 
 server:
   port: 8085
+codewise:
+  internal-token: ${CODEWISE_INTERNAL_TOKEN}

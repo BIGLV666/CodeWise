@@ -10,9 +10,12 @@ import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.fps.OJImportUtil;
 import org.example.servicequestion.service.QuestionService;
 
+import org.example.servicequestion.vo.QuestionVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/question")
@@ -39,8 +42,8 @@ public class QuestionController {
     }
 
     @GetMapping("/getquestionbyid")
-    public Result<Question> getQuestionById(@RequestParam Long questionId)  {
-        Question question = questionService.getQuestionById(questionId);
+    public Result<QuestionVo> getQuestionById(@RequestParam Long questionId)  {
+        QuestionVo question = questionService.getQuestionById(questionId);
 
         return Result.success(question);
     }
@@ -61,14 +64,26 @@ public class QuestionController {
     public Result<CursorPageResult<ReturnQuestionDto>> cursorQuestions(
             @RequestParam(required = false) Long lastId,
             @RequestParam Integer pageSize,
-            @RequestParam(required = false) Integer difficulty,
+            @RequestParam(required = false) String difficulty,
             @RequestParam(required = false) Integer status,
-            @RequestParam(required = false) String title) {
-        CursorPageResult<ReturnQuestionDto> result = questionService.cursorQuestions(lastId, pageSize, difficulty, status, title);
+            @RequestParam(required = false) String title,
+            @RequestParam(required=false)String type
+    ) {
+        CursorPageResult<ReturnQuestionDto> result = questionService.cursorQuestions(lastId, pageSize, difficulty, status, title, type);
         return Result.success(result);
     }
     @GetMapping("/total")
     private Result<Long>getTotal() throws InterruptedException {
         return Result.success(questionService.getTotalQuestionCount());
+    }
+
+    /**
+     * 标签题目模糊查询题目
+     * @param likeKey
+     * @return
+     */
+    @GetMapping("/likeserach")
+    private Result<List<QuestionVo>>serach(@RequestParam String likeKey){
+        return Result.success(questionService.serach(likeKey));
     }
 }

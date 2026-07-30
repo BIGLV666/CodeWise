@@ -17,6 +17,10 @@ public class AIService {
     private AIServiceManager serviceManager;
 
     public String callAi(String prompt) {
+        return callAi(prompt, 1024);
+    }
+
+    public String callAi(String prompt, int maxTokens) {
         CallAi first = serviceManager.getAvailableService();
         if (first == null) {
             throw new IllegalStateException("No healthy AI provider available");
@@ -25,7 +29,7 @@ public class AIService {
         long start = System.currentTimeMillis();
         try {
             log.info("Calling AI provider {}", first.getModelName());
-            String result = first.callAi(prompt);
+            String result = first.callAi(prompt, maxTokens);
             serviceManager.recordSuccess(first);
             log.info("AI provider {} succeeded in {}ms",
                     first.getModelName(), elapsed(start));
@@ -33,11 +37,11 @@ public class AIService {
         } catch (Exception firstFailure) {
             logFailure("AI provider " + first.getModelName(), start, firstFailure);
             serviceManager.recordFailure(first);
-            return retry(prompt, first, firstFailure);
+            return retry(prompt, maxTokens, first, firstFailure);
         }
     }
 
-    private String retry(String prompt, CallAi first, Exception firstFailure) {
+    private String retry(String prompt, int maxTokens, CallAi first, Exception firstFailure) {
         serviceManager.switchToNext();
         CallAi next = serviceManager.getAvailableService();
         if (next == null || next == first) {
@@ -47,7 +51,7 @@ public class AIService {
         long start = System.currentTimeMillis();
         try {
             log.info("Retrying AI with provider {}", next.getModelName());
-            String result = next.callAi(prompt);
+            String result = next.callAi(prompt, maxTokens);
             serviceManager.recordSuccess(next);
             log.info("AI provider {} retry succeeded in {}ms",
                     next.getModelName(), elapsed(start));

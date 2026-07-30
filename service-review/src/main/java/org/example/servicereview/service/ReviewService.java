@@ -107,6 +107,7 @@ public class ReviewService {
         if (reviewConfigDto == null) {
             throw new IllegalArgumentException("复习配置不能为空");
         }
+        validateReviewConfig(reviewConfigDto);
 
         ReviewConfig reviewConfig = reviewConfigMapper.selectOne(new QueryWrapper<ReviewConfig>().eq("user_id",UserContext.getUserId()));
         if(reviewConfig==null){
@@ -121,14 +122,12 @@ public class ReviewService {
                     .createTime(LocalDateTime.now())
                     .updateTime(LocalDateTime.now())
                     .build();
+            validateReviewConfigValues(reviewConfig);
             reviewConfigMapper.insert(reviewConfig);
             return reviewConfig;
         }
 
         if (reviewConfigDto.getReviewCount() != null) {
-            if(reviewConfigDto.getReviewCount()<0){
-                reviewConfigDto.setReviewCount(0);
-            }
             reviewConfig.setReviewCount(reviewConfigDto.getReviewCount());
         }
         if (reviewConfigDto.getEnableAutoReview() != null) {
@@ -148,9 +147,44 @@ public class ReviewService {
             reviewConfig.setMasteredIntervalDays(reviewConfigDto.getMasteredIntervalDays());
         }
 
+        validateReviewConfigValues(reviewConfig);
         reviewConfig.setUpdateTime(LocalDateTime.now());
         reviewConfigMapper.updateById(reviewConfig);
         return reviewConfig;
+    }
+
+    private void validateReviewConfig(ReviewConfigDto config) {
+        if (config.getReviewCount() != null && config.getReviewCount() < 0) {
+            throw new IllegalArgumentException("每日复习数量不能小于 0");
+        }
+        if (config.getEnableAutoReview() != null
+                && config.getEnableAutoReview() != 0
+                && config.getEnableAutoReview() != 1) {
+            throw new IllegalArgumentException("是否自动复习只能是 0 或 1");
+        }
+        if (config.getCountCompileError() != null
+                && config.getCountCompileError() != 0
+                && config.getCountCompileError() != 1) {
+            throw new IllegalArgumentException("是否统计编译错误只能是 0 或 1");
+        }
+        if (config.getMinEasinessFactor() != null
+                && config.getMinEasinessFactor().compareTo(new BigDecimal("1.30")) < 0) {
+            throw new IllegalArgumentException("最低难度因子不能小于 1.3");
+        }
+        if (config.getInitialEasinessFactor() != null
+                && config.getMinEasinessFactor() != null
+                && config.getInitialEasinessFactor().compareTo(config.getMinEasinessFactor()) < 0) {
+            throw new IllegalArgumentException("初始难度因子不能小于最低难度因子");
+        }
+        if (config.getMasteredIntervalDays() != null && config.getMasteredIntervalDays() <= 0) {
+            throw new IllegalArgumentException("掌握间隔天数必须大于 0");
+        }
+    }
+
+    private void validateReviewConfigValues(ReviewConfig config) {
+        if (config.getInitialEasinessFactor().compareTo(config.getMinEasinessFactor()) < 0) {
+            throw new IllegalArgumentException("初始难度因子不能小于最低难度因子");
+        }
     }
 
 
@@ -817,6 +851,51 @@ public class ReviewService {
         }
         return review;
 
+    }
+
+    /**
+     * 将某题移出复习计划
+     * @param reviewId Long
+     *
+     */
+
+    public void deleteReview(Long reviewId) {
+        if(reviewId==null){
+            throw new IllegalArgumentException("复习为空");
+        }
+        int r=reviewMapper.delete(new QueryWrapper<Review>().eq("review_id",reviewId).eq("user_id",UserContext.getUserId()));
+        if(r==0){
+            throw new IllegalArgumentException("删除失败");
+        }
+
+    }
+
+
+
+    public ReviewRecordVo getReviewRecordByDay(LocalDate day) {
+        if(day==null){
+            throw new IllegalArgumentException("日期为空");
+        }
+
+        ReviewRecord record=reviewRecordMapper.selectOne(new QueryWrapper<ReviewRecord>().eq("review_date",day).eq("user_id",UserContext.getUserId()));
+        if(record==null){
+            throw new IllegalArgumentException("未找到当天复习计划");
+        }
+        ReviewRecordVo reviewRecordVo=new ReviewRecordVo(record);
+        List<Long>allQuestionIds=new ArrayList<>();
+        allQuestionIds.addAll(record.getPendingReviewQuestionIds());
+        allQuestionIds.addAll(record.getCompletedReviewQuestionIds());
+        reviewRecordVo.setAllQuestionIds(allQuestionIds);
+        Result<List<QuestionDto>>result= questionFeignClient.getFavorites(allQuestionIds);
+        if(!result.getCode().equals(200)){
+            throw new IllegalArgumentException("获取题目信息失败");
+        }
+        Map<Long,String>map=new HashMap<>();
+        for(QuestionDto questionDto:result.getData()){
+            map.put(questionDto.getQuestionId(),questionDto.getTitle());
+        }
+        reviewRecordVo.setAllQuestionTitles(map);
+        return reviewRecordVo;
     }
 
 

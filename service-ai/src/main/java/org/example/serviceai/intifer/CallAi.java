@@ -12,6 +12,10 @@ public interface CallAi {
      * 调用AI服务
      */
     String callAi(String prompt);
+
+    default String callAi(String prompt, int maxTokens) {
+        return callAi(prompt);
+    }
     /**
      * 流式调用ai
      */

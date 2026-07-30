@@ -12,10 +12,14 @@ import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.dto.ReturnQuestionDto;
+import org.example.servicequestion.entry.FunctionConfig;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
+import org.example.servicequestion.enums.QuestionType;
+import org.example.servicequestion.mapper.FunctionConfigMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
+import org.example.servicequestion.vo.QuestionVo;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,6 +49,8 @@ public class QuestionService {
     private RedisTemplate<String, Object> redisTemplate;
     @Autowired
     private UserFeignClient userFeignClient;
+    @Autowired
+    private FunctionConfigMapper  functionConfigMapper;
 
 
     public Long getTotalQuestionCount() throws InterruptedException {
@@ -110,7 +116,7 @@ public class QuestionService {
        }
 
 
-    public Question getQuestionById(Long questionId) {
+    public QuestionVo getQuestionById(Long questionId) {
         Question question = questionMapper.selectById(questionId);
         if(question==null){
             throw new RuntimeException("题目不存在");
@@ -136,8 +142,14 @@ public class QuestionService {
         if(question.getStatus().equals(2)){
             throw new RuntimeException("题目审核中");
         }
-        return question;
 
+
+        if(question.getQuestionType().equals(QuestionType.FUNCTION)){
+            FunctionConfig functionConfig=functionConfigMapper.selectOne(new QueryWrapper<FunctionConfig>().eq("question_id", questionId));
+            QuestionVo questionVo=new QuestionVo(question,functionConfig);
+            return questionVo;
+        }
+        return new QuestionVo(question,null);
 
     }
 
@@ -191,7 +203,7 @@ public class QuestionService {
         }
     }
 
-    public CursorPageResult<ReturnQuestionDto> cursorQuestions(Long lastId, Integer pageSize, Integer difficulty, Integer status, String title) {
+    public CursorPageResult<ReturnQuestionDto> cursorQuestions(Long lastId, Integer pageSize, String difficulty, Integer status, String title,String type) {
         LambdaQueryWrapper<Question> wrapper = new LambdaQueryWrapper<>();
 
         // 游标分页：如果传入了 lastId，则查询大于 lastId 的记录（升序）
@@ -199,10 +211,6 @@ public class QuestionService {
             wrapper.gt(Question::getQuestionId, lastId);  // 改为 gt（大于），从前往后
         }
 
-        // 难度筛选
-        if (difficulty != null) {
-            wrapper.eq(Question::getDifficulty, difficulty);
-        }
 
         // 状态筛选
         if (status != null) {
@@ -213,10 +221,22 @@ public class QuestionService {
         if (title != null && !title.isEmpty()) {
             wrapper.like(Question::getTitle, title);
         }
+        // 类型搜索
+        if (type != null&& !type.isEmpty()) {
+            wrapper.eq(Question::getQuestionType, type);
+        }
+        if(difficulty!=null && !difficulty.isEmpty()) {
+            wrapper.and(group -> {
+                for (String value : difficulty.split(",")) {
+                    group.or().eq(Question::getDifficulty, value);
+                }
+            });
+        }
 
         // 按 questionId 升序排列（从小到大）
         wrapper.orderByAsc(Question::getQuestionId);  // 改为升序
         wrapper.last("LIMIT " + (pageSize + 1));
+
 
         List<Question> list = questionMapper.selectList(wrapper);
         List<ReturnQuestionDto> returnQuestionDtoList = new ArrayList<>();
@@ -268,5 +288,14 @@ public class QuestionService {
                 .nextCursor(nextCursor)
                 .hasNext(hasNext)
                 .build();
+    }
+    public List< QuestionVo> serach(String likeKey) {
+
+        List<QuestionVo> questionVoList = new ArrayList<>();
+        List<Question> questions = questionMapper.selectList(new QueryWrapper<Question>().like("title",likeKey).or().like("tags",likeKey).orderByAsc("question_id"));
+        for(Question question:questions){
+            questionVoList.add(new QuestionVo(question));
+        }
+        return questionVoList;
     }
 }

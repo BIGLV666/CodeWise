@@ -61,3 +61,19 @@ CREATE TABLE IF NOT EXISTS ai_conversation_memory (
         REFERENCES ai_conversation (conversation_id)
         ON DELETE CASCADE
 ) ENGINE = InnoDB;
+
+
+CREATE TABLE IF NOT EXISTS user_ai_config (
+    user_ai_config_id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    group_name VARCHAR(64) NOT NULL,
+    model_names JSON NOT NULL,
+    ai_url VARCHAR(512) NOT NULL,
+    api_key TEXT NOT NULL,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_ai_config_id),
+    UNIQUE KEY uk_user_ai_config_group (user_id, group_name),
+    KEY idx_user_ai_config_user_update (user_id, update_time)
+) ENGINE = InnoDB;

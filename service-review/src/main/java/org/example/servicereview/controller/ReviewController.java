@@ -1,5 +1,6 @@
 package org.example.servicereview.controller;
 
+import org.apache.ibatis.annotations.Delete;
 import org.example.serviceapi.dto.Result;
 import org.example.servicereview.dto.ReviewConfigDto;
 import org.example.servicereview.dto.UpdateReviewDto;
@@ -12,6 +13,7 @@ import org.example.servicereview.vo.ReviewVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -78,6 +80,14 @@ public class ReviewController {
     public Result<List<ReviewVo>> getAllReview(){
         return Result.success(reviewService.getAllReview());
     }
-
+    @DeleteMapping("/review/{reviewId}")
+    public Result<String> deleteReview(@PathVariable Long reviewId){
+        reviewService.deleteReview(reviewId);
+        return Result.success("success");
+    }
+    @GetMapping("/reviewrecord")
+    public Result<ReviewRecordVo>getReviewRecordByDay(@RequestParam LocalDate day){
+        return Result.success(reviewService.getReviewRecordByDay(day));
+    }
 
 }

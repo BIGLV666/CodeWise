@@ -3,6 +3,7 @@ package org.example.serviceuser.controller;
 import org.example.serviceapi.dto.ai.AiAdviceWADto;
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.until.UserContext;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.service.UserService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -53,8 +54,8 @@ public class UserController {
         return Result.success("success");
     }
     @GetMapping("/getuserbyid")
-    public Result<UserDto> getUserById(@RequestParam Long id){
-        return Result.success(userService.getUserById(id));
+    public Result<UserDto> getUserById(){
+        return Result.success(userService.getUserById(UserContext.getUserId()));
     }
 
 }

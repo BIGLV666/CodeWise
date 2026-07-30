@@ -46,6 +46,12 @@ spring:
           predicates:
             - Path=/api/question/**
 
+        # 判题容器管理
+        - id: service-judge
+          uri: lb://service-judge
+          predicates:
+            - Path=/api/judge/**
+
         # 4. AI 服务
         - id: service-ai
           uri: lb://service-ai

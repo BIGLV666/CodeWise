@@ -39,6 +39,11 @@ public class JudgeController {
         return Result.success(submitRecord);
     }
 
+    @PostMapping("/getsubmitrecordsbyids")
+    public Result<List<SubmitRecord>> getSubmitRecordsByIds(@RequestBody List<Long> submitRecordIds) {
+        return Result.success(submitRecordService.getSubmitRecordsByIds(submitRecordIds));
+    }
+
     @GetMapping("/getsubmitrecordsbyquestionid")
     public Result<List<SubmitRecord>> getSubmitRecordsByQuestionId(@RequestParam Long questionId) {
         List<SubmitRecord> records = submitRecordService.getSubmitRecordsByQuestionId(questionId);

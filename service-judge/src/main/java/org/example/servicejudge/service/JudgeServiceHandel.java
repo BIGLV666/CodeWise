@@ -6,23 +6,23 @@ import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.ai.AiAdviceWADto;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicejudge.Dto.TestDto;
 import org.example.servicejudge.Mq.MessageHandler;
-import org.example.servicejudge.entry.JudgeRecord;
-import org.example.servicejudge.entry.Question;
-import org.example.servicejudge.entry.SubmitRecord;
-import org.example.servicejudge.entry.TestCase;
+import org.example.servicejudge.Util.CodeBuild;
+import org.example.servicejudge.entry.*;
+import org.example.servicejudge.enums.QuestionType;
+import org.example.servicejudge.functionsService.Java;
 import org.example.servicejudge.interfaces.JudgeInterface;
-import org.example.servicejudge.mapper.JudgeRecordMapper;
-import org.example.servicejudge.mapper.QuestionMapper;
-import org.example.servicejudge.mapper.SubmitRecordMapper;
-import org.example.servicejudge.mapper.TestCaseMapper;
+import org.example.servicejudge.mapper.*;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Service
@@ -42,6 +42,10 @@ public class JudgeServiceHandel implements MessageHandler {
     private JudgeRecordMapper judgeRecordMapper;
     @Autowired
     private QuestionMapper questionMapper;
+    @Autowired
+    private FunctionConfigMapper functionConfigMapper;
+    @Autowired
+    private FunctionTestCaseMapper functionTestCaseMapper;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -52,11 +56,8 @@ public class JudgeServiceHandel implements MessageHandler {
 
     @Override
     public void handle(String message, Channel channel, Message amqpMessage) {
-        long start = System.currentTimeMillis();
         long deliveryTag = amqpMessage.getMessageProperties().getDeliveryTag();
-        long testSelect = 0;
-        long forstart=0;
-        long forstartend=0;
+
         try {
             Long submissionId = objectMapper.readValue(message, Long.class);
             SubmitRecord submitRecord=submitRecordMapper.selectById(submissionId);
@@ -70,31 +71,16 @@ public class JudgeServiceHandel implements MessageHandler {
                 channel.basicAck(deliveryTag,false);
                 return;
             }
-            List<TestCase>testMessages=testCaseMapper.selectList(new QueryWrapper<TestCase>().eq("question_id",submitRecord.getQuestionId()));
-            testSelect=System.currentTimeMillis();
-            log.info("收到判题请求, submissionId: {}, 测试用例数: {}", submissionId,
-                    testMessages != null ? testMessages.size() : 0);
-
-            if (testMessages == null || testMessages.isEmpty()) {
-                log.info("testMessages is empty");
-                channel.basicAck(deliveryTag, false);
-                return;
-            }
-
-            int totalCount = testMessages.size();
-            forstart=System.currentTimeMillis();
-            JudgeRecord finalResult = judge.batchExecuteCode(submitRecord.getSubmitContent(), submitRecord.getLanguage(), testMessages);
-            forstartend=System.currentTimeMillis();
-            int passedCount = "AC".equals(finalResult.getSubmitStatus()) ? totalCount : Math.max(finalResult.getFailIndex() - 1, 0);
-            finalResult.setSubmitRecordId(submissionId);
-            finalResult.setCode(submitRecord.getSubmitContent());
-            finalResult.setCreateTime(LocalDateTime.now());
-            finalResult.setTestTotal(totalCount);
-             judgeRecordMapper.insert(finalResult);
-
+            JudgeRecord finalResult=null;
+            Question question=questionMapper.selectById(submitRecord.getQuestionId());
+           if(question.getQuestionType().equals(QuestionType.ACM)){
+            finalResult=ACM(submitRecord);
+           }
+           if(question.getQuestionType().equals(QuestionType.FUNCTION)){
+            finalResult=FUNCTION(submitRecord);
+           }
 
             //构建复习队列
-
 
             // 发送结果
 
@@ -113,7 +99,6 @@ public class JudgeServiceHandel implements MessageHandler {
                 aiAdviceWADto.setUserOutput(finalResult.getUserOutput());
                 aiAdviceWADto.setOutput(finalResult.getExpectedOutput());
                 aiAdviceWADto.setSubmitId(submissionId);
-                Question question=questionMapper.selectById(submitRecord.getQuestionId());
                 aiAdviceWADto.setQuestionContent(question.getDescription());
                 aiAdviceWADto.setLanguage(submitRecord.getLanguage());
                 aiAdviceWADto.setLog(finalResult.getLog());
@@ -128,9 +113,6 @@ public class JudgeServiceHandel implements MessageHandler {
             }
 
 
-            log.info("判题完成, submissionId: {}, 通过: {}/{}", submissionId, passedCount, totalCount);
-            long end = System.currentTimeMillis();
-            log.info("查询结束用时{},循环用时{}，总{}", ( testSelect- start),(forstartend-forstart),(end-start));
             channel.basicAck(deliveryTag, false);
         } catch (Exception e) {
             log.error("判题处理失败", e);
@@ -140,6 +122,67 @@ public class JudgeServiceHandel implements MessageHandler {
                 log.error("NACK失败", ex);
             }
         }
+    }
+    private List<TestDto>ToTest(List<TestCase> testCases){
+        List<TestDto> testDtos = new ArrayList<>();
+        for(TestCase testCase:testCases){
+            TestDto testDto=new TestDto(testCase);
+            testDtos.add(testDto);
+        }
+        return testDtos;
+    }
+    private List<TestDto>ToTestDToFroFunction(List<FunctionTestCase> testCases){
+        List<TestDto> testDtos = new ArrayList<>();
+        for(FunctionTestCase testCase:testCases){
+            TestDto testDto=new TestDto(testCase);
+            testDtos.add(testDto);
+        }
+        return testDtos;
+    }
+    private JudgeRecord ACM(SubmitRecord submitRecord ) throws IOException {
+
+
+        List<TestCase>testMessages=testCaseMapper.selectList(new QueryWrapper<TestCase>().eq("question_id",submitRecord.getQuestionId()));
+        int totalCount = testMessages.size();
+
+        JudgeRecord finalResult = judge.batchExecuteCode(submitRecord.getSubmitContent(), submitRecord.getLanguage(), ToTest(testMessages));
+
+        finalResult.setSubmitRecordId(submitRecord.getSubmitRecordId());
+        finalResult.setCode(submitRecord.getSubmitContent());
+        finalResult.setCreateTime(LocalDateTime.now());
+        finalResult.setTestTotal(totalCount);
+        judgeRecordMapper.insert(finalResult);
+        return  finalResult;
+    }
+
+
+    private JudgeRecord FUNCTION(SubmitRecord submitRecord ) throws IOException {
+        List<FunctionTestCase>testCases=functionTestCaseMapper.selectList(new QueryWrapper<FunctionTestCase>().eq("question_id", submitRecord.getQuestionId()));
+        int totalCount = testCases.size();
+
+        FunctionConfig functionConfig=functionConfigMapper.selectOne(new QueryWrapper<FunctionConfig>().eq("question_id", submitRecord.getQuestionId()));
+        if(functionConfig==null){
+            throw new InterruptedIOException("函数模式题目配置不存在");
+        }
+        if (!"java".equalsIgnoreCase(submitRecord.getLanguage())) {
+            throw new InterruptedIOException("函数模式暂时只支持 Java");
+        }
+
+        String main= Java.ToMain(functionConfig.getParameterConfig(),functionConfig.getMethodName());
+
+        String code= CodeBuild.build(submitRecord.getSubmitContent(), functionConfig.getParameterConfig());
+        long startTime = System.currentTimeMillis();
+        JudgeRecord  finalResult=judge.batchExecuteCode(code,main,submitRecord.getLanguage(),ToTestDToFroFunction(testCases));
+        long endTime = System.currentTimeMillis();
+        System.out.println(endTime-startTime+"===============================");
+        finalResult.setSubmitRecordId(submitRecord.getSubmitRecordId());
+        finalResult.setCode(submitRecord.getSubmitContent());
+        finalResult.setCreateTime(LocalDateTime.now());
+        finalResult.setTestTotal(totalCount);
+        judgeRecordMapper.insert(finalResult);
+        return  finalResult;
+
+
     }
 
 

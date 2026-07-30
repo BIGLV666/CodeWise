@@ -9,6 +9,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.example.servicequestion.dto.InsertQuestionDto;
+import org.example.servicequestion.enums.QuestionType;
 import org.springframework.util.DigestUtils;
 
 import java.math.BigDecimal;
@@ -34,6 +35,7 @@ public class Question {
     private String source;//题目来源
     private Integer difficulty;//1-简单 2-
     private String tags;//标签
+    private QuestionType questionType;
 
     private Integer timeLimit;
     private Integer memoryLimit;

@@ -5,6 +5,7 @@ import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.TestCase;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class BuildResult {
@@ -43,6 +44,7 @@ public class BuildResult {
         if (actual.equals(expected)) {
             return buildResult("AC", output, actual, timeUsed, memoryUsed, "执行成功", failIndex, testCaseId, stdout, input);
         }
+
 
 
         // WA 的情况，像力扣一样告诉用户输入、输出和期望

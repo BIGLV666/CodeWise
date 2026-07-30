@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.example.servicejudge.enums.QuestionType;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -32,6 +33,7 @@ public class Question {
     private String source;//题目来源
     private Integer difficulty;//1-简单 2-
     private String tags;//标签
+    private QuestionType questionType;
 
     private Integer timeLimit;
     private Integer memoryLimit;

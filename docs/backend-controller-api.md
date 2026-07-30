@@ -475,6 +475,79 @@ Authorization: Bearer <token>
 
 返回：普通字符串。
 
+## service-question 函数题
+
+### 解析 LeetCode 题目
+
+```http
+GET /api/question/function/leetcode?title=string-to-integer-atoi
+Authorization: Bearer <token>
+```
+
+`title` 使用 LeetCode URL 中的题目标识，例如：
+
+```text
+https://leetcode.cn/problems/string-to-integer-atoi/
+                                    ^^^^^^^^^^^^^^^^^^^^^^
+```
+
+返回：`Result<FunctionParseVo>`，包含题目文本、难度、标签、Java 类名、方法名、参数配置、返回类型和公开样例。Java 方法修饰符不会进入返回类型；示例输出兼容 `.example-block` 和旧版 `<pre>` 题面格式。
+
+### 创建函数题
+
+```http
+POST /api/question/function
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+请求体：`FunctionDto`
+
+```json
+{
+  "title": "回文数",
+  "description": "给定一个整数，判断它是否为回文数。",
+  "difficulty": 1,
+  "timeLimit": 2000,
+  "memoryLimit": 256,
+  "className": "Solution",
+  "methodName": "isPalindrome",
+  "parameterConfig": "[{\"type\":\"int\",\"name\":\"x\"}]",
+  "outputType": "boolean",
+  "samples": [
+    {"input": "121", "output": "true"}
+  ]
+}
+```
+
+返回：`Result<Long>`，`data` 为新题目 ID。
+
+### 批量补充函数测试用例
+
+```http
+POST /api/question/function/test-cases/batch?questionId=1
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+请求体：
+
+```json
+[
+  {"input": "121", "output": "true"},
+  {"input": "-121", "output": "false"}
+]
+```
+
+说明：
+
+- 新增记录是隐藏测试用例，默认 `isSample=0`、`isHidden=1`。
+- 后端根据函数参数和返回类型标准化输入输出，并自动接续执行顺序。
+- 同一道题的输入输出哈希唯一，重复提交返回“测试用例已存在”。
+- 接口不会修改题目的公开样例字段。
+
+返回：`Result<Integer>`，`data` 为本次新增数量。
+
 ## service-question 判题与提交记录
 
 ### 提交判题
@@ -539,6 +612,9 @@ Content-Type: application/json
 
 - `tests` 为临时调试用例，不一定写入正式测试点。
 - 当前 `userId` 字段存在于 DTO 中，但正常应以登录态为准。
+- 后端根据题目类型自动选择 ACM 或函数调试流程。
+- 函数模式当前只支持 Java，会读取函数配置并生成 `Main.java`。
+- 函数模式会将本次调试用例一次编译、逐个运行，避免每个用例重复编译。
 
 返回：`Result<String>`。
 
@@ -881,6 +957,63 @@ SSE 事件：
 | `error` | 错误信息 | 调用失败或连接异常 |
 
 该接口为 `POST + SSE`，浏览器原生 `EventSource` 不支持 POST，前端应使用 `fetch()` 读取 `response.body`。
+
+## service-judge 容器池管理
+
+基础路径：`/api/judge/containers`。接口通过 Gateway 转发，仅角色为管理员的登录用户可以访问。
+
+### 查询容器池状态
+
+```http
+GET /api/judge/containers
+Authorization: Bearer <admin-token>
+```
+
+返回每种语言的当前实例快照：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "language": "java",
+      "total": 2,
+      "idle": 1,
+      "busy": 1,
+      "waiting": 0,
+      "configuredCapacity": 2,
+      "idleContainerIds": ["idle-container-id"],
+      "busyContainerIds": ["busy-container-id"]
+    }
+  ]
+}
+```
+
+状态查询只读取队列快照，不会租借或归还容器。高并发下各字段可能存在极短暂的采样时间差。
+
+### 扩容
+
+```http
+POST /api/judge/containers/{language}
+Authorization: Bearer <admin-token>
+```
+
+`language` 支持 `java`、`python`、`cpp`、`c`，大小写不敏感。每次请求创建一个容器，启动成功后加入空闲池；创建失败不会写入容器元数据。
+
+### 删除空闲容器
+
+```http
+DELETE /api/judge/containers/{language}/{containerId}
+Authorization: Bearer <admin-token>
+```
+
+限制：
+
+- 容器必须属于指定语言。
+- 容器必须处于空闲队列中，正在执行判题时返回错误。
+- 每种语言至少保留一个容器。
+- Docker 删除失败时将容器重新放回空闲队列。
 
 ## 内部服务接口
 

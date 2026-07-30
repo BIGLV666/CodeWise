@@ -11,4 +11,5 @@ public class DebugDto {
     private String language;
     private Long questionId;
     private List<GetDebugTestDto>tests;
+    private Boolean includeQuestionSample;
 }

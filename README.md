@@ -1,255 +1,160 @@
 # CodeWise
 
-面向编程学习、在线判题与错题复习场景的 Spring Cloud 微服务系统。
+CodeWise 是面向在线编程、代码判题和错题复习场景的个人学习实践项目。项目由 8 个可独立运行的 Spring Boot 服务应用和 2 个公共 Maven 模块组成，使用 Nacos、Gateway、OpenFeign、RabbitMQ、Redis 与 Docker 实践服务拆分和异步业务链路。
 
-CodeWise 将题库、代码判题、提交记录、复习计划、社区题解、消息通知和 AI 辅助能力拆分为独立服务，重点实践异步判题、服务间通信、缓存一致性、游标分页、WebSocket 推送以及容器化代码执行等后端工程问题。
+当前版本具备微服务的基本运行形态，但不以生产级治理为目标，尚未完整实现熔断降级、分布式链路追踪、分布式事务、多机容灾和完整沙箱安全策略。
 
-![Java](https://img.shields.io/badge/Java-21-ED8B00)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.4-6DB33F)
-![Spring Cloud](https://img.shields.io/badge/Spring%20Cloud-2023.0.3-6DB33F)
-![MySQL](https://img.shields.io/badge/MySQL-8.x-4479A1)
-![Redis](https://img.shields.io/badge/Redis-Cache-DC382D)
-![RabbitMQ](https://img.shields.io/badge/RabbitMQ-Async-FF6600)
+## 已实现能力
 
-## 项目能力
+- 在线判题：代码提交、调试、测试点执行、结果回写与状态查询。
+- Java 函数题：LeetCode 题面解析、方法签名解析、批量调试和测试生成。
+- 复习系统：根据判题结果维护错题、每日复习和收藏夹。
+- 学习社区：帖子、题解、评论、点赞、标签和热点排行。
+- 消息通知：站内通知、邮件、RabbitMQ 消费和 WebSocket 推送。
+- AI 辅助：判题建议、题目追问、SSE 流式响应和会话记忆。
+- 判题运维：按语言维护可复用容器池，支持空闲/占用/等待状态查询及管理员动态扩缩容。
 
-- 在线判题：代码提交、调试运行、测试点执行、结果回写和状态推送。
-- 题库管理：题目、标签、难度、测试用例、提交记录及题目详情。
-- 复习系统：根据提交结果生成复习记录，维护每日复习与收藏夹。
-- 学习社区：帖子、题解、评论、回复、点赞、标签搜索和热点排行。
-- 用户中心：注册登录、JWT 鉴权、资料维护、头像上传和用户统计。
-- 消息通知：统一承载邮件、站内通知、RabbitMQ 消费和 WebSocket 实时推送。
-- AI 辅助：判题失败建议、题目内多轮追问、SSE 流式回答、会话记忆压缩与多模型降级。
-
-## 系统架构
+## 架构边界
 
 ```mermaid
 flowchart LR
-    Client["Web / API Client"] --> Gateway["service-gateway\n统一入口与 JWT 鉴权"]
+    Client["Web / API Client"] --> Gateway["service-gateway"]
     Gateway --> User["service-user"]
     Gateway --> Question["service-question"]
     Gateway --> Review["service-review"]
     Gateway --> Community["service-community"]
-    Gateway --> AI["service-ai"]
     Gateway --> Message["service-message"]
+    Gateway --> AI["service-ai"]
 
-    Question -->|"判题消息"| MQ["RabbitMQ"]
+    Question -->|"判题任务"| MQ["RabbitMQ"]
     MQ --> Judge["service-judge"]
-    Judge -->|"结果消息"| MQ
+    Judge -->|"判题结果"| MQ
     MQ --> Question
-    Community -->|"点赞通知"| MQ
-    Review -->|"复习提醒"| MQ
-    MQ --> Message
 
-    Question --> Redis["Redis / Redisson"]
-    Review --> Redis
+    Judge --> Docker["Docker Runtime"]
+    Question --> Redis["Redis"]
     Community --> Redis
-    Judge --> Docker["Docker Sandbox"]
-
-    User --> MySQL[(MySQL)]
-    Question --> MySQL
-    Review --> MySQL
-    Community --> MySQL
-    Message --> MySQL
-
-    Nacos["Nacos\n注册与配置中心"] --- Gateway
-    Nacos --- User
-    Nacos --- Question
-    Nacos --- Judge
-    Nacos --- Review
-    Nacos --- Community
+    Review --> Redis
 ```
+
+- Gateway 校验 JWT，并通过请求头向下游传递用户身份。
+- 下游拦截器解析身份并写入 `UserContext`，业务服务继续判断题目作者、记录所有者等资源权限。
+- `service-api` 维护 Feign 接口和跨服务 DTO，`service-common` 提供用户上下文、Redis、RabbitMQ 等公共配置。
+- 每个业务服务维护自己的数据访问边界，跨服务数据通过 Feign 或消息传递，不使用跨库 SQL 作为常规调用方式。
+
+## 服务模块
+
+| 模块 | 默认端口 | 职责 |
+| --- | ---: | --- |
+| `service-gateway` | 8082 | 路由、JWT 校验、身份信息传递 |
+| `service-user` | 8081 | 注册登录、用户资料和用户统计 |
+| `service-question` | 8084 | 题目、测试点、提交记录和判题入口 |
+| `service-judge` | 8086 | Docker 执行、编译运行和结果判定 |
+| `service-review` | 8097 | 复习计划、每日复习和收藏夹 |
+| `service-community` | 8087 | 帖子、题解、评论、点赞和排行 |
+| `service-message` | 8083 | 邮件、站内通知、消息消费和 WebSocket |
+| `service-ai` | 8085 | 判题建议、SSE 追问和会话记忆 |
+| `service-api` | - | Feign 接口与跨服务 DTO |
+| `service-common` | - | 用户上下文及公共 Redis、MQ 配置 |
 
 ## 技术栈
 
 | 分类 | 技术 |
 | --- | --- |
 | 基础框架 | Java 21、Spring Boot 3.2.4、Maven |
-| 微服务 | Spring Cloud、Spring Cloud Alibaba、Nacos、OpenFeign、Gateway |
+| 服务通信 | Spring Cloud Gateway、Nacos、OpenFeign |
 | 数据访问 | MySQL、MyBatis-Plus、MyBatis XML |
-| 缓存与并发 | Redis、Redisson、Lua Script、分布式锁 |
-| 异步通信 | RabbitMQ、定时任务、异步任务 |
+| 缓存与并发 | Redis、Redisson、定时任务、分布式锁 |
+| 异步通信 | RabbitMQ |
 | 实时通信 | WebSocket、SSE |
-| 判题隔离 | Docker Java API、容器资源限制 |
-| 安全 | JWT、Spring Security、网关全局过滤器 |
-| AI 接入 | LangChain4j、Ollama、OpenAI 兼容流式接口、可替换模型处理器 |
+| 判题执行 | Docker Java API、Java 17 用户代码环境 |
+| 前端 | Vue 3、TypeScript、Pinia、Element Plus、Monaco Editor |
 
-## 服务模块
+## 核心实现
 
-| 模块 | 默认端口 | 职责 |
-| --- | ---: | --- |
-| `service-gateway` | 8082 | 统一路由、JWT 校验、用户上下文透传 |
-| `service-user` | 8081 | 注册登录、用户资料、头像、用户统计 |
-| `service-question` | 8084 | 题目、测试点、提交记录、判题入口 |
-| `service-judge` | 8086 | Docker 沙箱执行、编译运行、结果判定 |
-| `service-review` | 8097 | 复习计划、每日复习、收藏夹 |
-| `service-community` | 8087 | 帖子、题解、评论、点赞、标签与热点榜 |
-| `service-message` | 8083 | 邮件、站内通知、消息消费、WebSocket 推送 |
-| `service-ai` | 8085 | 判题建议、SSE 追问、会话记忆与测试用例生成 |
-| `service-api` | - | Feign 接口及跨服务 DTO 契约 |
-| `service-common` | - | JWT、Redis、RabbitMQ、上下文等公共能力 |
+### 异步判题
 
-## 工程亮点
+`service-question` 创建提交记录并发送 RabbitMQ 任务，`service-judge` 在 Docker 中编译和运行用户代码，再通过结果消息更新提交记录。WebSocket 用于实时通知，数据库提交记录是最终可查询结果，因此用户离线或推送失败时仍可主动查询。
 
-### 异步判题链路
+### Java 函数题
 
-题目服务接收提交后通过 RabbitMQ 投递判题任务，判题服务在 Docker 容器中完成编译和运行，再通过消息回写提交状态。请求线程无需等待完整判题过程，最终结果可通过 WebSocket 推送给用户。
+函数模式读取方法名和参数配置，生成 `Main.java` 调用用户的 `Solution`。同一次提交只编译一次，再逐个运行测试输入。函数返回值写入 `result.txt`，用户的 `System.out` 保留为调试日志，避免调试输出污染答案比较。
 
-### Docker 判题隔离
+支持批量补充测试、输入输出哈希去重、标准答案异步生成测试任务。当前随机生成器只保证参数类型合法；涉及 Two Sum 等跨参数约束时，需要题目级 Generator 和 Validator，不能仅依赖类型随机。
 
-判题模块通过 Docker Java API 创建运行环境，对不可信代码进行容器级隔离，并围绕编译错误、运行错误、超时、内存限制和测试点结果组织判题流程。
+### Docker 判题边界
 
-### Redis 双桶与 Lua 原子切换
+当前已设置运行超时、内存限制和 `network=none`，并识别 AC、WA、CE、RE、TLE。现阶段仍需补充 PID 限制、CPU 配额、非 root 用户、只读文件系统、编译超时和输出大小限制，因此 README 不将其描述为生产级安全沙箱。
 
-帖子点赞、评论点赞和题解浏览量先写入 Redis 增量桶，定时任务通过 Lua 原子切换读写桶，再批量回写 MySQL。Redisson 任务锁用于避免定时任务重叠消费同一个桶。
+判题服务为 Java 预创建 2 个容器，为 Python、C 和 C++ 各预创建 1 个容器。请求通过按语言隔离的阻塞队列租借空闲容器，归还前清理 `/workspace`；清理失败时删除并重建容器。管理员可通过 `/api/judge/containers` 查询池状态、扩容或删除空闲容器，忙碌容器和每种语言的最后一个容器不可删除。
 
-### 社区热点排行
+### 缓存、排行和分页
 
-使用 Redis ZSet 保存帖子热度，综合点赞数、评论数和发布时间衰减计算分数。定时任务周期性从数据库重建排行，互动行为在重建间隔内实时调整分数。
+- Redis 保存部分高频计数和缓存数据，定时任务批量回写 MySQL。
+- Redis ZSet 保存社区热点分数，定时任务负责周期性重算。
+- 列表接口使用基于 ID 的游标分页；关联用户、标签和点赞状态使用批量查询减少 N+1。
+- 通知和函数测试用例使用业务唯一键处理重复写入。
 
-### 游标分页与批量聚合
+## 已知限制
 
-题目、帖子、评论和题解列表采用游标分页，避免深分页的扫描成本。用户、标签和点赞状态通过批量查询聚合，减少逐条查询造成的 N+1 问题。
-
-### JavaScript Long 精度处理
-
-后端主键使用 `BIGINT/Long`，对需要直接返回前端的用户 ID 等字段按字符串输出，避免超过 JavaScript 安全整数范围后出现精度丢失。
-
-### 统一通知中心
-
-点赞与每日复习提醒通过 RabbitMQ 进入 `service-message`，先以 `message_id` 唯一索引完成数据库幂等入库，再尝试 WebSocket 实时推送。通知列表使用倒序游标分页，摘要与详情分离；查看详情时自动标记已读，扩展数据仅在详情响应中解析为 JSON 对象。
-
-### AI 判题建议与会话记忆
-
-WA、RE、TLE 等失败结果异步进入 `service-ai`，建议先写入 `codewise_ai`，再由 `service-message` 通过 WebSocket 推送。题目侧边栏追问采用 POST SSE，按 `chunk / answer / done / error` 事件流式返回。Prompt 固定携带根题目、会话摘要、最近消息和当前代码；Ollama 小模型异步压缩会话记忆，Redis 仅用于消费幂等和 Redisson 会话锁。
-
-## 核心业务流程
-
-```text
-提交代码
-  -> service-question 创建提交记录
-  -> RabbitMQ 投递判题任务
-  -> service-judge 拉取题目与测试数据
-  -> Docker 容器编译、运行并比对输出
-  -> RabbitMQ 回传判题结果
-  -> 更新提交记录与用户统计
-  -> service-message / WebSocket 推送结果
-  -> 错题进入 service-review 复习链路
-```
-
-更完整的流程说明见 [技术设计文档](docs/technical-design.md)。
+- Gateway 负责身份认证，下游仍有部分重复查询用户角色的代码，后续将改为签名身份信息加业务资源鉴权。
+- Feign 超时、重试和降级策略尚未统一。
+- RabbitMQ 消息发布确认、失败补偿和任务可观测性仍在完善。
+- WebSocket 当前主要承担实时提醒，高可用连接管理和多实例会话路由尚未实现。
+- Nacos 当前用于注册发现和配置加载，未实现完整的动态配置刷新治理。
+- 自动化测试已覆盖部分函数解析、权限、随机输入和调试流程，但整体覆盖率仍需提高。
 
 ## 项目结构
 
 ```text
 CodeWise/
-|-- service-gateway/      # 网关与鉴权
-|-- service-user/         # 用户服务
-|-- service-question/     # 题库与提交服务
-|-- service-judge/        # Docker 判题服务
-|-- service-review/       # 复习与收藏服务
-|-- service-community/    # 社区与题解服务
-|-- service-message/      # 消息、邮件与 WebSocket
-|-- service-ai/           # AI 能力
-|-- service-api/          # Feign 契约与共享 DTO
-|-- service-common/       # 公共基础设施
-|-- docs/                 # 接口与技术文档
-|-- pom.xml               # Maven 父工程
-`-- mvnw / mvnw.cmd       # Maven Wrapper
+|-- service-gateway/
+|-- service-user/
+|-- service-question/
+|-- service-judge/
+|-- service-review/
+|-- service-community/
+|-- service-message/
+|-- service-ai/
+|-- service-api/
+|-- service-common/
+|-- docs/
+|-- pom.xml
+`-- mvnw / mvnw.cmd
 ```
-
-详细目录及各包职责见 [项目目录说明](docs/project-structure.md)。
 
 ## 本地运行
 
-### 环境要求
+环境依赖：JDK 21、MySQL 8、Redis、RabbitMQ、Nacos 和 Docker。
 
-- JDK 21
-- MySQL 8.x
-- Redis
-- RabbitMQ
-- Nacos
-- Docker，运行判题服务时需要
-
-### 数据库约定
-
-各业务服务使用独立数据库，命名规则为：
-
-```text
-codewise_<去掉 service- 后的模块名>
-```
-
-例如：`codewise_user`、`codewise_question`、`codewise_review`、`codewise_community`、`codewise_message`。
-
-建表脚本位于各模块的 `src/main/resources`，服务连接信息主要通过 Nacos 配置管理。
-
-### 编译
-
-Windows：
+根 POM 当前未配置聚合模块，公共模块发生变更时需要先安装：
 
 ```powershell
-.\mvnw.cmd -DskipTests compile
+.\mvnw.cmd -f service-common\pom.xml -DskipTests install
+.\mvnw.cmd -f service-api\pom.xml -DskipTests install
 ```
 
-Linux / macOS：
-
-```bash
-./mvnw -DskipTests compile
-```
-
-公共模块发生变更时，先安装到本地 Maven 仓库：
+然后分别编译或启动所需服务：
 
 ```powershell
-cd service-common
-..\mvnw.cmd -DskipTests install
-
-cd ..\service-api
-..\mvnw.cmd -DskipTests install
+.\mvnw.cmd -f service-question\pom.xml test
+.\mvnw.cmd -f service-judge\pom.xml test
 ```
 
-### 推荐启动顺序
+判题服务所在 Docker 主机需要提前构建 `codewise-java-judge:17` 镜像，并提供 Jackson JAR。
 
-```text
-MySQL / Redis / RabbitMQ / Nacos / Docker
-  -> service-common、service-api 安装
-  -> service-user
-  -> service-question
-  -> service-judge
-  -> service-review
-  -> service-community
-  -> service-message
-  -> service-ai
-  -> service-gateway
-```
+函数测试生成链路还要求 `service-ai` 与 `service-question` 配置相同的 `CODEWISE_INTERNAL_TOKEN`。用户自定义模型密钥由 `API_KEY_MASTER_KEY` 加密，仓库中不得保存真实密钥。运行时生成的函数产物写入 `data/function-artifacts`，不纳入版本控制。
 
-## 文档导航
+## 文档
 
 - [技术设计与核心链路](docs/technical-design.md)
 - [项目目录说明](docs/project-structure.md)
-- [后端 Controller 接口总览](docs/backend-controller-api.md)
-- [刷题、判题与复习流程](docs/codewise-flow-and-features.md)
-- [社区模块接口](docs/service-community-api.md)
-- [复习模块接口](docs/service-review-api.md)
-- [消息模块说明](docs/service-message.md)
-- [AI 模块说明](docs/AI_MODULE_GUIDE.md)
-- [项目体量快照](docs/project-metrics.md)
+- [Controller 接口总览](docs/backend-controller-api.md)
+- [维护手册](docs/maintenance-guide.md)
+- [函数测试生成接口](docs/function-testcase-generator-api.md)
+- [自定义 AI 配置接口](docs/custom-ai-config-api.md)
+- [V1 发布基线](docs/v1-release-notes.md)
 
-## 当前状态
+## 项目定位
 
-项目处于持续开发阶段，核心微服务和主要业务链路已经形成。当前已具备点赞与复习提醒的站内通知闭环，后续重点包括补充自动化测试、增强消息发布确认与失败补偿、完善判题安全边界，以及继续收敛跨服务异常处理和配置管理。
-
-## 面试交流方向
-
-围绕本项目可以重点讨论：
-
-- 为什么判题使用消息队列，而不是同步 HTTP 调用。
-- 如何隔离和限制用户提交的不可信代码。
-- Redis 双桶为什么需要 Lua 和任务锁。
-- 热点排行如何兼顾实时增量与周期重算。
-- 游标分页与传统 `LIMIT offset` 分页的差异。
-- Feign 调用失败、消息重复消费和缓存回写失败如何处理。
-- 微服务拆分后如何维护 DTO 契约和用户上下文。
-
----
-
-本仓库用于个人学习与工程实践，欢迎通过 Issue 交流设计和实现问题。
+本项目用于个人学习与工程实践。面试或交流时应重点说明当前实现、设计原因、已知缺陷和改进方向，不将尚未实现的生产级能力写成既有成果。

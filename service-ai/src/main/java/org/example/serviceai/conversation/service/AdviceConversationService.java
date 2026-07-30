@@ -1,5 +1,6 @@
 package org.example.serviceai.conversation.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.conversation.dto.CursorPageResult;
 import org.example.serviceai.conversation.enums.Role;
 import org.example.serviceai.conversation.vo.HomeConversationVo;
@@ -9,6 +10,7 @@ import org.example.serviceai.entry.AiConversationMemory;
 import org.example.serviceai.conversation.repository.AiConversationRepository;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.service.AIService;
+import org.example.serviceai.service.UserAiService;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -21,6 +23,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 @Service
+@Slf4j
 public class AdviceConversationService {
     @Autowired
     private AiConversationRepository aiConversationRepository;
@@ -28,6 +31,8 @@ public class AdviceConversationService {
     private AIService aiService;
     @Autowired
     private AiConversationMemaryService  aiConversationMemaryService;
+    @Autowired
+    private UserAiService userAiService;
     public Message ask(
             Long userId,
             Long conversationId,
@@ -70,9 +75,7 @@ public class AdviceConversationService {
         message.setRole(Role.ASSISTANT);
         message.setCreateTime(LocalDateTime.now());
         aiConversationRepository.appendMessage(conversationId,message);
-        CompletableFuture.runAsync(()->{
-            aiConversationMemaryService.updateSummery(conversationId, message.getUserId());
-        });
+        updateMemoryAsync(conversationId, message.getUserId());
         return message;
 
     }
@@ -114,6 +117,8 @@ public class AdviceConversationService {
             String question,
             String currentCode,
             Role role,
+            Long userAiConfigId,
+            String modelName,
             Consumer<String> onChunk
     ) {
         Conversation conversation =
@@ -153,10 +158,20 @@ public class AdviceConversationService {
 
         StringBuilder fullAnswer = new StringBuilder();
 
-        aiService.streamAi(prompt, chunk -> {
+        Consumer<String> answerConsumer = chunk -> {
             fullAnswer.append(chunk);
             onChunk.accept(chunk);
-        });
+        };
+        boolean useAutoProvider = userAiConfigId == null
+                && (modelName == null || modelName.isBlank());
+        if (useAutoProvider) {
+            aiService.streamAi(prompt, answerConsumer);
+        } else {
+            if (userAiConfigId == null || modelName == null || modelName.isBlank()) {
+                throw new IllegalArgumentException("自定义模型必须同时提供配置 ID 和模型名称");
+            }
+            userAiService.streamAi(prompt, answerConsumer, userId, userAiConfigId, modelName);
+        }
 
         Message assistantMessage = new Message();
         assistantMessage.setConversationId(conversationId);
@@ -165,11 +180,23 @@ public class AdviceConversationService {
         assistantMessage.setContent(fullAnswer.toString());
         assistantMessage.setCurrentCode(currentCode);
         assistantMessage.setCreateTime(LocalDateTime.now());
-
-        return aiConversationRepository.appendMessage(
+        Message savedMessage = aiConversationRepository.appendMessage(
                 conversationId,
                 assistantMessage
         );
+        updateMemoryAsync(conversationId, savedMessage.getUserId());
+        return savedMessage;
+    }
+
+    private void updateMemoryAsync(Long conversationId, Long userId) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                aiConversationMemaryService.updateSummery(conversationId, userId);
+            } catch (Exception exception) {
+                log.error("Conversation memory update failed, conversationId={}, userId={}",
+                        conversationId, userId, exception);
+            }
+        });
     }
 
 }

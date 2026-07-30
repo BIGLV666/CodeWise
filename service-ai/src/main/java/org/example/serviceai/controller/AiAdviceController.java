@@ -5,7 +5,9 @@ import org.example.serviceai.conversation.dto.CursorPageResult;
 import org.example.serviceai.conversation.enums.Role;
 import org.example.serviceai.conversation.service.AdviceConversationService;
 import org.example.serviceai.conversation.vo.HomeConversationVo;
+import org.example.serviceai.dto.AiTaskDto;
 import org.example.serviceai.entry.Message;
+import org.example.serviceai.service.AiAdviceTaskService;
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +24,8 @@ import java.util.concurrent.CompletableFuture;
 public class AiAdviceController {
     @Autowired
     private AdviceConversationService adviceConversationService;
+    @Autowired
+    private AiAdviceTaskService aiAdviceTaskService;
     @GetMapping
     public Result<List<HomeConversationVo>> getConversations(){
         return Result.success(adviceConversationService.getConversations());
@@ -44,6 +48,8 @@ public class AiAdviceController {
                                 askDto.getQuestion(),
                                 askDto.getCode(),
                                 Role.USER,
+                                askDto.getUserAiConfigId(),
+                                askDto.getModelName(),
                                 chunk -> {
                                     try {
                                         emitter.send(
@@ -79,7 +85,7 @@ public class AiAdviceController {
                     emitter.send(
                             SseEmitter.event()
                                     .name("error")
-                                    .data(e.getMessage())
+                                    .data(toUserMessage(e))
                     );
                 } catch (Exception ignored) {
                 }
@@ -92,6 +98,26 @@ public class AiAdviceController {
 
         return emitter;
     }
+
+    private String toUserMessage(Exception exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof org.example.serviceai.service.AiProviderHttpException providerException) {
+                int statusCode = providerException.getStatusCode();
+                if (statusCode == 401 || statusCode == 403) {
+                    return "AI 服务认证失败，请检查 API Key 和模型权限";
+                }
+                if (statusCode == 429) {
+                    return "AI 服务请求过于频繁或额度不足，请稍后重试";
+                }
+                return "AI 服务调用失败，HTTP " + statusCode;
+            }
+            current = current.getCause();
+        }
+        return exception.getMessage() == null
+                ? "AI 服务调用失败，请稍后重试"
+                : exception.getMessage();
+    }
     @GetMapping("/{conversationId}/messages")
     public Result<CursorPageResult<Message>> getAllMessage(
             @PathVariable Long conversationId,
@@ -102,5 +128,16 @@ public class AiAdviceController {
                 UserContext.getUserId(), conversationId, cursor, size
         ));
     }
+
+    @PostMapping("/task")
+    public Result<String>aiTask(@RequestBody AiTaskDto taskDto) {
+        aiAdviceTaskService.aiTask(taskDto);
+        return Result.success("success");
+    }
+    @GetMapping("/task")
+    public Result<List<Object>>getAllAdviceTasks(@RequestParam Long questionId) {
+        return Result.success(aiAdviceTaskService.getAiAdvices(UserContext.getUserId(), questionId));
+    }
+
 
 }
