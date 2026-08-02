@@ -61,4 +61,18 @@ class FunctionCaseDataConverterTest {
         assertEquals("", result.getInput());
         assertEquals("0", result.getOutput());
     }
+
+    @Test
+    void shouldPreserveTreeNodeLevelOrderValues() {
+        FunctionSampleVo result = converter.normalize(
+                new FunctionSampleVo("[3,9,20,null,null,15,7]", "[3,20,9,7,15]"),
+                """
+                [{"type":"TreeNode","name":"root"}]
+                """,
+                "TreeNode"
+        );
+
+        assertEquals("[3,9,20,null,null,15,7]", result.getInput());
+        assertEquals("[3,20,9,7,15]", result.getOutput());
+    }
 }

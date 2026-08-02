@@ -47,11 +47,8 @@ public class MqConfig {
                 .to(emailExchange())
                 .with(WEBSOCKET_ROUTING_KEY);
     }
-    // ========== 判题队列 ==========
-    @Bean
-    public Queue judgeQueue() {
-        return QueueBuilder.durable(JUDGE_QUEUE_NAME).build();
-    }
+   // ========== 判题队列 ==========
+
 
     @Bean
     public DirectExchange judgeExchange() {
@@ -71,6 +68,30 @@ public class MqConfig {
                 .bind(judgeQueue())
                 .to(judgeExchange())
                 .with(MqContexts.JUDGE_DEBUG_ROUTING_KEY);
+    }
+
+    @Bean
+    DirectExchange judgeDeadExchange() {
+        return new DirectExchange(JUDGE_DLX);
+    }
+
+    @Bean
+    Queue judgeQueue() {
+        return QueueBuilder.durable(JUDGE_QUEUE_NAME)
+                .deadLetterExchange(JUDGE_DLX)
+                .deadLetterRoutingKey("judge.dead")
+                .build();
+    }
+
+    @Bean
+    Queue judgeDeadQueue() {
+        return QueueBuilder.durable(JUDGE_DLQ).build();
+    }
+    @Bean
+    Binding judgeDeadBinding() {
+        return BindingBuilder.bind(judgeDeadQueue())
+                .to(judgeDeadExchange())
+                .with("judge.dead");
     }
 
     @Bean

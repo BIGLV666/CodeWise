@@ -1,6 +1,7 @@
 package org.example.servicejudge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
@@ -55,11 +56,11 @@ public class JudgeServiceHandel implements MessageHandler {
     }
 
     @Override
-    public void handle(String message, Channel channel, Message amqpMessage) {
+    public void handle(String message, Channel channel, Message amqpMessage) throws JsonProcessingException {
         long deliveryTag = amqpMessage.getMessageProperties().getDeliveryTag();
-
+        Long submissionId = objectMapper.readValue(message, Long.class);
         try {
-            Long submissionId = objectMapper.readValue(message, Long.class);
+
             SubmitRecord submitRecord=submitRecordMapper.selectById(submissionId);
             if(submitRecord==null){
                 log.info("submitRecord is null");
@@ -68,6 +69,10 @@ public class JudgeServiceHandel implements MessageHandler {
             }
             if(submitRecord.getJudgeStatus().equals("success")){
                 log.info("消息已处理Id{}",submissionId);
+                channel.basicAck(deliveryTag,false);
+                return;
+            }
+            if(submitRecordMapper.updateRecordToJudge(submissionId) != 1){
                 channel.basicAck(deliveryTag,false);
                 return;
             }
@@ -117,7 +122,7 @@ public class JudgeServiceHandel implements MessageHandler {
         } catch (Exception e) {
             log.error("判题处理失败", e);
             try {
-                channel.basicNack(deliveryTag, false, false);
+                channel.basicNack(deliveryTag, false,false);
             } catch (IOException ex) {
                 log.error("NACK失败", ex);
             }
@@ -168,9 +173,17 @@ public class JudgeServiceHandel implements MessageHandler {
             throw new InterruptedIOException("函数模式暂时只支持 Java");
         }
 
-        String main= Java.ToMain(functionConfig.getParameterConfig(),functionConfig.getMethodName());
+        String main = Java.ToMain(
+                functionConfig.getParameterConfig(),
+                functionConfig.getMethodName(),
+                functionConfig.getOutputType()
+        );
 
-        String code= CodeBuild.build(submitRecord.getSubmitContent(), functionConfig.getParameterConfig());
+        String code = CodeBuild.build(
+                submitRecord.getSubmitContent(),
+                functionConfig.getParameterConfig(),
+                functionConfig.getOutputType()
+        );
         long startTime = System.currentTimeMillis();
         JudgeRecord  finalResult=judge.batchExecuteCode(code,main,submitRecord.getLanguage(),ToTestDToFroFunction(testCases));
         long endTime = System.currentTimeMillis();

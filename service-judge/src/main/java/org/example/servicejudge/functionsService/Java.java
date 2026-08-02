@@ -15,6 +15,23 @@ public class Java {
     private static final ObjectMapper objectMapper=new ObjectMapper();
 
     public static String ToMain(String paserConfig,String FunctionName) throws JsonProcessingException {
+        List<String> parameterTypes = CodeBuild.getType(paserConfig);
+        String inferredOutputType = parameterTypes.contains("ListNode")
+                ? "ListNode"
+                : parameterTypes.contains("TreeNode") ? "TreeNode" : null;
+        return ToMain(paserConfig, FunctionName, inferredOutputType);
+    }
+
+    public static String ToMain(
+            String paserConfig,
+            String FunctionName,
+            String outputType
+    ) throws JsonProcessingException {
+        List<String> parameterTypes = CodeBuild.getType(paserConfig);
+        boolean usesListNode = parameterTypes.contains("ListNode");
+        boolean usesTreeNode = parameterTypes.contains("TreeNode");
+        boolean returnsListNode = "ListNode".equals(outputType);
+        boolean returnsTreeNode = "TreeNode".equals(outputType);
         StringBuilder main = new StringBuilder();
 
          main .append
@@ -49,16 +66,24 @@ public class Java {
         }
         method.append(");\n");
         main.append(method);
-        main.append("""
-                Path resultPath = Path.of("result.txt");
-                if (result == null) {
-                    Files.writeString(resultPath, "null", StandardCharsets.UTF_8);}
-                """);
+        main.append("        Path resultPath = Path.of(\"result.txt\");\n");
+        main.append("        if (result == null) {\n");
+        main.append("            Files.writeString(resultPath, \"")
+                .append(returnsTreeNode ? "[]" : "null")
+                .append("\", StandardCharsets.UTF_8);\n");
+        main.append("        }\n");
 
-        if (CodeBuild.getType(paserConfig).contains("ListNode")) {
+        if (returnsListNode) {
             main.append("""
                 else if (result instanceof ListNode) {
                     writeListNodeResult(resultPath, (ListNode) result);
+                }
+                """);
+        }
+        if (returnsTreeNode) {
+            main.append("""
+                else if (result instanceof TreeNode) {
+                    writeTreeNodeResult(resultPath, (TreeNode) result);
                 }
                 """);
         }
@@ -78,11 +103,18 @@ public class Java {
                 """);
 
         main.append("    }\n");
-        String methodCode = CodeBuild.formatNodeMethod(paserConfig);
+        String methodCode = CodeBuild.formatNodeMethod(paserConfig, outputType);
         main.append(methodCode);
 
         main.append("}\n");
-        main.append(buildBatchMain(map, FunctionName, CodeBuild.getType(paserConfig).contains("ListNode")));
+        main.append(buildBatchMain(
+                map,
+                FunctionName,
+                usesListNode,
+                usesTreeNode,
+                returnsListNode,
+                returnsTreeNode
+        ));
 
         return main.toString();
 
@@ -93,7 +125,10 @@ public class Java {
     private static String buildBatchMain(
             LinkedHashMap<String, String> parameters,
             String functionName,
-            boolean returnsListNode
+            boolean usesListNode,
+            boolean usesTreeNode,
+            boolean returnsListNode,
+            boolean returnsTreeNode
     ) {
         StringBuilder batch = new StringBuilder("""
 
@@ -186,7 +221,7 @@ public class Java {
         batch.append("        }\n");
         batch.append("    }\n\n");
 
-        if (returnsListNode) {
+        if (usesListNode) {
             batch.append("""
                         private static ListNode buildListForListNode(int[] values) {
                             ListNode dummy = new ListNode(0);
@@ -200,11 +235,41 @@ public class Java {
 
                     """);
         }
+        if (usesTreeNode) {
+            batch.append("""
+                        private static TreeNode buildTreeNode(Integer[] values) {
+                            if (values.length == 0 || values[0] == null) {
+                                return null;
+                            }
+                            TreeNode root = new TreeNode(values[0]);
+                            Queue<TreeNode> queue = new ArrayDeque<>();
+                            queue.offer(root);
+                            int index = 1;
+                            while (!queue.isEmpty() && index < values.length) {
+                                TreeNode current = queue.poll();
+                                if (values[index] != null) {
+                                    current.left = new TreeNode(values[index]);
+                                    queue.offer(current.left);
+                                }
+                                index++;
+                                if (index < values.length && values[index] != null) {
+                                    current.right = new TreeNode(values[index]);
+                                    queue.offer(current.right);
+                                }
+                                index++;
+                            }
+                            return root;
+                        }
+
+                    """);
+        }
 
         batch.append("""
                     private static String serializeResult(Object result) throws Exception {
                         if (result == null) {
-                            return "null";
+                """);
+        batch.append(returnsTreeNode ? "            return \"[]\";\n" : "            return \"null\";\n");
+        batch.append("""
                         }
                 """);
         if (returnsListNode) {
@@ -220,6 +285,30 @@ public class Java {
                                     current = current.next;
                                 }
                                 return text.append("]").toString();
+                            }
+                    """);
+        }
+        if (returnsTreeNode) {
+            batch.append("""
+                            if (result instanceof TreeNode) {
+                                List<String> values = new ArrayList<>();
+                                Queue<TreeNode> queue = new LinkedList<>();
+                                queue.offer((TreeNode) result);
+                                while (!queue.isEmpty()) {
+                                    TreeNode current = queue.poll();
+                                    if (current == null) {
+                                        values.add("null");
+                                    } else {
+                                        values.add(String.valueOf(current.val));
+                                        queue.offer(current.left);
+                                        queue.offer(current.right);
+                                    }
+                                }
+                                int last = values.size() - 1;
+                                while (last >= 0 && "null".equals(values.get(last))) {
+                                    last--;
+                                }
+                                return "[" + String.join(",", values.subList(0, last + 1)) + "]";
                             }
                     """);
         }
@@ -269,7 +358,7 @@ public class Java {
         for(int i=0;i<paserConfigNode.size();i++){
             JsonNode declarationNode=paserConfigNode.get(i);
             String type=declarationNode.get("type").asText();
-            String name=declarationNode.get("name").asText();
+            String name=declarationNode.get("name").asText().trim();
             map.put(name, CodeBuild.getType(type,name));
         }
 

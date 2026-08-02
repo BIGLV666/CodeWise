@@ -4,8 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Pattern;
 
 public class CodeBuild {
@@ -13,8 +12,15 @@ public class CodeBuild {
     private static final Pattern TOP_LEVEL_LIST_NODE = Pattern.compile(
             "(?m)^(?:public\\s+)?class\\s+ListNode\\b"
     );
+    private static final Pattern TOP_LEVEL_TREE_NODE = Pattern.compile(
+            "(?m)^(?:public\\s+)?class\\s+TreeNode\\b"
+    );
 
     public static String build(String code,String paserConfig) throws JsonProcessingException {
+        return build(code, paserConfig, null);
+    }
+
+    public static String build(String code, String paserConfig, String outputType) throws JsonProcessingException {
         StringBuilder sb=new StringBuilder();
         if(!code.contains("import java.util.*;")&&!code.contains("import  java.util.*;"))
         {
@@ -22,8 +28,14 @@ public class CodeBuild {
         if(!code.contains("import java.lang.*;")&&!code.contains("import  java.lang.*;")){
         sb.append("import java.lang.*;\n");}
         sb.append(code);
-        if (!containsTopLevelListNode(code)) {
-            sb.append(formatClass(paserConfig));
+        List<String> types = getType(paserConfig);
+        boolean needsListNode = types.contains("ListNode") || "ListNode".equals(outputType);
+        boolean needsTreeNode = types.contains("TreeNode") || "TreeNode".equals(outputType);
+        if (needsListNode && !containsTopLevelListNode(code)) {
+            sb.append(listNodeClass());
+        }
+        if (needsTreeNode && !containsTopLevelTreeNode(code)) {
+            sb.append(treeNodeClass());
         }
         return sb.toString();
 
@@ -75,8 +87,11 @@ public class CodeBuild {
                     "String[] " + name
                             + " = objectMapper.readValue(reader.readLine(), String[].class);";
             case "ListNode"->
-                    "int []"+" nodeList = objectMapper.readValue(reader.readLine(), int[].class);\n"+
-                            "ListNode "+name+" = buildListForListNode(nodeList);\n";
+                    "int[] " + name + "Values = objectMapper.readValue(reader.readLine(), int[].class);\n" +
+                            "ListNode " + name + " = buildListForListNode(" + name + "Values);\n";
+            case "TreeNode" ->
+                    "Integer[] " + name + "Values = objectMapper.readValue(reader.readLine(), Integer[].class);\n" +
+                            "TreeNode " + name + " = buildTreeNode(" + name + "Values);\n";
             case "int[][]","int [][]"->
                     "int[][] "+name+" = objectMapper.readValue(reader.readLine(), int[][].class);\n";
 
@@ -92,26 +107,53 @@ public class CodeBuild {
         List<String>config=getType(paserConfig);
         StringBuilder s=new StringBuilder();
         if(config.contains("ListNode")){
-            s.append("class ListNode {\n" +
-                    "    int val;\n" +
-                    "    ListNode next;\n" +
-                    "\n" +
-                    "    ListNode(int val) {\n" +
-                    "        this.val = val;\n" +
-                    "    }\n" +
-                    "}\n");
+            s.append(listNodeClass());
+        }
+        if(config.contains("TreeNode")){
+            s.append(treeNodeClass());
         }
         return s.toString();
+    }
+
+    private static String listNodeClass() {
+        return "\nclass ListNode {\n" +
+                "    int val;\n" +
+                "    ListNode next;\n" +
+                "\n" +
+                "    ListNode(int val) {\n" +
+                "        this.val = val;\n" +
+                "    }\n" +
+                "}\n";
+    }
+
+    private static String treeNodeClass() {
+        return "\nclass TreeNode {\n" +
+                "    int val;\n" +
+                "    TreeNode left;\n" +
+                "    TreeNode right;\n" +
+                "\n" +
+                "    TreeNode(int val) {\n" +
+                "        this.val = val;\n" +
+                "    }\n" +
+                "}\n";
     }
 
     private static boolean containsTopLevelListNode(String code) {
         return code != null && TOP_LEVEL_LIST_NODE.matcher(code).find();
     }
 
+    private static boolean containsTopLevelTreeNode(String code) {
+        return code != null && TOP_LEVEL_TREE_NODE.matcher(code).find();
+    }
+
     public static String formatNodeMethod(String parseConfig) throws JsonProcessingException {
+        return formatNodeMethod(parseConfig, null);
+    }
+
+    public static String formatNodeMethod(String parseConfig, String outputType) throws JsonProcessingException {
         List<String> config = getType(parseConfig);
         StringBuilder s = new StringBuilder();
-        if (config.contains("ListNode")) {
+        if (config.contains("ListNode") || "ListNode".equals(outputType)) {
             s.append("        private static ListNode buildListForListNode(int[] values) {\n" +
                     "                        ListNode dummy = new ListNode(0);\n" +
                     "                        ListNode current = dummy;\n" +
@@ -147,6 +189,66 @@ public class CodeBuild {
                     "                                StandardCharsets.UTF_8\n" +
                     "                        );\n" +
                     "                    }");
+        }
+        if (config.contains("TreeNode") || "TreeNode".equals(outputType)) {
+            s.append("""
+
+                        private static TreeNode buildTreeNode(Integer[] values) {
+                            if (values.length == 0 || values[0] == null) {
+                                return null;
+                            }
+                            TreeNode root = new TreeNode(values[0]);
+                            Queue<TreeNode> queue = new ArrayDeque<>();
+                            queue.offer(root);
+                            int index = 1;
+                            while (!queue.isEmpty() && index < values.length) {
+                                TreeNode current = queue.poll();
+                                if (values[index] != null) {
+                                    current.left = new TreeNode(values[index]);
+                                    queue.offer(current.left);
+                                }
+                                index++;
+                                if (index < values.length && values[index] != null) {
+                                    current.right = new TreeNode(values[index]);
+                                    queue.offer(current.right);
+                                }
+                                index++;
+                            }
+                            return root;
+                        }
+
+                        private static void writeTreeNodeResult(Path resultPath, TreeNode root) throws Exception {
+                            Files.writeString(
+                                    resultPath,
+                                    serializeTreeNode(root),
+                                    StandardCharsets.UTF_8
+                            );
+                        }
+
+                        private static String serializeTreeNode(TreeNode root) {
+                            if (root == null) {
+                                return "[]";
+                            }
+                            List<String> values = new ArrayList<>();
+                            Queue<TreeNode> queue = new LinkedList<>();
+                            queue.offer(root);
+                            while (!queue.isEmpty()) {
+                                TreeNode current = queue.poll();
+                                if (current == null) {
+                                    values.add("null");
+                                } else {
+                                    values.add(String.valueOf(current.val));
+                                    queue.offer(current.left);
+                                    queue.offer(current.right);
+                                }
+                            }
+                            int last = values.size() - 1;
+                            while (last >= 0 && "null".equals(values.get(last))) {
+                                last--;
+                            }
+                            return "[" + String.join(",", values.subList(0, last + 1)) + "]";
+                        }
+                    """);
         }
         return s.toString();
     }

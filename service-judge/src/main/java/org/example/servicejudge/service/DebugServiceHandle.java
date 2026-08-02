@@ -148,9 +148,14 @@ public class DebugServiceHandle implements MessageHandler {
 
         String mainCode = Java.ToMain(
                 functionConfig.getParameterConfig(),
-                functionConfig.getMethodName()
+                functionConfig.getMethodName(),
+                functionConfig.getOutputType()
         );
-        String code= CodeBuild.build(debugDto.getCode(),functionConfig.getParameterConfig());
+        String code = CodeBuild.build(
+                debugDto.getCode(),
+                functionConfig.getParameterConfig(),
+                functionConfig.getOutputType()
+        );
         List<JudgeRecord> judgeRecords = judgeService.batchDebugCode(
                 code,
                 mainCode,

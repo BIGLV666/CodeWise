@@ -6,7 +6,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FunctionRandomInputGeneratorTest {
 
@@ -34,10 +35,32 @@ class FunctionRandomInputGeneratorTest {
     }
 
     @Test
-    void rejectsUnsupportedParameterType() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> generator.generate("[{\"type\":\"TreeNode\",\"name\":\"root\"}]", 1, 1L)
-        );
+    void generatesDeterministicValidTrees() throws Exception {
+        String config = "[{\"type\":\"TreeNode\",\"name\":\"root\"}]";
+
+        List<String> first = generator.generate(config, 20, 42L);
+        List<String> second = generator.generate(config, 20, 42L);
+
+        assertEquals(first, second);
+        assertEquals(20, first.size());
+        for (String input : first) {
+            var values = new ObjectMapper().readTree(input);
+            assertTrue(values.isArray());
+            if (values.isEmpty()) {
+                continue;
+            }
+            assertFalse(values.get(0).isNull());
+            int pendingParents = 1;
+            int index = 1;
+            while (index < values.size()) {
+                assertTrue(pendingParents > 0);
+                pendingParents--;
+                for (int child = 0; child < 2 && index < values.size(); child++, index++) {
+                    if (!values.get(index).isNull()) {
+                        pendingParents++;
+                    }
+                }
+            }
+        }
     }
 }

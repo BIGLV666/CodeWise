@@ -54,19 +54,134 @@ public class JavaTest {
         );
     }
     @Test
-    void shouldRejectUnsupportedType() {
+    void shouldGenerateTreeNodeInput() throws Exception {
         String parameterConfig = """
             [
               {"type":"TreeNode","name":"root"}
             ]
             """;
 
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> generator.ToMain(
-                        parameterConfig,
-                        "maxDepth"
-                )
+        String source = generator.ToMain(
+                parameterConfig,
+                "maxDepth",
+                "int"
+        );
+
+        assertAll(
+                () -> assertTrue(source.contains("Integer[] rootValues")),
+                () -> assertTrue(source.contains("TreeNode root = buildTreeNode(rootValues)")),
+                () -> assertTrue(source.contains("private static TreeNode buildTreeNode"))
+        );
+    }
+
+    @Test
+    void generatedTreeNodeSolutionShouldCompileAndRun() throws Exception {
+        String config = """
+                [{"type":"TreeNode","name":"root"}]
+                """;
+        String mainCode = generator.ToMain(config, "invertTree", "TreeNode");
+        String solutionCode = """
+                class Solution {
+                    public TreeNode invertTree(TreeNode root) {
+                        if (root == null) {
+                            return null;
+                        }
+                        TreeNode left = invertTree(root.left);
+                        root.left = invertTree(root.right);
+                        root.right = left;
+                        return root;
+                    }
+                }
+                """;
+
+        Path mainFile = tempDirectory.resolve("Main.java");
+        Path solutionFile = tempDirectory.resolve("Solution.java");
+        Files.writeString(mainFile, mainCode, StandardCharsets.UTF_8);
+        Files.writeString(
+                solutionFile,
+                CodeBuild.build(solutionCode, config, "TreeNode"),
+                StandardCharsets.UTF_8
+        );
+
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler);
+        int compileExitCode = compiler.run(
+                null,
+                null,
+                null,
+                "-classpath",
+                System.getProperty("java.class.path"),
+                "-encoding",
+                "UTF-8",
+                mainFile.toString(),
+                solutionFile.toString()
+        );
+        assertEquals(0, compileExitCode);
+
+        assertTreeResult("[4,2,7,1,3,6,9]\n", "[4,7,2,9,6,3,1]");
+        assertTreeResult("[]\n", "[]");
+
+        Path casesDirectory = Files.createDirectories(tempDirectory.resolve("cases"));
+        Files.writeString(
+                casesDirectory.resolve("case-000001.txt"),
+                "[4,2,7,1,3,6,9]\n",
+                StandardCharsets.UTF_8
+        );
+        Files.writeString(
+                casesDirectory.resolve("case-000002.txt"),
+                "[]\n",
+                StandardCharsets.UTF_8
+        );
+        assertBatchTreeResults();
+    }
+
+    private void assertTreeResult(String input, String expected) throws Exception {
+        String runtimeClasspath = tempDirectory
+                + File.pathSeparator
+                + System.getProperty("java.class.path");
+        Process process = new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-classpath",
+                runtimeClasspath,
+                "Main"
+        )
+                .directory(tempDirectory.toFile())
+                .start();
+        process.getOutputStream().write(input.getBytes(StandardCharsets.UTF_8));
+        process.getOutputStream().close();
+
+        assertEquals(
+                0,
+                process.waitFor(),
+                new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8)
+        );
+        assertEquals(
+                expected,
+                Files.readString(tempDirectory.resolve("result.txt"), StandardCharsets.UTF_8)
+        );
+    }
+
+    private void assertBatchTreeResults() throws Exception {
+        String runtimeClasspath = tempDirectory
+                + File.pathSeparator
+                + System.getProperty("java.class.path");
+        Process process = new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-classpath",
+                runtimeClasspath,
+                "BatchMain"
+        )
+                .directory(tempDirectory.toFile())
+                .start();
+
+        assertTrue(process.waitFor(5, TimeUnit.SECONDS));
+        String stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+                .replace("\r\n", "\n");
+        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertAll(
+                () -> assertEquals(0, process.exitValue(), stderr),
+                () -> assertTrue(stdout.contains("__CODEWISE_RESULT_BEGIN__\n[4,7,2,9,6,3,1]")),
+                () -> assertTrue(stdout.contains("__CODEWISE_RESULT_BEGIN__\n[]"))
         );
     }
     @Test

@@ -64,6 +64,7 @@ public class FunctionRandomInputGenerator {
             case "String" -> randomString(random, random.nextInt(21));
             case "int[]", "int []" -> writeJson(randomIntArray(random));
             case "String[]", "String []" -> writeJson(randomStringArray(random));
+            case "TreeNode" -> writeJson(randomTree(random));
             default -> throw new IllegalArgumentException("随机生成暂不支持参数类型: " + type);
         };
     }
@@ -74,6 +75,38 @@ public class FunctionRandomInputGenerator {
             values[index] = random.nextInt(201) - 100;
         }
         return values;
+    }
+
+    private List<Integer> randomTree(Random random) {
+        if (random.nextInt(10) == 0) {
+            return List.of();
+        }
+
+        List<Integer> values = new ArrayList<>();
+        values.add(random.nextInt(201) - 100);
+        int pendingParents = 1;
+        int nodeCount = 1;
+        int targetNodeCount = random.nextInt(15) + 1;
+
+        while (pendingParents > 0 && nodeCount < targetNodeCount) {
+            pendingParents--;
+            for (int child = 0; child < 2; child++) {
+                boolean createChild = nodeCount < targetNodeCount && random.nextInt(100) < 70;
+                if (createChild) {
+                    values.add(random.nextInt(201) - 100);
+                    pendingParents++;
+                    nodeCount++;
+                } else {
+                    values.add(null);
+                }
+            }
+        }
+
+        int last = values.size() - 1;
+        while (last >= 0 && values.get(last) == null) {
+            last--;
+        }
+        return new ArrayList<>(values.subList(0, last + 1));
     }
 
     private String[] randomStringArray(Random random) {

@@ -43,6 +43,9 @@ public class UserService {
 
     public Map<String,Object> login(String username, String password){
         QueryWrapper<User> queryWrapper = new QueryWrapper<User>();
+        if(username==null||password==null){
+            throw new IllegalArgumentException("用户名不为空");
+        }
         queryWrapper.eq("user_name",username);
 
         User user=userMapper.selectOne(queryWrapper);
@@ -65,6 +68,36 @@ public class UserService {
         Map<String,Object> map = new HashMap<>();
         map.put("user",userDto);
         map.put("token",jwtUntil.generateToken(user.getUserId(),username));
+        return map;
+    }
+    //邮箱登录
+    public  Map<String,Object>emailLogin(String email,String password){
+        QueryWrapper<User> queryWrapper = new QueryWrapper<User>();
+        if(email==null||password==null){
+            throw new IllegalArgumentException("邮箱或密码不为空");
+        }
+        queryWrapper.eq("email",email);
+
+        User user=userMapper.selectOne(queryWrapper);
+        if(user==null){
+            throw new RuntimeException("未找到该用户");
+        }
+        if(!PasswordEncoding.matches(password,user.getPassword())){
+            throw new RuntimeException("密码错误");
+        }
+        if(user.getStatus()==0){
+            throw new RuntimeException("用户被封禁,解封时间为"+user.getBanTime());
+        }
+
+        //修改登录记录
+        user.setLastLoginIp(UserContext.getIp());
+        user.setLastLoginTime(LocalDateTime.now());
+
+        UserDto userDto=new UserDto(user);
+
+        Map<String,Object> map = new HashMap<>();
+        map.put("user",userDto);
+        map.put("token",jwtUntil.generateToken(user.getUserId(),user.getUserName()));
         return map;
     }
 
