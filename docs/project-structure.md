@@ -7,15 +7,23 @@
 ```text
 CodeWise/
 |-- docs/
-|   |-- backend-controller-api.md
-|   |-- codewise-flow-and-features.md
-|   |-- project-structure.md
-|   |-- service-community-api.md
-|   |-- service-message.md
-|   |-- service-review-api.md
-|   |-- AI_MODULE_GUIDE.md
-|   |-- project-metrics.md
-|   `-- technical-design.md
+|   |-- README.md                       # 文档导航
+|   |-- backend-controller-api.md       # Controller 接口总览
+|   |-- codewise-flow-and-features.md   # 业务流程与功能说明
+|   |-- project-structure.md            # 项目目录说明
+|   |-- service-community-api.md        # 社区基础接口
+|   |-- service-message.md              # 消息与通知
+|   |-- service-review-api.md           # 复习与收藏接口
+|   |-- custom-ai-config-api.md         # 自定义 AI 配置
+|   |-- function-testcase-generator-api.md
+|   |-- AI_MODULE_GUIDE.md              # Java AI 模块
+|   |-- community/                      # 社区审核与申诉专题
+|   |   |-- review-appeal-api.md
+|   |   `-- review-appeal-summary.md
+|   |-- maintenance-guide.md            # 运维维护
+|   |-- v1-release-notes.md             # 发布基线
+|   |-- project-metrics.md              # 工程规模快照
+|   `-- technical-design.md             # 技术设计
 |
 |-- service-api/
 |   `-- src/main/java/org/example/serviceapi/

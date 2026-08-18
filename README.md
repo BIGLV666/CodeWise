@@ -179,7 +179,11 @@ CodeWise-Agent/                 # 与 CodeWise 同级的 Python Agent
 
 环境依赖：JDK 21、Python 3.11+、MySQL 8、Redis、RabbitMQ、Nacos 和 Docker。
 
-根 POM 当前未配置聚合模块，公共模块发生变更时需要先安装：
+### 首次运行或 IDE 加载失败
+
+如果 IDE（如 IntelliJ IDEA）在加载项目时提示依赖解析失败，或 Maven 每次启动都重新加载且出错，这是因为共享模块（`service-api`、`service-common`）还未安装到本地 Maven 仓库。
+
+使用提供的一键安装脚本：
 
 ```powershell
 .\mvnw.cmd -f service-common\pom.xml -DskipTests install
@@ -217,15 +221,21 @@ FastAPI 默认监听 `127.0.0.1:8000`。前端调用 `/api/agent/**` 时必须�
 
 ## 文档
 
+完整文档索引见 [文档导航](docs/README.md)。
+
 - [技术设计与核心链路](docs/technical-design.md)
 - [项目目录说明](docs/project-structure.md)
 - [Controller 接口总览](docs/backend-controller-api.md)
 - [维护手册](docs/maintenance-guide.md)
+- [复习与收藏接口](docs/service-review-api.md)
+- [社区接口](docs/service-community-api.md)
+- [通知中心与消息服务](docs/service-message.md)
+- [社区审核与申诉 API](docs/community/review-appeal-api.md)
+- [社区审核与申诉实现总结](docs/community/review-appeal-summary.md)
 - [函数测试生成接口](docs/function-testcase-generator-api.md)
 - [自定义 AI 配置接口](docs/custom-ai-config-api.md)
 - [Java AI 模块与会话记忆](docs/AI_MODULE_GUIDE.md)
 - [V1 发布基线](docs/v1-release-notes.md)
-
 ## 项目定位
 
 本项目用于个人学习与工程实践，重点展示异步判题、函数题适配、容器池调度、学习数据闭环和 AI 辅助等核心实现及其设计过程。

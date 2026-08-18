@@ -17,7 +17,7 @@
 | `service-gateway` | `8082` | - | 推荐前端统一访问网关 |
 | `service-user` | `8081` | `/api/user/**` | 用户、登录、头像接口 |
 | `service-question` | `8084` | `/api/question/**` | 题目、测试点、提交、调试接口 |
-| `service-review` | `8085` | 当前未配置 | 收藏夹/复习服务，当前需直连或补 gateway 路由 |
+| `service-review` | `8097` | 当前未配置 | 收藏夹/复习服务，当前需直连或补 gateway 路由 |
 | `service-community` | `8087` | 当前未配置 | 帖子、评论和点赞，当前需直连或补 gateway 路由 |
 
 通过网关调用示例：
@@ -30,7 +30,7 @@ Authorization: Bearer <token>
 直连服务调用示例：
 
 ```http
-GET http://localhost:8085/api/review/favorites/list
+GET http://localhost:8097/api/review/favorites/list
 Authorization: Bearer <token>
 ```
 
@@ -753,7 +753,7 @@ Authorization: Bearer <token>
 
 基础路径：`/api/review/favorites`
 
-注意：当前 gateway 未配置 `/api/review/**`，前端若走网关需要先补路由；否则直连 `http://localhost:8085`。
+注意：当前 gateway 未配置 `/api/review/**`，前端若走网关需要先补路由；否则直连 `http://localhost:8097`。
 
 ### 获取当前用户收藏夹列表
 
@@ -1159,4 +1159,3 @@ Authorization: Bearer <token>
 | `questionIds` | `List<Long>` | 题目 ID 列表 |
 | `createTime` | `LocalDateTime` | 创建时间 |
 | `updateTime` | `LocalDateTime` | 更新时间 |
-
