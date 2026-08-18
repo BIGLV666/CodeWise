@@ -8,6 +8,7 @@ import org.example.servicecommunity.service.HostPostService;
 import org.example.servicecommunity.vo.CursorPageResult;
 import org.example.servicecommunity.vo.HomePostVo;
 import org.example.servicecommunity.vo.PostVo;
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +35,7 @@ public class PostController {
      * 获取发布帖子或评论时使用的一次性请求 ID，防止重复提交。
      */
     @GetMapping("/request-id")
+    @RateLimit(limit = 120, window = 60)
     public Result<String> getRequestId() {
         return Result.success(postService.getRequestId());
     }
@@ -42,6 +44,7 @@ public class PostController {
      * 发布帖子。requestId 必须先通过 /request-id 获取。
      */
     @PostMapping("/posts")
+    @RateLimit(limit = 20, window = 60)
     public Result<Post> createPost(@RequestBody PostDto postDto,
                                    @RequestParam String requestId) {
         return Result.success(postService.createPost(postDto, requestId));
@@ -51,6 +54,7 @@ public class PostController {
      * 按帖子 ID 升序游标分页。首次不传 lastId，后续传上页返回的 nextCursor。
      */
     @GetMapping("/posts")
+    @RateLimit(limit = 200, window = 60)
     public Result<CursorPageResult<HomePostVo>> listPosts(
             @RequestParam(required = false) Long lastId,
             @RequestParam(defaultValue = "20") Integer pageSize) {
@@ -62,6 +66,7 @@ public class PostController {
      * 查询帖子正文、点赞状态以及按标签推荐的相关帖子。
      */
     @GetMapping("/posts/{postId}")
+    @RateLimit(limit = 200, window = 60)
     public Result<PostVo> getPost(@PathVariable Long postId) {
         return Result.success(postService.getPostById(postId));
     }
@@ -70,6 +75,7 @@ public class PostController {
      * 修改当前用户发布的帖子。postId 以路径参数为准，请求体只需提交标题、正文和标签。
      */
     @PutMapping("/posts/{postId}")
+    @RateLimit(limit = 20, window = 60)
     public Result<PostVo> updatePost(@PathVariable Long postId, @RequestBody PostVo postVo) {
         return Result.success(postService.updatePost(postId, postVo));
     }
@@ -78,6 +84,7 @@ public class PostController {
      * 获取当前热度最高的帖子，按热度从高到低返回，最多 10 条。
      */
     @GetMapping("/posts/hot")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<HomePostVo>> hotPosts() {
         return Result.success(hostPostService.getHostHomePost());
     }
@@ -86,6 +93,7 @@ public class PostController {
      * 按帖子标题模糊搜索，结果按发布时间倒序返回。
      */
     @GetMapping("/posts/search")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<HomePostVo>> searchPosts(
             @RequestParam String keyword,
             @RequestParam(defaultValue = "20") Integer limit) {
@@ -97,6 +105,7 @@ public class PostController {
      * 按完整标签名搜索帖子，结果按发布时间倒序返回。
      */
     @GetMapping("/posts/tag")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<HomePostVo>> postsByTag(
             @RequestParam String tag,
             @RequestParam(defaultValue = "20") Integer limit) {
@@ -105,6 +114,7 @@ public class PostController {
     }
 
     @DeleteMapping("/posts/{postId}")
+    @RateLimit(limit = 20, window = 60)
     public Result<String> deletePost(@PathVariable Long postId) {
         postService.deletePostById(postId);
         return Result.success("success");

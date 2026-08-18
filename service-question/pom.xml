@@ -17,6 +17,14 @@
     <description>题目微服务</description>
 
     <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.example</groupId>
+            <artifactId>api-governance-spring-boot-starte</artifactId>
+        </dependency>
         <!-- Spring Web -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -25,11 +33,6 @@
         <dependency>
             <groupId>org.example</groupId>
             <artifactId>service-api</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
 
 
@@ -45,7 +48,6 @@
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
-            <version>2.10.1</version>
         </dependency>
 
         <!-- Nacos 配置管理 -->
@@ -58,7 +60,6 @@
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-            <version>3.5.9</version>
         </dependency>
 
         <!-- MySQL -->
@@ -84,7 +85,6 @@
         <dependency>
             <groupId>org.example</groupId>
             <artifactId>service-common</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>

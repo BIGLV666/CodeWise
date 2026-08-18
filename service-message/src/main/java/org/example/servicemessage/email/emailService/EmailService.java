@@ -33,8 +33,9 @@ public class EmailService implements MessageHandler {
 
 
     public void handle(String emailmessage, Channel channel, Message amqpMessage) {
-        EmailMessage message = objectMapper.convertValue(emailmessage, EmailMessage.class);
+        log.info("进入发送");
         try {
+            EmailMessage message = objectMapper.readValue(emailmessage, EmailMessage.class);
             log.info("收到邮件任务，收件人: {}", message.getTo());
 
             MimeMessage mail = mailSender.createMimeMessage();
@@ -44,6 +45,8 @@ public class EmailService implements MessageHandler {
             helper.setSubject(message.getSubject());
             if (isCodeEmail(message.getContent())) {
                 helper.setText(buildHtmlContent(message.getContent()), true);
+            } else if (isHtmlEmail(message.getContent())) {
+                helper.setText(message.getContent(), true);
             } else {
                 helper.setText(message.getContent(), false);
             }
@@ -52,7 +55,7 @@ public class EmailService implements MessageHandler {
             channel.basicAck(amqpMessage.getMessageProperties().getDeliveryTag(), false);
             log.info("邮件发送成功: {}", message.getTo());
         } catch (Exception e) {
-            log.error("邮件发送失败: {}, 错误: {}", message.getTo(), e.getMessage());
+            log.error("邮件任务处理失败: {}", e.getMessage(), e);
             try {
                 channel.basicAck(amqpMessage.getMessageProperties().getDeliveryTag(), false);
             } catch (Exception ackEx) {
@@ -63,6 +66,14 @@ public class EmailService implements MessageHandler {
 
     private boolean isCodeEmail(String content) {
         return content != null && content.contains("验证码");
+    }
+
+    private boolean isHtmlEmail(String content) {
+        if (content == null) {
+            return false;
+        }
+        String normalized = content.stripLeading().toLowerCase();
+        return normalized.startsWith("<!doctype html") || normalized.startsWith("<html");
     }
 
     private String buildHtmlContent(String content) {

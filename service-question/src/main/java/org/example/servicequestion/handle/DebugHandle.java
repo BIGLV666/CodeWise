@@ -9,7 +9,6 @@ import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicequestion.MQ.MessageHandler;
-import org.example.servicequestion.service.WebSocketPushService;
 import org.example.servicequestion.service.FunctionTestCaseGenerationService;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -28,8 +27,6 @@ public class DebugHandle implements MessageHandler {
     private RabbitTemplate rabbitTemplate;
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
-    @Autowired
-    private WebSocketPushService webSocketPushService;
     @Autowired
     private FunctionTestCaseGenerationService functionTestCaseGenerationService;
     private final ObjectMapper objectMapper = new ObjectMapper();

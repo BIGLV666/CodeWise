@@ -1,5 +1,6 @@
 package org.example.servicequestion.controller;
 
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.service.HtmlService;
@@ -15,6 +16,7 @@ public class HtmlController {
     @Autowired
     private HtmlService htmlService;
     @PostMapping("/html")
+    @RateLimit(limit = 20, window = 60)
     public Result<Question> html(@RequestParam("file") MultipartFile file) throws Exception {
 
             // 1. 获取文件内容

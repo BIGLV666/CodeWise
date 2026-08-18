@@ -18,9 +18,6 @@ public class WebConfig implements WebMvcConfigurer {
 
          .addPathPatterns("/**")
                 .excludePathPatterns(
-                       "/websocket/**",      // ✅ 排除 WebSocket
-                        "/ws/**",              // ✅ 排除 WebSocket
-                       "/sockjs/**",          // ✅ 排除 SockJS
                         "/login",              // ✅ 排除登录
                         "/register"            // ✅ 排除注册
                 );

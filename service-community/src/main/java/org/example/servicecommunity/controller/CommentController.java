@@ -7,6 +7,7 @@ import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.service.CommentService;
 import org.example.servicecommunity.vo.CommentVo;
 import org.example.servicecommunity.vo.CursorPageResult;
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,6 +30,7 @@ public class CommentController {
      * requestId 通过 /api/community/request-id 获取。
      */
     @PostMapping
+    @RateLimit(limit = 60, window = 60)
     public Result<Comment> createComment(@RequestBody CommentDto commentDto,
                                          @RequestParam String requestId) {
         return Result.success(commentService.createComment(commentDto, requestId));
@@ -39,6 +41,7 @@ public class CommentController {
      * rootCommentId=-1 不按根评论筛选，否则查询指定根评论的回复。
      */
     @GetMapping
+    @RateLimit(limit = 200, window = 60)
     public Result<CursorPageResult<CommentVo>> listComments(
             @RequestParam Long postId,
             @RequestParam(defaultValue = "POST") PostType type,
@@ -51,6 +54,7 @@ public class CommentController {
 
     /** 删除自己的评论；若删除根评论，会一并删除该根评论下的回复。 */
     @DeleteMapping("/{commentId}")
+    @RateLimit(limit = 30, window = 60)
     public Result<String> deleteComment(@PathVariable Long commentId) {
         commentService.deleteComment(commentId);
         return Result.success("success");

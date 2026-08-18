@@ -10,6 +10,7 @@ import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
 import org.example.servicecommunity.entry.Solution;
+import org.example.servicecommunity.enums.PostStatus;
 import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
@@ -58,12 +59,13 @@ public class CommentService {
         Solution solution = null;
         if (type == PostType.POST) {
             post = postMapper.selectById(commentDto.getPostId());
-            if (post == null || !Integer.valueOf(1).equals(post.getStatus())) {
+            // 待审核 / 已下架的帖子不可评论
+            if (post == null || !PostStatus.isVisible(post.getStatus())) {
                 throw new IllegalArgumentException("post not found");
             }
         } else {
             solution = solutionMapper.selectById(commentDto.getPostId());
-            if (solution == null || !Integer.valueOf(1).equals(solution.getStatus())) {
+            if (solution == null || !PostStatus.isVisible(solution.getStatus())) {
                 throw new IllegalArgumentException("solution not found");
             }
         }
@@ -78,7 +80,8 @@ public class CommentService {
                 .replyUserName(commentDto.getReplyUserName())
                 .likeCount(0L)
                 .type(type)
-                .status(1)
+                // 评论即时发布，不进入审核队列；管理员可事后下架
+                .status(PostStatus.NORMAL)
                 .build();
         int result = commentMapper.insert(comment);
         if (result == 0) {
@@ -111,6 +114,8 @@ public class CommentService {
 
         wrapper.eq(Comment::getPostId, postId);
         wrapper.eq(Comment::getType, type == null ? PostType.POST : type);
+        // 公开评论区不展示被管理员下架的评论
+        wrapper.eq(Comment::getStatus, PostStatus.NORMAL);
         wrapper.orderByAsc(Comment::getCommentId);
         wrapper.last("LIMIT " + (pageSize + 1));
         if (rootCommentId != null && !rootCommentId.equals(-1L)) {

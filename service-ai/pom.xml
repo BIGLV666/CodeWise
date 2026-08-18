@@ -14,6 +14,14 @@
     <description>Ai微服务</description>
 
     <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.example</groupId>
+            <artifactId>api-governance-spring-boot-starte</artifactId>
+        </dependency>
         <!-- ========== 1. 微服务基础设施 ========== -->
 
         <!-- Spring Boot Web (提供REST接口) -->
@@ -84,7 +92,6 @@
         <dependency>
             <groupId>com.baomidou</groupId>
             <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-            <version>3.5.9</version>
         </dependency>
 
         <!-- ========== 3. 工具与数据处理 ========== -->
@@ -113,14 +120,12 @@
         <dependency>
             <groupId>org.example</groupId>
             <artifactId>service-common</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
         </dependency>
         <!-- 公共模块（包含 Feign 接口） -->
 
         <dependency>
             <groupId>org.example</groupId>
             <artifactId>service-api</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
         </dependency>
 
 

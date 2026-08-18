@@ -23,7 +23,7 @@ public class Post {
     @Builder.Default
     private Long likeCount=0L;
     private Long commentCount;
-    private Integer status;//0-审核1-删除2-下架
+    private Integer status;//0-审核1-正常2-下架 3-审核未通过
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

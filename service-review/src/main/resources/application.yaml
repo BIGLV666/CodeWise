@@ -14,3 +14,22 @@ spring:
 
 server:
   port: 8097
+
+api:
+  governance:
+    enabled: true
+    log:
+      enabled: true
+      log-request-params: false
+      log-response: false
+      slow-threshold-ms: 800
+    rate-limit:
+      type: redis
+      algorithm: sliding-window
+      default-limit: -1
+      default-window: 60
+      status-code: 429
+      message: "复习操作过于频繁，请稍后重试"
+    management:
+      enabled: true
+      base-path: /api/review/governance

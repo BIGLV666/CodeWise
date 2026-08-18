@@ -1,5 +1,6 @@
 package org.example.serviceuser.controller;
 
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.service.FileUploadService;
@@ -17,6 +18,7 @@ public class informationController {
     private FileUploadService fileUploadService;
 
     @PostMapping("/avatar")
+    @RateLimit(limit = 10, window = 60)
     public Result<String> avatar(@RequestParam("file") MultipartFile file) {
         String url = fileUploadService.uploadFile(file, "avatar");
         try {
@@ -33,6 +35,7 @@ public class informationController {
      * 修改当前用户昵称
      */
     @PutMapping("/nickname")
+    @RateLimit(limit = 20, window = 60)
     public Result<UserDto> updateNickName(@RequestParam String nickName) {
         return Result.success(informationService.updateNickName(nickName));
     }
@@ -41,6 +44,7 @@ public class informationController {
      * 修改当前用户个人简介
      */
     @PutMapping("/bio")
+    @RateLimit(limit = 20, window = 60)
     public Result<UserDto> updateBio(@RequestParam String bio) {
         return Result.success(informationService.updateBio(bio));
     }
@@ -49,6 +53,7 @@ public class informationController {
      * 修改当前用户生日，格式：yyyy-MM-dd
      */
     @PutMapping("/birthday")
+    @RateLimit(limit = 20, window = 60)
     public Result<UserDto> updateBirthday(@RequestParam String birthday) {
         return Result.success(informationService.updateBirthday(birthday));
     }

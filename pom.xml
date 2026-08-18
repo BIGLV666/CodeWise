@@ -20,14 +20,38 @@
 
     <properties>
         <java.version>21</java.version>
-        <spring-boot.version>3.2.4</spring-boot.version>   <!-- ← 加上这行 -->
         <spring-cloud.version>2023.0.3</spring-cloud.version>
         <spring-cloud-alibaba.version>2023.0.1.0</spring-cloud-alibaba.version>
+        <!-- 第三方库版本集中管理 -->
+        <mybatis-plus.version>3.5.9</mybatis-plus.version>
+        <redisson.version>3.27.2</redisson.version>
+        <jjwt.version>0.12.5</jjwt.version>
+        <jsoup.version>1.17.2</jsoup.version>
+        <hutool.version>5.8.26</hutool.version>
+        <gson.version>2.10.1</gson.version>
+        <commons-pool2.version>2.12.0</commons-pool2.version>
     </properties>
 
 
     <dependencyManagement>
         <dependencies>
+            <!-- ===== 内部模块（父在此登记版本，子模块无需再写 version） ===== -->
+            <dependency>
+                <groupId>org.example</groupId>
+                <artifactId>service-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.example</groupId>
+                <artifactId>service-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.example</groupId>
+                <artifactId>api-governance-spring-boot-starte</artifactId>
+                <version>0.0.1-SNAPSHOT</version>
+            </dependency>
+
             <!-- Spring Cloud -->
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
@@ -36,28 +60,6 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-starter-websocket</artifactId>
-                <version>2.7.14</version>
-            </dependency>
-            <dependency>
-                <groupId>org.jsoup</groupId>
-                <artifactId>jsoup</artifactId>
-                <version>1.17.2</version>
-            </dependency>
-            <dependency>
-                <groupId>cn.hutool</groupId>
-                <artifactId>hutool-all</artifactId>
-                <version>5.8.26</version>
-            </dependency>
-
-            <dependency>
-                    <groupId>org.redisson</groupId>
-                    <artifactId>redisson-spring-boot-starter</artifactId>
-                    <version>3.27.2</version>
-            </dependency>
-
 
             <!-- Spring Cloud Alibaba -->
             <dependency>
@@ -68,43 +70,51 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- Redis -->
+            <!-- ===== 第三方库（Spring Boot 未管理或需锁定的） ===== -->
             <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-starter-data-redis</artifactId>
-                <version>${spring-boot.version}</version>
+                <groupId>org.jsoup</groupId>
+                <artifactId>jsoup</artifactId>
+                <version>${jsoup.version}</version>
             </dependency>
-
-            <!-- RabbitMQ -->
             <dependency>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-starter-amqp</artifactId>
-                <version>${spring-boot.version}</version>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-all</artifactId>
+                <version>${hutool.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.code.gson</groupId>
+                <artifactId>gson</artifactId>
+                <version>${gson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.redisson</groupId>
+                <artifactId>redisson-spring-boot-starter</artifactId>
+                <version>${redisson.version}</version>
             </dependency>
 
             <!-- 连接池 -->
             <dependency>
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-pool2</artifactId>
-                <version>2.12.0</version>
+                <version>${commons-pool2.version}</version>
             </dependency>
 
             <!-- JWT -->
             <dependency>
                 <groupId>io.jsonwebtoken</groupId>
                 <artifactId>jjwt-api</artifactId>
-                <version>0.12.5</version>
+                <version>${jjwt.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.jsonwebtoken</groupId>
                 <artifactId>jjwt-impl</artifactId>
-                <version>0.12.6</version>
+                <version>${jjwt.version}</version>
                 <scope>runtime</scope>
             </dependency>
             <dependency>
                 <groupId>io.jsonwebtoken</groupId>
                 <artifactId>jjwt-jackson</artifactId>
-                <version>0.12.5</version>
+                <version>${jjwt.version}</version>
                 <scope>runtime</scope>
             </dependency>
 
@@ -112,7 +122,7 @@
             <dependency>
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-                <version>3.5.5</version>
+                <version>${mybatis-plus.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

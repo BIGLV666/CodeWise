@@ -10,5 +10,33 @@ spring:
       config:
         server-addr: localhost:8848
         file-extension: yaml
+
+codewise:
+  mq:
+    enabled: true
+
 server:
   port: 8087
+
+api:
+  governance:
+    enabled: true
+    log:
+      enabled: true
+      log-request-params: false
+      log-response: false
+      slow-threshold-ms: 800
+    rate-limit:
+      type: redis
+      algorithm: sliding-window
+      default-limit: -1
+      default-window: 60
+      status-code: 429
+      message: "社区操作过于频繁，请稍后重试"
+    metrics:
+      window-size: 100
+      window-seconds: 300
+      max-apis: 1000
+    management:
+      enabled: true
+      base-path: /api/community/governance

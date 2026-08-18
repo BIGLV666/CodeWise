@@ -1,5 +1,6 @@
 package org.example.servicequestion.controller;
 
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
 import org.example.servicequestion.dto.InsertTestCaseDto;
 import org.example.servicequestion.entry.TestCase;
@@ -17,31 +18,37 @@ public class TestCaseController {
     private TestCaseService testCaseService;
 
     @GetMapping("/getallquestion")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<Map<String,Object>>> getQuestionInfo(){
         return Result.success(testCaseService.getAllTestCase());
     }
 
     @PostMapping("/addtestcase")
+    @RateLimit(limit = 20, window = 60)
     public Result<TestCase> addTestCase(@RequestBody TestCase testCase) {
         return Result.success(testCaseService.addTestCase(testCase));
     }
 
     @GetMapping("/gettestcasebyid")
+    @RateLimit(limit = 100, window = 60)
     public Result<TestCase> getTestCaseById(@RequestParam Long caseId) {
         return Result.success(testCaseService.getTestCaseById(caseId));
     }
 
     @GetMapping("/gettestcasesbyquestionid")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<TestCase>> getTestCasesByQuestionId(@RequestParam Long questionId) {
         return Result.success(testCaseService.getTestCasesByQuestionId(questionId));
     }
 
     @PutMapping("/updatetestcase")
+    @RateLimit(limit = 20, window = 60)
     public Result<TestCase> updateTestCase(@RequestBody InsertTestCaseDto dto, @RequestParam Long caseId) {
         return Result.success(testCaseService.updateTestCase(dto, caseId));
     }
 
     @DeleteMapping("/deletetestcase")
+    @RateLimit(limit = 20, window = 60)
     public Result<Void> deleteTestCase(@RequestParam Long caseId) {
         testCaseService.deleteTestCase(caseId);
         return Result.success("删除成功");

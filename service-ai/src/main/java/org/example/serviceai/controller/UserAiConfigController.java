@@ -1,5 +1,6 @@
 package org.example.serviceai.controller;
 
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceai.dto.AiModelQueryDto;
 import org.example.serviceai.dto.UserAiConfigDto;
 import org.example.serviceai.service.UserAiService;
@@ -28,21 +29,25 @@ public class UserAiConfigController {
     }
 
     @GetMapping
+    @RateLimit(limit = 100, window = 60)
     public Result<List<HomeUserConfigVo>> getAllConfigs() {
         return Result.success(userAiService.getAllConfigs());
     }
 
     @GetMapping("/{configId}")
+    @RateLimit(limit = 100, window = 60)
     public Result<UserAiConfigVo> getConfig(@PathVariable Long configId) {
         return Result.success(userAiService.getConfig(configId));
     }
 
     @PostMapping
+    @RateLimit(limit = 20, window = 60)
     public Result<UserAiConfigVo> createConfig(@RequestBody UserAiConfigDto dto) {
         return Result.success(userAiService.createConfig(dto));
     }
 
     @PutMapping("/{configId}")
+    @RateLimit(limit = 30, window = 60)
     public Result<UserAiConfigVo> updateConfig(
             @PathVariable Long configId,
             @RequestBody UserAiConfigDto dto
@@ -51,12 +56,14 @@ public class UserAiConfigController {
     }
 
     @DeleteMapping("/{configId}")
+    @RateLimit(limit = 30, window = 60)
     public Result<Void> deleteConfig(@PathVariable Long configId) {
         userAiService.deleteConfig(configId);
         return Result.success("删除成功");
     }
 
     @PostMapping("/models")
+    @RateLimit(limit = 30, window = 60)
     public Result<List<String>> fetchModels(@RequestBody AiModelQueryDto dto) {
         return Result.success(userAiService.fetchModels(dto.getBaseUrl(), dto.getApiKey()));
     }

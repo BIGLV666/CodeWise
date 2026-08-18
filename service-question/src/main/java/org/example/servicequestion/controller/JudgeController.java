@@ -10,6 +10,7 @@ import org.example.servicequestion.service.JudgeService;
 import org.example.servicequestion.service.SubmitRecordService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 
 import java.util.List;
 
@@ -24,27 +25,32 @@ public class JudgeController {
     private SubmitRecordService submitRecordService;
 
     @PostMapping("/judge")
+    @RateLimit(limit = 120, window = 60)
     public Result<Long> judge(@RequestBody GetCodeDto getCodeDto) {
         Long submitRecordId = judgeService.judge(getCodeDto);
         return Result.success(submitRecordId);
     }
     @PostMapping("/debug")
+    @RateLimit(limit = 60, window = 60)
     public Result<String> debug(@RequestBody DebugDto getCodeDto) {
         return Result.success(judgeService.debug(getCodeDto));
     }
 
     @GetMapping("/getsubmitrecordbyid")
+    @RateLimit(limit = 200, window = 60)
     public Result<SubmitRecord> getSubmitRecordById(@RequestParam Long submitRecordId) {
         SubmitRecord submitRecord = submitRecordService.getSubmitRecordById(submitRecordId);
         return Result.success(submitRecord);
     }
 
     @PostMapping("/getsubmitrecordsbyids")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<SubmitRecord>> getSubmitRecordsByIds(@RequestBody List<Long> submitRecordIds) {
         return Result.success(submitRecordService.getSubmitRecordsByIds(submitRecordIds));
     }
 
     @GetMapping("/getsubmitrecordsbyquestionid")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<SubmitRecord>> getSubmitRecordsByQuestionId(@RequestParam Long questionId) {
         List<SubmitRecord> records = submitRecordService.getSubmitRecordsByQuestionId(questionId);
         return Result.success(records);
@@ -52,6 +58,7 @@ public class JudgeController {
 
 
     @GetMapping("/getsubmitrecordsbyuserid")
+    @RateLimit(limit = 100, window = 60)
     public Result<CursorPageResult<SubmitRecord>> getSubmitRecordsByUserId(
             @RequestParam(required = false) Long lastId,
             @RequestParam Integer pageSize) {
@@ -61,6 +68,7 @@ public class JudgeController {
     }
 
     @DeleteMapping("/deletesubmitrecord")
+    @RateLimit(limit = 30, window = 60)
     public Result<Void> deleteSubmitRecord(@RequestParam Long submitRecordId) {
         submitRecordService.deleteSubmitRecord(submitRecordId);
         return Result.success("删除成功");

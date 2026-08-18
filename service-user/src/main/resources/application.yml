@@ -12,5 +12,33 @@ spring:
         server-addr: localhost:8848
         file-extension: yaml
 
+codewise:
+  mq:
+    enabled: true
+
 server:
   port: 8081   # ??????????????????
+
+api:
+  governance:
+    enabled: true
+    log:
+      enabled: true
+      log-request-params: false
+      log-response: false
+      slow-threshold-ms: 500
+    rate-limit:
+      type: redis
+      algorithm: sliding-window
+      default-limit: -1
+      default-window: 60
+      status-code: 429
+      message: "请求过于频繁，请稍后重试"
+    metrics:
+      window-size: 100
+      window-seconds: 300
+      max-apis: 1000
+    management:
+      enabled: true
+      base-path: /api/user/governance
+

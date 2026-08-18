@@ -13,6 +13,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.util.Objects;
+import java.util.Set;
 
 @Component
 public class AuthGlobalFilter implements GlobalFilter, Ordered {
@@ -20,7 +21,34 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     @Autowired
     private JwtUntil jwtUtil;
 
+    /**
+     * 免鉴权路径白名单。
+     * 用精确路径而非 contains 子串匹配：后者会让任何含 "login"/"register" 的路径意外放行。
+     */
+    private static final Set<String> PUBLIC_PATHS = Set.of(
+            "/api/user/login",
+            "/api/user/emaillogin",
+            "/api/user/emailloginforcode",
+            "/api/user/getemailcode",
+            "/api/user/emailregister",
+            "/api/user/register",
+            "/api/user/updatepasswordforemail",
+            "/api/user/updatefromcode"
+    );
 
+    /** 静态资源前缀，无需登录即可访问。 */
+    private static final String UPLOADS_PREFIX = "/uploads/";
+
+    private boolean isPublicPath(String path) {
+        if (path == null) {
+            return false;
+        }
+        // 去掉结尾多余的斜杠，避免 /api/user/login/ 绕过白名单命中鉴权分支
+        String normalized = path.endsWith("/") && path.length() > 1
+                ? path.substring(0, path.length() - 1)
+                : path;
+        return PUBLIC_PATHS.contains(normalized) || normalized.startsWith(UPLOADS_PREFIX);
+    }
 
     private String getClientIp(ServerHttpRequest request) {
         HttpHeaders headers = request.getHeaders();
@@ -54,8 +82,8 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         System.out.println("🔍 请求路径: " + path);
         System.out.println("📌 客户端 IP: " + ip);
 
-        // 2. 放行登录/注册
-        if (path.contains("login") || path.contains("register")||path.contains("updatefromcode")||path.contains("updatepasswordforemail")||path.contains("uploads")) {
+        // 2. 放行登录/注册/找回密码
+        if (isPublicPath(path)) {
             System.out.println("✅ 放行: " + path);
             ServerHttpRequest newRequest = requestBuilder.build();
             System.out.println("📌 newRequest 的 X-Real-IP: " + newRequest.getHeaders().getFirst("X-Real-IP"));

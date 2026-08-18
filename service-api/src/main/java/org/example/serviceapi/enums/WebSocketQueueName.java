@@ -6,6 +6,8 @@ import lombok.Getter;
 public enum WebSocketQueueName {
     INBOX_LIKE,
     INBOX_REVIEW,
+    INBOX_CHECKED,
+    INBOX_APPEAL,
     AI_ADVICE,
     ;
 }

@@ -1,6 +1,7 @@
 package org.example.servicejudge.controller;
 
 import org.example.serviceapi.dto.Result;
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.servicejudge.judge.JudgeService;
 import org.example.servicejudge.vo.DockersStatusVo;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 @RestController
+@RateLimit(limit = 60, window = 60)
 @RequestMapping("/api/judge/containers")
 public class DockerController {
 

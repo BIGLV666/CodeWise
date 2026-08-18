@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 
 @Slf4j
-@RestControllerAdvice(basePackages = "org.example.serviceuser.controller")
+@RestControllerAdvice(basePackages = "org.example.serviceuser")
 public class GlobalExceptionHandler {
 
 

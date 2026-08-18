@@ -15,3 +15,22 @@ server:
   port: 8085
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
+
+api:
+  governance:
+    enabled: true
+    log:
+      enabled: true
+      log-request-params: false
+      log-response: false
+      slow-threshold-ms: 2000
+    rate-limit:
+      type: redis
+      algorithm: sliding-window
+      default-limit: -1
+      default-window: 60
+      status-code: 429
+      message: "AI 请求过于频繁，请稍后重试"
+    management:
+      enabled: true
+      base-path: /api/ai/governance

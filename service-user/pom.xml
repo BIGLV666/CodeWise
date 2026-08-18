@@ -16,6 +16,10 @@
     <description>用户微服务</description>
 
     <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
         <!-- Spring Security -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -24,6 +28,10 @@
         <dependency>
             <groupId>org.example</groupId>
             <artifactId>service-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.example</groupId>
+            <artifactId>api-governance-spring-boot-starte</artifactId>
             <version>0.0.1-SNAPSHOT</version>
         </dependency>
 
@@ -52,30 +60,26 @@
             <scope>runtime</scope>
         </dependency>
 
-            <!-- ✅ Spring Boot 3.x 专用 -->
+            <!-- ✅ Spring Boot 3.x 专用（版本由父 pom 管理） -->
             <dependency>
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
-                <version>3.5.9</version>
             </dependency>
 
 
-        <!--JWT-->
+        <!--JWT（版本由父 pom 管理）-->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>
-            <version>0.12.5</version>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-impl</artifactId>
-            <version>0.12.6</version>
             <scope>runtime</scope>
         </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-jackson</artifactId>
-            <version>0.12.5</version>
             <scope>runtime</scope>
         </dependency>
 
@@ -83,7 +87,6 @@
         <dependency>
             <groupId>org.example</groupId>
             <artifactId>service-common</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
         </dependency>
 
         <!-- Lombok -->
@@ -109,6 +112,18 @@
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>..</directory>
+                <includes>
+                    <include>login-notification-email.html</include>
+                </includes>
+                <targetPath>templates</targetPath>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
@@ -120,14 +135,6 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <source>8</source>
-                    <target>8</target>
                 </configuration>
             </plugin>
         </plugins>

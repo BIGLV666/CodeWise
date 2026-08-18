@@ -12,8 +12,8 @@ import org.example.servicequestion.service.QuestionService;
 
 import org.example.servicequestion.vo.QuestionVo;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 
 import java.util.List;
 
@@ -21,27 +21,17 @@ import java.util.List;
 @RequestMapping("/api/question")
 public class QuestionController {
 
-
-    @Autowired
-    private SimpMessagingTemplate messagingTemplate;
-
-
     @Autowired
     private QuestionService questionService;
-    @GetMapping("/test-ws")
-    public String testWs() {
-        messagingTemplate.convertAndSend("/topic/judge-result", "广播测试消息");
-        return "广播已发送";
-    }
-
-
     @PostMapping("/addquestion")
+    @RateLimit(limit = 20, window = 60)
     public Result<Question> addQuestion(@RequestBody InsertQuestionDto insertQuestionDto) {
         Question question = questionService.addQuestion(insertQuestionDto);
         return Result.success(question);
     }
 
     @GetMapping("/getquestionbyid")
+    @RateLimit(limit = 200, window = 60)
     public Result<QuestionVo> getQuestionById(@RequestParam Long questionId)  {
         QuestionVo question = questionService.getQuestionById(questionId);
 
@@ -49,18 +39,21 @@ public class QuestionController {
     }
 
     @PutMapping("/updatequestion")
+    @RateLimit(limit = 20, window = 60)
     public Result<Question> updateQuestion(@RequestBody InsertQuestionDto insertQuestionDto,@RequestParam Long questionId) {
         Question updated = questionService.updateQuestion(insertQuestionDto,questionId);
         return Result.success(updated);
     }
 
     @DeleteMapping("/deletequestion")
+    @RateLimit(limit = 20, window = 60)
     public Result<Void> deleteQuestion(@RequestParam Long questionId) {
         questionService.deleteQuestion(questionId);
         return Result.success("删除成功");
     }
 
     @GetMapping("/cursorquestions")
+    @RateLimit(limit = 200, window = 60)
     public Result<CursorPageResult<ReturnQuestionDto>> cursorQuestions(
             @RequestParam(required = false) Long lastId,
             @RequestParam Integer pageSize,
@@ -73,7 +66,8 @@ public class QuestionController {
         return Result.success(result);
     }
     @GetMapping("/total")
-    private Result<Long>getTotal() throws InterruptedException {
+    @RateLimit(limit = 100, window = 60)
+    public Result<Long>getTotal() throws InterruptedException {
         return Result.success(questionService.getTotalQuestionCount());
     }
 
@@ -83,7 +77,8 @@ public class QuestionController {
      * @return
      */
     @GetMapping("/likeserach")
-    private Result<List<QuestionVo>>serach(@RequestParam String likeKey){
+    @RateLimit(limit = 100, window = 60)
+    public Result<List<QuestionVo>>serach(@RequestParam String likeKey){
         return Result.success(questionService.serach(likeKey));
     }
 }

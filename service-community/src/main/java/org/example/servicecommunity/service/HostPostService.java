@@ -5,6 +5,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommunity.entry.Post;
+import org.example.servicecommunity.enums.PostStatus;
 import org.example.servicecommunity.mapper.PostMapper;
 import org.example.servicecommunity.vo.HomePostVo;
 import org.redisson.api.RLock;
@@ -140,7 +141,7 @@ public class HostPostService {
         List<HomePostVo> result = new ArrayList<>();
         for (Long id : rankedIds) {
             Post post = postMap.get(id);
-            if (post != null && Integer.valueOf(1).equals(post.getStatus())) {
+            if (post != null && PostStatus.isVisible(post.getStatus())) {
                 result.add(new HomePostVo(post));
             }
         }

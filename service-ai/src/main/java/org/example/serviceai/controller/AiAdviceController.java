@@ -9,6 +9,7 @@ import org.example.serviceai.dto.AiTaskDto;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.service.AiAdviceTaskService;
 import org.example.serviceapi.dto.Result;
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -27,6 +28,7 @@ public class AiAdviceController {
     @Autowired
     private AiAdviceTaskService aiAdviceTaskService;
     @GetMapping
+    @RateLimit(limit = 100, window = 60)
     public Result<List<HomeConversationVo>> getConversations(){
         return Result.success(adviceConversationService.getConversations());
     }
@@ -34,6 +36,7 @@ public class AiAdviceController {
             value = "/ask",
             produces = MediaType.TEXT_EVENT_STREAM_VALUE
     )
+    @RateLimit(limit = 20, window = 60)
     public SseEmitter ask(@RequestBody AskDto askDto) {
         Long userId = UserContext.getUserId();
 
@@ -119,6 +122,7 @@ public class AiAdviceController {
                 : exception.getMessage();
     }
     @GetMapping("/{conversationId}/messages")
+    @RateLimit(limit = 100, window = 60)
     public Result<CursorPageResult<Message>> getAllMessage(
             @PathVariable Long conversationId,
             @RequestParam(required = false) Long cursor,
@@ -130,11 +134,13 @@ public class AiAdviceController {
     }
 
     @PostMapping("/task")
+    @RateLimit(limit = 20, window = 60)
     public Result<String>aiTask(@RequestBody AiTaskDto taskDto) {
         aiAdviceTaskService.aiTask(taskDto);
         return Result.success("success");
     }
     @GetMapping("/task")
+    @RateLimit(limit = 100, window = 60)
     public Result<List<Object>>getAllAdviceTasks(@RequestParam Long questionId) {
         return Result.success(aiAdviceTaskService.getAiAdvices(UserContext.getUserId(), questionId));
     }

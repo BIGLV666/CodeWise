@@ -1,0 +1,70 @@
+name: codewise
+
+runtime:
+  java: "21"
+
+build_tools:
+  - maven
+
+external_services:
+  - name: MySQL
+    required: true
+    version: "8"
+  - name: Redis
+    required: true
+  - name: RabbitMQ
+    required: true
+  - name: Nacos
+    required: true
+  - name: Docker
+    required: true
+
+services:
+  - name: service-user
+    language: Java
+    work_dir: .
+    install_command: mvnw.cmd -f service-common\pom.xml -DskipTests install && mvnw.cmd -f service-api\pom.xml -DskipTests install
+    command: mvnw.cmd -f service-user\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8081
+
+  - name: service-message
+    language: Java
+    work_dir: .
+    command: mvnw.cmd -f service-message\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8083
+
+  - name: service-review
+    language: Java
+    work_dir: .
+    command: mvnw.cmd -f service-review\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8097
+
+  - name: service-community
+    language: Java
+    work_dir: .
+    command: mvnw.cmd -f service-community\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8087
+
+  - name: service-ai
+    language: Java
+    work_dir: .
+    command: mvnw.cmd -f service-ai\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8085
+
+  - name: service-question
+    language: Java
+    work_dir: .
+    command: mvnw.cmd -f service-question\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8084
+
+  - name: service-judge
+    language: Java
+    work_dir: .
+    command: mvnw.cmd -f service-judge\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8086
+
+  - name: service-gateway
+    language: Java
+    work_dir: .
+    command: mvnw.cmd -f service-gateway\pom.xml spring-boot:run
+    health_check: http://127.0.0.1:8082

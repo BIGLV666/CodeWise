@@ -14,7 +14,6 @@ import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.mapper.JudgeRecordMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
-import org.example.servicequestion.service.WebSocketPushService;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,8 +33,6 @@ public class SubmitRecordHandel implements MessageHandler {
     private QuestionMapper questionMapper;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    @Autowired
-    private WebSocketPushService webSocketPushService;
     @Autowired
     private JudgeRecordMapper judgeRecordMapper;
     @Autowired

@@ -13,6 +13,7 @@ import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
 import org.example.servicecommunity.entry.Tags;
+import org.example.servicecommunity.enums.PostStatus;
 import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
@@ -71,7 +72,8 @@ public class PostService {
                 .userName(UserContext.getUserName())
                 .likeCount(0L)
                 .commentCount(0L)
-                .status(1)
+                // 新建内容进入待审核，由管理员审核台放行；作者本人仍可在“我的内容”看到
+                .status(PostStatus.PENDING)
                 .createTime(LocalDateTime.now())
                 .updateTime(LocalDateTime.now())
                 .build();
@@ -95,7 +97,7 @@ public class PostService {
                 throw new IllegalArgumentException("create post failed");
             }
         }
-        redisTemplate.opsForZSet().add(RedisContext.HOST_POST_KEY, post.getPostId().toString(), 0.0);
+        // 待审核帖子不进热榜，审核通过时再入榜（见 PostCheckService#checkPost）
         redisTemplate.opsForValue().set(RedisContext.REQUEST_ID_KEY + uuid, "success", 3, TimeUnit.MINUTES);
         return post;
     }
@@ -105,6 +107,8 @@ public class PostService {
         if (lastId != null) {
             wrapper.gt(Post::getPostId, lastId);
         }
+        // 信息流只返回审核通过的帖子，避免待审核/已下架内容外泄
+        wrapper.eq(Post::getStatus, PostStatus.NORMAL);
         wrapper.orderByAsc(Post::getPostId);
         wrapper.last("LIMIT " + (pageSize + 1));
 
@@ -168,6 +172,13 @@ public class PostService {
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Post::getPostId, postId);
          Post post = postMapper.selectOne(wrapper);
+        if (post == null) {
+            throw new IllegalArgumentException("post not found");
+        }
+        if (!PostStatus.isVisible(post.getStatus())
+                && !Objects.equals(post.getUserId(), UserContext.getUserId())) {
+            throw new IllegalArgumentException("post not found");
+        }
 
         List<Tags> tags = tagsMapper.selectList(new LambdaQueryWrapper<Tags>()
                 .eq(Tags::getPostId, postId)
@@ -343,6 +354,8 @@ public class PostService {
 
         post.setPostTitle(postTitle);
         post.setPostContent(postDto.getPostContent().trim());
+        // 已发布内容修改后必须重新审核，避免通过审核后替换为违规正文
+        post.setStatus(PostStatus.PENDING);
         post.setUpdateTime(LocalDateTime.now());
         int r1 = postMapper.updateById(post);
         if (r1 == 0) {
@@ -350,6 +363,7 @@ public class PostService {
         }
         redisTemplate.opsForHash().delete(RedisContext.POST_ID_KEY, post.getPostId().toString());
         redisTemplate.opsForHash().delete(RedisContext.POST_VO_KEY, post.getPostId().toString(), post.getPostId().toString());
+        redisTemplate.opsForZSet().remove(RedisContext.HOST_POST_KEY, post.getPostId().toString());
         PostVo result = new PostVo(post);
         result.setTags(tags.stream().map(Tags::getTagName).toList());
         return result;

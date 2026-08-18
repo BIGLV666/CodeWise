@@ -15,6 +15,7 @@ import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Solution;
 import org.example.servicecommunity.entry.Tags;
+import org.example.servicecommunity.enums.PostStatus;
 import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
@@ -73,7 +74,8 @@ public class SolutionService {
                 .solutionTitle(dto.getSolutionTitle().trim())
                 .solutionContent(dto.getSolutionContent().trim())
                 .solutionUserId(UserContext.getUserId())
-                .status(1)
+                // 新建题解进入待审核，由管理员审核台放行
+                .status(PostStatus.PENDING)
                 .createTime(LocalDateTime.now())
                 .updateTime(LocalDateTime.now())
                 .build();
@@ -121,10 +123,9 @@ public class SolutionService {
 
     /** 查询题解详情，并把本次浏览写入 Redis 当前桶。 */
     public SolutionVo getSolution(Long solutionId) {
-        Solution solution = solutionMapper.selectOne(new LambdaQueryWrapper<Solution>()
-                .eq(Solution::getSolutionId, solutionId)
-                .eq(Solution::getStatus, 1));
-        if (solution == null) {
+        Solution solution = solutionMapper.selectById(solutionId);
+        if (solution == null || (!PostStatus.isVisible(solution.getStatus())
+                && !java.util.Objects.equals(solution.getSolutionUserId(), UserContext.getUserId()))) {
             throw new IllegalArgumentException("题解不存在或已下架");
         }
         Number bucketId = (Number) redisTemplate.opsForValue().get(RedisContext.SOLUTION_LOOK_BUCKET_KEY);
@@ -156,6 +157,8 @@ public class SolutionService {
         solution.setQuestionId(dto.getQuestionId());
         solution.setSolutionTitle(dto.getSolutionTitle().trim());
         solution.setSolutionContent(dto.getSolutionContent().trim());
+        // 已发布题解修改后重新进入审核队列
+        solution.setStatus(PostStatus.PENDING);
         solution.setUpdateTime(LocalDateTime.now());
         if (solutionMapper.updateById(solution) == 0) {
             throw new IllegalArgumentException("修改题解失败");

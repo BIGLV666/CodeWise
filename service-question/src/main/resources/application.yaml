@@ -20,3 +20,22 @@ codewise:
     docker-command: docker
     docker-image: codewise-java-judge:17
     timeout-seconds: 30
+
+api:
+  governance:
+    enabled: true
+    log:
+      enabled: true
+      log-request-params: false
+      log-response: false
+      slow-threshold-ms: 1000
+    rate-limit:
+      type: redis
+      algorithm: sliding-window
+      default-limit: -1
+      default-window: 60
+      status-code: 429
+      message: "题目操作过于频繁，请稍后重试"
+    management:
+      enabled: true
+      base-path: /api/question/governance

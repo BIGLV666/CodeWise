@@ -1,6 +1,7 @@
 package org.example.servicemessage.notificationcenter.controller;
 
 import org.example.serviceapi.dto.Result;
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceapi.enums.NotificationCenterType;
 import org.example.servicemessage.notificationcenter.service.NotificationCenterService;
 import org.example.servicemessage.notificationcenter.vo.NotificationCursorPageVo;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RateLimit(limit = 300, window = 60)
 @RequestMapping("/api/message/notifications")
 public class NotificationCenterController {
     private final NotificationCenterService notificationCenterService;

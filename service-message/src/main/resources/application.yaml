@@ -15,5 +15,28 @@ spring:
         server-addr: localhost:8848
         group: DEFAULT_GROUP
 
+codewise:
+  mq:
+    enabled: true
+
 server:
   port: 8083
+
+api:
+  governance:
+    enabled: true
+    log:
+      enabled: true
+      log-request-params: false
+      log-response: false
+      slow-threshold-ms: 500
+    rate-limit:
+      type: redis
+      algorithm: sliding-window
+      default-limit: -1
+      default-window: 60
+      status-code: 429
+      message: "通知操作过于频繁，请稍后重试"
+    management:
+      enabled: true
+      base-path: /api/message/governance

@@ -1,5 +1,6 @@
 package org.example.servicequestion.controller;
 
+import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
 import org.example.servicequestion.dto.FunctionDto;
 import org.example.servicequestion.dto.FunctionTestCaseDto;
@@ -32,16 +33,19 @@ public class FunctionQuestionParseController {
     private LeetCodeArtifactImportService leetCodeArtifactImportService;
 
     @GetMapping("/leetcode")
+    @RateLimit(limit = 30, window = 60)
     public Result<FunctionParseVo> fromLeetcode(@RequestParam String title) throws IOException, InterruptedException {
         return Result.success(functionQuestionParseService.fromLeetCode(title));
     }
 
     @PostMapping
+    @RateLimit(limit = 20, window = 60)
     public Result<Long> insert(@RequestBody FunctionDto functionDto) {
         return Result.success(functionQuestionParseService.insert(functionDto));
     }
 
     @PostMapping("/test-cases/batch")
+    @RateLimit(limit = 20, window = 60)
     public Result<Integer> insertTestCases(
             @RequestParam Long questionId,
             @RequestBody List<FunctionTestCaseDto> testCases
@@ -50,6 +54,7 @@ public class FunctionQuestionParseController {
     }
 
     @PostMapping("/test-cases/generate")
+    @RateLimit(limit = 10, window = 60)
     public Result<FunctionTestCaseGenerationTaskVo> generateTestCases(
             @RequestBody FunctionTestCaseGenerateRequest request
     ) {
@@ -57,6 +62,7 @@ public class FunctionQuestionParseController {
     }
 
     @GetMapping("/test-cases/generate/status")
+    @RateLimit(limit = 100, window = 60)
     public Result<FunctionTestCaseGenerationTaskVo> getGenerationStatus(
             @RequestParam String taskId
     ) {
@@ -64,6 +70,7 @@ public class FunctionQuestionParseController {
     }
 
     @PostMapping("/leetcode/artifacts/generate")
+    @RateLimit(limit = 10, window = 60)
     public Result<LeetCodeArtifactTaskVo> generateLeetCodeArtifacts(
             @RequestParam String titleSlug
     ) {
@@ -71,6 +78,7 @@ public class FunctionQuestionParseController {
     }
 
     @GetMapping("/leetcode/artifacts/status")
+    @RateLimit(limit = 100, window = 60)
     public Result<LeetCodeArtifactTaskVo> getLeetCodeArtifactStatus(
             @RequestParam String taskId
     ) {
