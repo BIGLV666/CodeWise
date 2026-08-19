@@ -1,4 +1,4 @@
-package org.example.servicejudge.service;
+package org.example.servicejudge.Mq.handler;
 
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.GetDebugTestDto;
@@ -28,7 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class DebugServiceHandleTest {
+class JudgeDebugHandlerTest {
 
     @Mock
     private FunctionConfigMapper functionConfigMapper;
@@ -36,13 +36,13 @@ class DebugServiceHandleTest {
     @Mock
     private JudgeService judgeService;
 
-    private DebugServiceHandle debugServiceHandle;
+    private JudgeDebugHandler judgeDebugHandler;
 
     @BeforeEach
     void setUp() {
-        debugServiceHandle = new DebugServiceHandle();
-        ReflectionTestUtils.setField(debugServiceHandle, "functionConfigMapper", functionConfigMapper);
-        ReflectionTestUtils.setField(debugServiceHandle, "judgeService", judgeService);
+        judgeDebugHandler = new JudgeDebugHandler();
+        ReflectionTestUtils.setField(judgeDebugHandler, "functionConfigMapper", functionConfigMapper);
+        ReflectionTestUtils.setField(judgeDebugHandler, "judgeService", judgeService);
     }
 
     @Test
@@ -70,7 +70,7 @@ class DebugServiceHandleTest {
         second.setInput("3");
         second.setOutput("6");
 
-        List<JudgeReturnRecordDto> results = debugServiceHandle.debugFunction(
+        List<JudgeReturnRecordDto> results = judgeDebugHandler.debugFunction(
                 debugDto,
                 List.of(first, second)
         );

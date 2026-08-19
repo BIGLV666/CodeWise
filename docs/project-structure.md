@@ -7,23 +7,25 @@
 ```text
 CodeWise/
 |-- docs/
-|   |-- README.md                       # 文档导航
-|   |-- backend-controller-api.md       # Controller 接口总览
+|   |-- README.md                       # 文档总索引
+|   |-- backend-controller-api.md       # 接口公共约定与服务索引
+|   |-- technical-design.md             # 跨服务技术设计
 |   |-- codewise-flow-and-features.md   # 业务流程与功能说明
 |   |-- project-structure.md            # 项目目录说明
-|   |-- service-community-api.md        # 社区基础接口
-|   |-- service-message.md              # 消息与通知
-|   |-- service-review-api.md           # 复习与收藏接口
-|   |-- custom-ai-config-api.md         # 自定义 AI 配置
-|   |-- function-testcase-generator-api.md
-|   |-- AI_MODULE_GUIDE.md              # Java AI 模块
-|   |-- community/                      # 社区审核与申诉专题
-|   |   |-- review-appeal-api.md
-|   |   `-- review-appeal-summary.md
+|   |-- project-metrics.md              # 工程规模快照
 |   |-- maintenance-guide.md            # 运维维护
 |   |-- v1-release-notes.md             # 发布基线
-|   |-- project-metrics.md              # 工程规模快照
-|   `-- technical-design.md             # 技术设计
+|   |-- service-gateway/README.md
+|   |-- service-user/api.md
+|   |-- service-question/api.md
+|   |-- service-review/api.md
+|   |-- service-community/api.md
+|   |-- service-message/README.md
+|   |-- service-ai/README.md
+|   |-- service-judge/README.md
+|   |-- service-judge-go/README.md
+|   |-- service-api/README.md
+|   `-- service-common/README.md
 |
 |-- service-api/
 |   `-- src/main/java/org/example/serviceapi/
@@ -68,10 +70,13 @@ CodeWise/
 |
 |-- service-judge/
 |   `-- src/main/java/org/example/servicejudge/
-|       |-- judge/                     # 编译、执行、判定核心逻辑
-|       |-- service/                   # 判题和调试处理器
-|       |-- config/                    # Docker 客户端配置
-|       `-- Mq/                        # 判题消息消费与结果回传
+|       |-- judge/                     # Docker 容器池、编译、执行、判定核心
+|       |-- Mq/handler/                # 正常判题、调试、重试、死信处理器
+|       |-- service/failure/           # 失败提交查询与人工重试业务
+|       |-- task/                      # 失败判题状态补偿任务
+|       |-- controller/                # 容器池与失败提交管理接口
+|       |-- mapper/                    # 判题库 MyBatis Mapper
+|       `-- config/                    # Docker、Feign、Web 配置
 |
 |-- service-review/
 |   `-- src/main/

@@ -1,4 +1,4 @@
-package org.example.servicejudge.service;
+package org.example.servicejudge.Mq.handler;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -26,9 +26,13 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 正常判题消息处理器，消费初次提交并回调题目服务。
+ * AI 建议消息仍由正常判题流程按原业务规则发送；失败重试由 {@link JudgeRetryHandler} 处理。
+ */
 @Service
 @Slf4j
-public class JudgeServiceHandel implements MessageHandler {
+public class JudgeSubmitHandler implements MessageHandler {
 
     @Autowired
     private JudgeInterface judge;
@@ -187,7 +191,6 @@ public class JudgeServiceHandel implements MessageHandler {
         long startTime = System.currentTimeMillis();
         JudgeRecord  finalResult=judge.batchExecuteCode(code,main,submitRecord.getLanguage(),ToTestDToFroFunction(testCases));
         long endTime = System.currentTimeMillis();
-        System.out.println(endTime-startTime+"===============================");
         finalResult.setSubmitRecordId(submitRecord.getSubmitRecordId());
         finalResult.setCode(submitRecord.getSubmitContent());
         finalResult.setCreateTime(LocalDateTime.now());

@@ -2,15 +2,11 @@ package org.example.servicequestion.Task;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.NonNull;
-import org.example.serviceapi.dto.judge.JudgeMqDto;
-import org.example.serviceapi.dto.judge.JudgeResultDto;
 import org.example.serviceapi.dto.question.TestMessage;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.entry.TestCase;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
-import org.example.servicequestion.mapper.TestCaseMapper;
-import org.example.servicequestion.service.JudgeService;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;

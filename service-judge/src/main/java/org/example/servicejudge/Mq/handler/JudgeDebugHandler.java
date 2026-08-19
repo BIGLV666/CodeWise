@@ -1,4 +1,4 @@
-package org.example.servicejudge.service;
+package org.example.servicejudge.Mq.handler;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,9 +34,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 调试判题消息处理器，负责 Redis 中调试任务的读取、执行和结果回写。
+ */
 @Service
 @Slf4j
-public class DebugServiceHandle implements MessageHandler {
+public class JudgeDebugHandler implements MessageHandler {
     @Autowired
     private RabbitTemplate rabbitTemplate;
     @Autowired

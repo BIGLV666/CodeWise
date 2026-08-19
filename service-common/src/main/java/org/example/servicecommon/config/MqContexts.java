@@ -29,7 +29,8 @@ public  class MqContexts {
     //判题死信队列
     public static final String JUDGE_DLX = "judge.dlx";
     public static final String JUDGE_DLQ = "judge.dead.queue";
-
+    //判题重试队列
+    public static final String JUDGE_RETRY_ROUTING_KEY="judge.retry.routing";
     //复习队列
     public static final String REVIEW_QUEUE_NAME = "reviews.queue";
     public static final String REVIEW_EXCHANGE = "reviews.exchange";

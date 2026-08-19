@@ -103,6 +103,19 @@ public class MqConfig {
     public MessageConverter messageConverter() {
         return new Jackson2JsonMessageConverter();
     }
+    //判题重试队列
+    @Bean
+    public Binding judgeRetryBinding() {
+        return BindingBuilder
+                .bind(judgeQueue())
+                .to(judgeExchange())
+                .with(JUDGE_RETRY_ROUTING_KEY);
+    }
+
+
+
+
+
     //==============Ai===========队列
     @Bean
     public Queue aiQueue(){

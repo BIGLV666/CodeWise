@@ -1,4 +1,4 @@
-# CodeWise AI 模块说明
+# service-ai AI 服务说明与接口
 
 ## 1. 当前完成范围
 
@@ -182,3 +182,164 @@ UNIQUE KEY uk_ai_memory_conversation_user (conversation_id, user_id);
 ## 12. 完成边界与后续方向
 
 当前 AI MVP 到此收尾，不增加 Redis 摘要缓存。下一阶段优先实现力扣式核心函数判题模式，让平台产生稳定的真实提交数据；之后再按顺序推进相邻提交 diff 和跨题长期记忆。
+
+---
+
+## 用户自定义 AI 服务配置接口
+
+用户可以保存 OpenAI 兼容的 HTTPS API 地址、API Key 和模型列表。API Key 使用 AES-256-GCM 加密后写入数据库，接口只返回固定掩码。
+
+## 环境变量
+
+启动 `service-ai` 前必须配置 32 字节主密钥的 Base64 字符串：
+
+```powershell
+$env:API_KEY_MASTER_KEY="<base64-key>"
+```
+
+主密钥不能提交到代码仓库，丢失后已有 API Key 无法解密。
+
+## 获取远程模型列表
+
+```http
+POST /api/ai/configs/models
+Content-Type: application/json
+```
+
+```json
+{
+  "baseUrl": "https://api.example.com/v1",
+  "apiKey": "sk-example"
+}
+```
+
+服务端请求 `GET {baseUrl}/models`。出于 SSRF 防护，只允许 HTTPS 公网地址，不允许本机、局域网和链路本地地址。
+
+## 创建配置
+
+```http
+POST /api/ai/configs
+Content-Type: application/json
+```
+
+```json
+{
+  "groupName": "个人模型",
+  "modelNames": ["model-a", "model-b"],
+  "aiUrl": "https://api.example.com/v1",
+  "apiKey": "sk-example"
+}
+```
+
+同一用户的 `groupName` 不能重复。
+
+## 查询配置
+
+```http
+GET /api/ai/configs
+GET /api/ai/configs/{configId}
+```
+
+用户只能查询自己的配置。
+
+## 更新配置
+
+```http
+PUT /api/ai/configs/{configId}
+```
+
+请求字段与创建接口相同。`apiKey` 为空时保留原 API Key，传入新值时重新加密。
+
+## 删除配置
+
+```http
+DELETE /api/ai/configs/{configId}
+```
+
+## 接入原问答接口
+
+继续使用原 SSE 接口：
+
+```http
+POST /api/ai/advice/ask
+```
+
+自动选择平台模型：
+
+```json
+{
+  "conversationId": 1,
+  "question": "为什么这段代码越界？",
+  "code": "..."
+}
+```
+
+使用用户模型：
+
+```json
+{
+  "conversationId": 1,
+  "question": "为什么这段代码越界？",
+  "code": "...",
+  "userAiConfigId": 12,
+  "modelName": "model-a"
+}
+```
+
+`userAiConfigId` 和 `modelName` 必须同时为空或同时提供。服务端会校验配置归属以及模型是否属于该配置。
+
+## 用户可见异常
+
+- `400`：参数错误、API Key 无效、模型不属于配置。
+- `403`：访问了其他用户的配置。
+- `429`：远程 AI 服务限流或额度不足。
+- `502`：远程 AI 服务异常。
+- `500`：服务内部异常。
+
+---
+
+## 函数模式随机测试生成接口
+
+## 创建生成任务
+
+```http
+POST /api/question/function/test-cases/generate
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "questionId": 1001,
+  "language": "java",
+  "standardAnswer": "class Solution { public int solve(int value) { return value * 2; } }",
+  "count": 20,
+  "seed": 123456
+}
+```
+
+- 仅题目创建者或管理员可调用，禁用账号不可调用。
+- `count` 默认为 `20`，范围为 `1-100`。
+- `seed` 可不传；传入相同种子可以复现同一批随机输入。
+- 当前支持 `int`、`long`、`String`、`int[]`、`String[]` 参数。
+- 后端随机生成输入，用标准答案计算输出，全部成功后批量写入隐藏测试用例。
+- 接口返回异步任务信息，初始状态为 `PENDING`。
+
+## 查询生成状态
+
+```http
+GET /api/question/function/test-cases/generate/status?taskId=<taskId>
+Authorization: Bearer <token>
+```
+
+任务状态包括 `PENDING`、`SUCCESS`、`FAILED`。任务仅创建者本人可查询，并在 Redis 中保留 30 分钟。
+
+默认随机范围：
+
+- `int`：`[-1000, 1000]`
+- `long`：`[-100000, 100000]`
+- `String`：长度 `0-20`，内容为大小写字母和数字
+- `int[]`：长度 `0-20`，元素范围 `[-100, 100]`
+- `String[]`：长度 `0-10`，单个字符串长度 `0-10`
+
+随机生成只保证参数类型正确，不保证满足题目的跨参数业务约束。例如“两数之和一定存在答案”这类约束，后续需要增加题目级生成规则。
