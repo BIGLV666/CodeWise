@@ -2,6 +2,8 @@
 
 `service-judge` 是 CodeWise 的异步判题执行服务。它不直接接收用户提交请求，而是通过 RabbitMQ 消费 `service-question` 发布的判题或调试任务，在 Docker 容器中编译、运行代码，并把判题结果回调给题目服务。
 
+容器池以受限、非 root 容器执行不可信代码：根文件系统只读，只有 `/workspace` 与 `/tmp` 使用容量受限的临时文件系统；容器禁用网络、移除全部 capabilities 并启用 `no-new-privileges`，同时限制 CPU、内存和 PID 数。执行超时或异常的容器不会回收到池中，而是销毁重建以清理可能遗留的进程树。
+
 ## 1. 包结构
 
 ```text

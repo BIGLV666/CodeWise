@@ -14,6 +14,8 @@ CodeWise/
 |   |-- project-structure.md            # 项目目录说明
 |   |-- project-metrics.md              # 工程规模快照
 |   |-- maintenance-guide.md            # 运维维护
+|   |-- maintenance/                    # 修复与演进计划
+|   |   `-- repair-plan.md
 |   |-- v1-release-notes.md             # 发布基线
 |   |-- service-gateway/README.md
 |   |-- service-user/api.md

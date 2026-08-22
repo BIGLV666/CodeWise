@@ -39,6 +39,7 @@
 ## 发布与维护
 
 - [`maintenance-guide.md`](maintenance-guide.md)：部署前检查、判题容器池、消息队列、Redis 和常见故障。
+- [`maintenance/repair-plan.md`](maintenance/repair-plan.md)：按优先级维护的修复与演进计划。
 - [`v1-release-notes.md`](v1-release-notes.md)：V1 发布基线和部署前提。
 
 ## 文档维护约定

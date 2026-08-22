@@ -98,7 +98,7 @@ Authorization: Bearer <token>
 | --- | --- | --- | --- |
 | `questionId` | `Long` | 是 | 题目 ID |
 
-返回：`Result<Void>`，成功消息为“删除成功”。
+返回：`Result<Void>`，成功消息为“删除成功”。只有题目创建者或管理员可以删除；服务端从登录态确定操作者，忽略客户端声称的身份。
 
 ### 游标分页查询题目
 
@@ -207,7 +207,7 @@ Content-Type: application/json
 }
 ```
 
-返回：`Result<Long>`，`data` 为新题目 ID。
+返回：`Result<Long>`，`data` 为新题目 ID。函数题创建、解析、测试用例生成和批量测试用例管理属于管理员操作；题目创建者 ID 始终由服务端登录态写入，不信任请求体中的 `createUserId`。
 
 ### 批量补充函数测试用例
 
@@ -232,6 +232,7 @@ Content-Type: application/json
 - 后端根据函数参数和返回类型标准化输入输出，并自动接续执行顺序。
 - 同一道题的输入输出哈希唯一，重复提交返回“测试用例已存在”。
 - 接口不会修改题目的公开样例字段。
+- 该接口要求管理员权限，避免普通用户向任意题目注入隐藏测试数据。
 
 返回：`Result<Integer>`，`data` 为本次新增数量。
 
@@ -282,7 +283,6 @@ Content-Type: application/json
 
 ```json
 {
-  "userId": 1,
   "code": "print(input())",
   "language": "python",
   "questionId": 1,
@@ -298,7 +298,6 @@ Content-Type: application/json
 说明：
 
 - `tests` 为临时调试用例，不一定写入正式测试点。
-- 当前 `userId` 字段存在于 DTO 中，但正常应以登录态为准。
 - 后端根据题目类型自动选择 ACM 或函数调试流程。
 - 函数模式当前只支持 Java，会读取函数配置并生成 `Main.java`。
 - 函数模式会将本次调试用例一次编译、逐个运行，避免每个用例重复编译。
@@ -341,7 +340,7 @@ DELETE /api/question/deletesubmitrecord?submitRecordId=1
 Authorization: Bearer <token>
 ```
 
-返回：`Result<Void>`。
+返回：`Result<Void>`。仅当前登录用户自己的提交记录可以删除，避免通过枚举提交记录 ID 删除他人记录。
 
 ## service-question 测试点管理
 
@@ -381,6 +380,8 @@ Content-Type: application/json
 ```
 
 返回：`Result<TestCase>`。
+
+测试点管理接口由管理员使用，测试数据不接受普通用户直接维护。
 
 ### 根据测试点 ID 查询
 

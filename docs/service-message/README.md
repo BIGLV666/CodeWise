@@ -101,6 +101,8 @@ notification.review.routing -> ReviewHandle
 
 ## WebSocket
 
+WebSocket 握手除 JWT 解析外还必须校验网关注入的 `X-Internal-Token`；直接携带伪造身份头访问下游服务会被拒绝。
+
 STOMP 端点：
 
 ```text

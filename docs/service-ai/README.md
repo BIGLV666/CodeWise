@@ -127,7 +127,7 @@ data: [DONE]
 | 云端模型 | 自动判题建议、用户实时追问、主要回答质量 |
 | Ollama 小模型 | 会话摘要、未来记忆整理、无输出时的最终兜底 |
 
-不同模型统一实现 `CallAi`。`AIServiceManager` 按优先级选择健康 Provider，记录失败次数并进行切换；`AIService` 记录 Provider 名称、耗时、超时判断和根因。
+不同模型统一实现 `CallAi`。`AIServiceManager` 按优先级选择健康 Provider，记录失败次数并进行切换；后台单线程定时执行真实探测，健康实例每三分钟探测一次，不健康实例每三十秒复检，关闭服务时同步停止探测线程。`AIService` 记录 Provider 名称、耗时、超时判断和根因。
 
 ## 8. 数据库与迁移
 
@@ -213,7 +213,7 @@ Content-Type: application/json
 }
 ```
 
-服务端请求 `GET {baseUrl}/models`。出于 SSRF 防护，只允许 HTTPS 公网地址，不允许本机、局域网和链路本地地址。
+服务端请求 `GET {baseUrl}/models`。出于 SSRF 防护，只允许无查询参数或片段的 HTTPS 公网地址；服务端会校验 DNS 返回的全部 IPv4/IPv6 地址，拒绝本机、私网、链路本地、多播及保留地址。模型列表和流式请求均禁止跟随重定向，并校验重定向目标后显式拒绝响应。
 
 ## 创建配置
 
