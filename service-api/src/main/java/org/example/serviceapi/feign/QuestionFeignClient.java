@@ -1,7 +1,8 @@
 package org.example.serviceapi.feign;
 
-import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.dto.judge.JudgeContextDto;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,4 +17,16 @@ public interface QuestionFeignClient {
     Result<QuestionDto> getQuestionInfo(@PathVariable Long questionId);
     @PostMapping("/api/question/info/favoritequestions")
     Result<List<QuestionDto>> getFavorites(@RequestBody List<Long> questionIds);
+
+    /**
+     * 按判题记录拉取判题上下文（代码、日志、输入输出、题目描述等大字段）。
+     *
+     * <p>仅供服务间内部调用：请求经由统一 Feign 拦截器注入 X-Internal-Token，
+     * 由 UserAuthInterceptor 校验；不存在对外公网暴露的鉴权面。</p>
+     *
+     * @param judgeRecordId 判题记录 ID
+     * @return 判题上下文；记录不存在时返回 error
+     */
+    @GetMapping("/api/question/internal/judge-context/{judgeRecordId}")
+    Result<JudgeContextDto> getJudgeContext(@PathVariable("judgeRecordId") Long judgeRecordId);
 }

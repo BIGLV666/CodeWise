@@ -54,38 +54,77 @@ public class MqConfig {
     }
    // ========== 判题队列 ==========
 
-
     @Bean
     public DirectExchange judgeExchange() {
         return new DirectExchange(MqContexts.JUDGE_EXCHANGE, true, false);
     }
 
+    // ========== 判题队列 v2：submit/debug/retry 独立队列，统一挂 judge.dlx ==========
+    // 旧 judge.queue 因 broker 端参数不可变无法补挂 DLX，已弃用（不再声明）。
+
     @Bean
-    public Binding judgeBinding() {
+    Queue judgeSubmitQueue() {
+        return QueueBuilder.durable(JUDGE_SUBMIT_QUEUE)
+                .deadLetterExchange(JUDGE_DLX)
+                .deadLetterRoutingKey(JUDGE_DEAD_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    Queue judgeDebugQueue() {
+        return QueueBuilder.durable(JUDGE_DEBUG_QUEUE)
+                .deadLetterExchange(JUDGE_DLX)
+                .deadLetterRoutingKey(JUDGE_DEAD_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    Queue judgeRetryQueue() {
+        return QueueBuilder.durable(JUDGE_RETRY_QUEUE)
+                .deadLetterExchange(JUDGE_DLX)
+                .deadLetterRoutingKey(JUDGE_DEAD_ROUTING_KEY)
+                .build();
+    }
+
+    /**
+     * 延迟重试等待队列：无消费者。消费失败时按指数退避设置 per-message TTL
+     * 投入本队列，TTL 到期后经 DLX 弹回 judge.submit.queue，实现无插件的延迟重试。
+     */
+    @Bean
+    Queue judgeWaitQueue() {
+        return QueueBuilder.durable(JUDGE_WAIT_QUEUE)
+                .deadLetterExchange(JUDGE_EXCHANGE)
+                .deadLetterRoutingKey(JUDGE_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    public Binding judgeSubmitBinding() {
         return BindingBuilder
-                .bind(judgeQueue())
+                .bind(judgeSubmitQueue())
                 .to(judgeExchange())
                 .with(MqContexts.JUDGE_ROUTING_KEY);
     }
+
     @Bean
-    public Binding judgeBinding2() {
+    public Binding judgeDebugBinding() {
         return BindingBuilder
-                .bind(judgeQueue())
+                .bind(judgeDebugQueue())
                 .to(judgeExchange())
                 .with(MqContexts.JUDGE_DEBUG_ROUTING_KEY);
     }
 
     @Bean
-    DirectExchange judgeDeadExchange() {
-        return new DirectExchange(JUDGE_DLX);
+    public Binding judgeRetryBinding() {
+        return BindingBuilder
+                .bind(judgeRetryQueue())
+                .to(judgeExchange())
+                .with(MqContexts.JUDGE_RETRY_ROUTING_KEY);
     }
 
     @Bean
-    Queue judgeQueue() {
-        // judge.queue already exists without DLX arguments in the current broker.
-        // Queue arguments are immutable, so redeclaring it with a DLX closes the channel
-        // and prevents RabbitAdmin from declaring the notification queues below.
-        return QueueBuilder.durable(JUDGE_QUEUE_NAME).build();
+    DirectExchange judgeDeadExchange() {
+        return new DirectExchange(JUDGE_DLX);
     }
 
     @Bean
@@ -96,20 +135,12 @@ public class MqConfig {
     Binding judgeDeadBinding() {
         return BindingBuilder.bind(judgeDeadQueue())
                 .to(judgeDeadExchange())
-                .with("judge.dead");
+                .with(JUDGE_DEAD_ROUTING_KEY);
     }
 
     @Bean
     public MessageConverter messageConverter() {
         return new Jackson2JsonMessageConverter();
-    }
-    //判题重试队列
-    @Bean
-    public Binding judgeRetryBinding() {
-        return BindingBuilder
-                .bind(judgeQueue())
-                .to(judgeExchange())
-                .with(JUDGE_RETRY_ROUTING_KEY);
     }
 
 

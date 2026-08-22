@@ -1,44 +1,38 @@
 package org.example.servicejudge.Mq.handler;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rabbitmq.client.Channel;
+import org.example.serviceapi.dto.event.EventTypes;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.event.EventPublisher;
 import org.example.servicejudge.entry.FailureSubmit;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.SubmitRecord;
 import org.example.servicejudge.enums.FailureSubmitStatus;
-import org.example.servicejudge.interfaces.JudgeInterface;
 import org.example.servicejudge.mapper.FailureSubmitMapper;
-import org.example.servicejudge.mapper.FunctionConfigMapper;
-import org.example.servicejudge.mapper.FunctionTestCaseMapper;
 import org.example.servicejudge.mapper.JudgeRecordMapper;
-import org.example.servicejudge.mapper.QuestionMapper;
 import org.example.servicejudge.mapper.SubmitRecordMapper;
-import org.example.servicejudge.mapper.TestCaseMapper;
+import org.example.servicejudge.service.JudgeTaskService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.amqp.core.Message;
-import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.test.util.ReflectionTestUtils;
 
+import java.io.IOException;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
+/**
+ * 失败重试处理器单元测试（适配去 Channel 化后的新结构）：
+ * 幂等抢占、复用已有结果、判题复用 JudgeTaskService（不发 AI 事件）、
+ * 失败登记 lastError 并上抛。
+ */
 @ExtendWith(MockitoExtension.class)
 class JudgeRetryHandlerTest {
 
-    @Mock
-    private JudgeInterface judge;
     @Mock
     private FailureSubmitMapper failureSubmitMapper;
     @Mock
@@ -46,42 +40,34 @@ class JudgeRetryHandlerTest {
     @Mock
     private JudgeRecordMapper judgeRecordMapper;
     @Mock
-    private QuestionMapper questionMapper;
+    private EventPublisher eventPublisher;
     @Mock
-    private FunctionConfigMapper functionConfigMapper;
-    @Mock
-    private FunctionTestCaseMapper functionTestCaseMapper;
-    @Mock
-    private TestCaseMapper testCaseMapper;
-    @Mock
-    private RabbitTemplate rabbitTemplate;
-    @Mock
-    private Channel channel;
+    private JudgeTaskService judgeTaskService;
 
     private JudgeRetryHandler judgeRetryHandler;
-    private Message message;
 
     @BeforeEach
     void setUp() {
-        judgeRetryHandler = new JudgeRetryHandler();
-        ReflectionTestUtils.setField(judgeRetryHandler, "objectMapper", new ObjectMapper());
-        ReflectionTestUtils.setField(judgeRetryHandler, "judge", judge);
-        ReflectionTestUtils.setField(judgeRetryHandler, "failureSubmitMapper", failureSubmitMapper);
-        ReflectionTestUtils.setField(judgeRetryHandler, "submitRecordMapper", submitRecordMapper);
-        ReflectionTestUtils.setField(judgeRetryHandler, "judgeRecordMapper", judgeRecordMapper);
-        ReflectionTestUtils.setField(judgeRetryHandler, "questionMapper", questionMapper);
-        ReflectionTestUtils.setField(judgeRetryHandler, "functionConfigMapper", functionConfigMapper);
-        ReflectionTestUtils.setField(judgeRetryHandler, "functionTestCaseMapper", functionTestCaseMapper);
-        ReflectionTestUtils.setField(judgeRetryHandler, "testCaseMapper", testCaseMapper);
-        ReflectionTestUtils.setField(judgeRetryHandler, "rabbitTemplate", rabbitTemplate);
-
-        MessageProperties properties = new MessageProperties();
-        properties.setDeliveryTag(99L);
-        message = new Message("1".getBytes(), properties);
+        judgeRetryHandler = new JudgeRetryHandler(
+                failureSubmitMapper,
+                submitRecordMapper,
+                judgeRecordMapper,
+                eventPublisher,
+                judgeTaskService);
     }
 
     @Test
-    void reusesExistingJudgeResultWithoutExecutingJudgeOrSendingAi() throws Exception {
+    void preemptedRecordReturnsNormally() throws IOException {
+        when(failureSubmitMapper.updateStatusToRetry(1L)).thenReturn(0);
+
+        judgeRetryHandler.handle(1L);
+
+        verify(failureSubmitMapper, never()).selectById(1L);
+        verifyNoInteractions(judgeTaskService, eventPublisher);
+    }
+
+    @Test
+    void reusesExistingJudgeResultWithoutExecutingJudgeOrSendingAi() throws IOException {
         FailureSubmit failureSubmit = new FailureSubmit();
         failureSubmit.setFailureSubmitId(1L);
         failureSubmit.setSubmitRecordId(10L);
@@ -100,19 +86,44 @@ class JudgeRetryHandlerTest {
         when(judgeRecordMapper.selectOne(any())).thenReturn(existingResult);
         when(failureSubmitMapper.updateStatus(1L, FailureSubmitStatus.SUCCESS.getValue())).thenReturn(1);
 
-        judgeRetryHandler.handle("1", channel, message);
+        judgeRetryHandler.handle(1L);
 
-        verify(rabbitTemplate).convertAndSend(
+        verify(eventPublisher).publish(
                 MqContexts.Question_EXCHANGE,
                 MqContexts.QUESTION_SUBMIT_RECORD_ROUTING_KEY,
+                EventTypes.JUDGE_RESULT_CALLBACK,
                 20L);
-        verify(channel).basicAck(99L, false);
         verify(failureSubmitMapper, never()).updateFailureStatus(any(), any(), any());
-        verifyNoInteractions(judge);
+        verifyNoInteractions(judgeTaskService);
     }
 
     @Test
-    void storesLastErrorAndNacksWhenRetryFails() throws Exception {
+    void executesThroughJudgeTaskServiceWithoutAiAdvice() throws IOException {
+        FailureSubmit failureSubmit = new FailureSubmit();
+        failureSubmit.setFailureSubmitId(1L);
+        failureSubmit.setSubmitRecordId(10L);
+
+        SubmitRecord submitRecord = new SubmitRecord();
+        submitRecord.setSubmitRecordId(10L);
+        submitRecord.setJudgeStatus("failure");
+
+        when(failureSubmitMapper.updateStatusToRetry(1L)).thenReturn(1);
+        when(failureSubmitMapper.selectById(1L)).thenReturn(failureSubmit);
+        when(submitRecordMapper.selectById(10L)).thenReturn(submitRecord);
+        when(judgeRecordMapper.selectOne(any())).thenReturn(null);
+        when(submitRecordMapper.updateRecordToJudge(10L)).thenReturn(1);
+        when(failureSubmitMapper.updateStatus(1L, FailureSubmitStatus.SUCCESS.getValue())).thenReturn(1);
+
+        judgeRetryHandler.handle(1L);
+
+        // 判题 + 落库 + 结果回调事件复用 JudgeTaskService，且不发 AI 建议
+        verify(judgeTaskService).judgeAndPersist(submitRecord, false);
+        verify(failureSubmitMapper).updateStatus(1L, FailureSubmitStatus.SUCCESS.getValue());
+        verify(failureSubmitMapper, never()).updateFailureStatus(any(), any(), any());
+    }
+
+    @Test
+    void storesLastErrorAndThrowsWhenRetryFails() {
         FailureSubmit failureSubmit = new FailureSubmit();
         failureSubmit.setFailureSubmitId(1L);
         failureSubmit.setSubmitRecordId(10L);
@@ -125,7 +136,7 @@ class JudgeRetryHandlerTest {
                 eq(FailureSubmitStatus.FAILURE.getValue()),
                 any())).thenReturn(1);
 
-        judgeRetryHandler.handle("1", channel, message);
+        assertThrows(IllegalStateException.class, () -> judgeRetryHandler.handle(1L));
 
         ArgumentCaptor<String> errorCaptor = ArgumentCaptor.forClass(String.class);
         verify(failureSubmitMapper).updateFailureStatus(
@@ -134,8 +145,36 @@ class JudgeRetryHandlerTest {
                 errorCaptor.capture());
         assertTrue(errorCaptor.getValue().contains("提交记录不存在"));
         assertTrue(errorCaptor.getValue().length() <= 4000);
-        verify(channel).basicNack(99L, false, false);
-        verifyNoInteractions(rabbitTemplate);
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void judgeFailureMarksFailureAndRethrows() throws IOException {
+        FailureSubmit failureSubmit = new FailureSubmit();
+        failureSubmit.setFailureSubmitId(1L);
+        failureSubmit.setSubmitRecordId(10L);
+
+        SubmitRecord submitRecord = new SubmitRecord();
+        submitRecord.setSubmitRecordId(10L);
+        submitRecord.setJudgeStatus("failure");
+
+        when(failureSubmitMapper.updateStatusToRetry(1L)).thenReturn(1);
+        when(failureSubmitMapper.selectById(1L)).thenReturn(failureSubmit);
+        when(submitRecordMapper.selectById(10L)).thenReturn(submitRecord);
+        when(judgeRecordMapper.selectOne(any())).thenReturn(null);
+        when(submitRecordMapper.updateRecordToJudge(10L)).thenReturn(1);
+        doThrow(new java.io.IOException("docker down"))
+                .when(judgeTaskService).judgeAndPersist(any(SubmitRecord.class), anyBoolean());
+        when(failureSubmitMapper.updateFailureStatus(
+                eq(1L),
+                eq(FailureSubmitStatus.FAILURE.getValue()),
+                any())).thenReturn(1);
+
+        assertThrows(java.io.IOException.class, () -> judgeRetryHandler.handle(1L));
+
+        verify(failureSubmitMapper).updateFailureStatus(
+                eq(1L),
+                eq(FailureSubmitStatus.FAILURE.getValue()),
+                any());
     }
 }
-

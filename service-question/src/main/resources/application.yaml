@@ -14,6 +14,8 @@ server:
   port: 8084
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
+  outbox:
+    enabled: true
   function-artifact:
     root: ./data/function-artifacts
     judge-mode: local

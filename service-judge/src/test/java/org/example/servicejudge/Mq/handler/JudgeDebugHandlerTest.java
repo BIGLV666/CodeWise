@@ -8,28 +8,36 @@ import org.example.servicejudge.entry.FunctionConfig;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.judge.JudgeService;
 import org.example.servicejudge.mapper.FunctionConfigMapper;
+import org.example.servicejudge.mapper.QuestionMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.data.redis.core.RedisTemplate;
 
 import java.io.IOException;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * 调试判题处理器单元测试（适配构造器注入后的新结构，断言与原版等价）。
+ */
 @ExtendWith(MockitoExtension.class)
 class JudgeDebugHandlerTest {
 
+    @Mock
+    private RabbitTemplate rabbitTemplate;
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+    @Mock
+    private QuestionMapper questionMapper;
     @Mock
     private FunctionConfigMapper functionConfigMapper;
 
@@ -40,9 +48,12 @@ class JudgeDebugHandlerTest {
 
     @BeforeEach
     void setUp() {
-        judgeDebugHandler = new JudgeDebugHandler();
-        ReflectionTestUtils.setField(judgeDebugHandler, "functionConfigMapper", functionConfigMapper);
-        ReflectionTestUtils.setField(judgeDebugHandler, "judgeService", judgeService);
+        judgeDebugHandler = new JudgeDebugHandler(
+                rabbitTemplate,
+                redisTemplate,
+                questionMapper,
+                judgeService,
+                functionConfigMapper);
     }
 
     @Test

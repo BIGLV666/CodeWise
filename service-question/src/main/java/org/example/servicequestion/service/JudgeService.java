@@ -1,21 +1,21 @@
 package org.example.servicequestion.service;
 
 import lombok.NonNull;
+import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.question.TestMessage;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
-import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.entry.TestCase;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
-import org.example.servicequestion.mapper.TestCaseMapper;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -26,12 +26,18 @@ import java.util.UUID;
 public class JudgeService {
     @Autowired
     private SubmitRecordMapper submitRecordMapper;
+
     @Autowired
-    private RabbitTemplate rabbitTemplate;
+    private OutboxService outboxService;
 
     @Autowired
     private RedisTemplate<String,Object> redisTemplate;
 
+    /**
+     * 提交判题：提交记录落库与判题请求事件在同一事务内写入（事务性 Outbox），
+     * 事务提交后由 Relay 异步投递到判题交换机，避免「DB 已提交但消息丢失」。
+     */
+    @Transactional
     public Long judge(GetCodeDto getCodeDto) {
 
         String code = getCodeDto.getCode();
@@ -54,7 +60,9 @@ public class JudgeService {
         submitRecord.setSubmitScene(submitScene);
         submitRecordMapper.insert(submitRecord);
 
-        rabbitTemplate.convertAndSend(
+        // 判题请求改走事务性 Outbox：payload 只放 submitRecordId（小字段引用）
+        outboxService.append(
+                EventTypes.JUDGE_SUBMIT_REQUEST,
                 MqContexts.JUDGE_EXCHANGE,
                 MqContexts.JUDGE_ROUTING_KEY,
                 submitRecord.getSubmitRecordId()
@@ -64,11 +72,17 @@ public class JudgeService {
     }
 
 
+    /**
+     * 调试判题：Redis 任务写入先行，Outbox 事件随后在同一事务内登记，
+     * 事务提交后由 Relay 投递调试路由键，保证任务数据与消息的一致性。
+     */
+    @Transactional
     public String debug(DebugDto debugDto){
         String uuid = UUID.randomUUID().toString();
         debugDto.setUserId(UserContext.getUserId());
         redisTemplate.opsForHash().put(RedisContext.JUDGE_DEBUG_KEY,uuid,debugDto);
-        rabbitTemplate.convertAndSend(
+        outboxService.append(
+                EventTypes.JUDGE_DEBUG_REQUEST,
                 MqContexts.JUDGE_EXCHANGE,
                 MqContexts.JUDGE_DEBUG_ROUTING_KEY,
                 uuid

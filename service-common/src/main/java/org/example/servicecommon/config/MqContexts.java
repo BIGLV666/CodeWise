@@ -29,8 +29,23 @@ public  class MqContexts {
     //判题死信队列
     public static final String JUDGE_DLX = "judge.dlx";
     public static final String JUDGE_DLQ = "judge.dead.queue";
+    //判题死信路由键
+    public static final String JUDGE_DEAD_ROUTING_KEY = "judge.dead";
     //判题重试队列
     public static final String JUDGE_RETRY_ROUTING_KEY="judge.retry.routing";
+
+    // ========== 判题队列 v2：submit/debug/retry 拆分为独立队列并挂 DLX ==========
+    // 旧 judge.queue 在 broker 中参数不可变（无法补挂 DLX），已弃用；
+    // 发布时需排空旧队列（详见 docs/maintenance/messaging-reliability.md）。
+    /** 判题提交队列（挂 judge.dlx，消费失败超限后死信） */
+    public static final String JUDGE_SUBMIT_QUEUE = "judge.submit.queue";
+    /** 调试判题队列（挂 judge.dlx） */
+    public static final String JUDGE_DEBUG_QUEUE = "judge.debug.queue";
+    /** 人工/补偿重试队列（挂 judge.dlx，消息体为 failureSubmitId） */
+    public static final String JUDGE_RETRY_QUEUE = "judge.retry.queue";
+    /** 延迟重试等待队列：无消费者，TTL 到期后经 DLX 弹回 judge.submit.queue */
+    public static final String JUDGE_WAIT_QUEUE = "judge.wait.queue";
+
     //复习队列
     public static final String REVIEW_QUEUE_NAME = "reviews.queue";
     public static final String REVIEW_EXCHANGE = "reviews.exchange";

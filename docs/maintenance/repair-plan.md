@@ -19,13 +19,13 @@
 
 ### 2. Judge MQ 可靠性
 
-- [ ] 为主 Judge 队列真正配置 DLX/DLQ 参数，确认 `basicNack(requeue=false)` 会进入死信队列。
-- [ ] 拆分 submit、debug、retry 队列，避免不同消息结构共用一个队列。
+- [-] 为主 Judge 队列真正配置 DLX/DLQ 参数，确认 `basicNack(requeue=false)` 会进入死信队列。（新队列 judge.submit/debug/retry.queue 已挂 judge.dlx，旧 judge.queue 因参数不可变弃用，见 `docs/maintenance/messaging-reliability.md`）
+- [-] 拆分 submit、debug、retry 队列，避免不同消息结构共用一个队列。
 - [-] 确认并启用 `@EnableScheduling`，验证 Pending 任务补偿扫描实际运行。
-- [ ] 统一 ACK/NACK 时机，避免事务提交前 ACK。
-- [ ] 避免在数据库事务中长时间执行 Docker 和 MQ 操作。
+- [ ] 统一 ACK/NACK 时机，避免事务提交前 ACK。（judge 侧消费者已统一：毒消息/重试/死信分派且 ACK 在事务提交后；question 侧 `SubmitRecordHandel` 仍在事务内 ACK，待后续处理）
+- [-] 避免在数据库事务中长时间执行 Docker 和 MQ 操作。（判题执行移出事务；MQ 发布经 Outbox 表内登记、Relay 批量短事务投递）
 - [ ] 为判题结果更新增加原子幂等控制，防止重复回调重复增加计数。
-- [ ] 增加消息消费日志：eventId、submitId、routingKey、重试次数和最终结果。
+- [-] 增加消息消费日志：eventId、submitId、routingKey、重试次数和最终结果。
 
 ### 3. 判题沙箱
 
@@ -70,13 +70,15 @@
 
 ### 消息与事务
 
-- [ ] 实现 Transactional Outbox，优先覆盖 Question → Judge 主链路。
-- [ ] 统一 MQ 消息信封：`eventId`、`eventType`、`schemaVersion`、`occurredAt`、`producer`、`traceId`、`payload`。
-- [ ] 增加延迟重试、指数退避、DLQ 和人工重放能力。
-- [ ] 拆分代码、日志、程序输出等大字段，避免放入 MQ 大消息。
-- [ ] 统一各服务 FeignRequestInterceptor，减少重复实现。
-- [ ] 将 Judge 的 submit/debug/retry 处理器拆成清晰的独立消费者。
-- [ ] 拆分过大的 `JudgeService.java`，按任务领取、容器执行、结果处理、补偿恢复拆分。
+> 2026-08 已完成下列七项，实现说明见 `docs/maintenance/messaging-reliability.md`（拓扑变更、旧 judge.queue 排空步骤、重放手册、配置项）。
+
+- [-] 实现 Transactional Outbox，优先覆盖 Question → Judge 主链路。
+- [-] 统一 MQ 消息信封：`eventId`、`eventType`、`schemaVersion`、`occurredAt`、`producer`、`traceId`、`payload`。
+- [-] 增加延迟重试、指数退避、DLQ 和人工重放能力。
+- [-] 拆分代码、日志、程序输出等大字段，避免放入 MQ 大消息。
+- [-] 统一各服务 FeignRequestInterceptor，减少重复实现。
+- [-] 将 Judge 的 submit/debug/retry 处理器拆成清晰的独立消费者。
+- [-] 拆分过大的 `JudgeService.java`，按任务领取、容器执行、结果处理、补偿恢复拆分。
 
 ### AI
 

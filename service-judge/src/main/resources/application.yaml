@@ -13,6 +13,11 @@ spring:
 server:
   port: 8086
 
+# judge 与 question 共库 event_outbox，两侧 Relay 用 SKIP LOCKED 并发安全
+codewise:
+  outbox:
+    enabled: true
+
 api:
   governance:
     enabled: true

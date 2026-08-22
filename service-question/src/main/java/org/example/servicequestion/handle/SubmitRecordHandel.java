@@ -1,6 +1,5 @@
 package org.example.servicequestion.handle;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.judge.JudgeResultDto;
@@ -8,6 +7,7 @@ import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicecommon.dto.WebsocketSendDto;
+import org.example.servicecommon.event.EnvelopeCodec;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.SubmitRecord;
@@ -26,13 +26,24 @@ import java.io.IOException;
 @Slf4j
 public class SubmitRecordHandel implements MessageHandler {
 
+    /**
+     * WebSocket 推送大字段截断上限（字符数）。
+     *
+     * <p>截断只作用于发往 MQ -> WebSocket 的 DTO 副本：数据库写入
+     * （submit_record 状态更新）与判题结果比较均使用原始完整数据，
+     * 不受截断影响；error 为编译/系统错误诊断信息，不参与截断。</p>
+     */
+    static final int MAX_FIELD_LENGTH = 16 * 1024;
+
+    /** 截断标记后缀，提示前端内容已裁剪 */
+    private static final String TRUNCATED_SUFFIX = "...[truncated]";
+
     @Autowired
     private SubmitRecordMapper submitRecordMapper;
 
     @Autowired
     private QuestionMapper questionMapper;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
     @Autowired
     private JudgeRecordMapper judgeRecordMapper;
     @Autowired
@@ -51,8 +62,8 @@ public class SubmitRecordHandel implements MessageHandler {
         try {
             log.info("处理判题结果消息, deliveryTag: {}", deliveryTag);
 
-            // 解析消息
-            Long JudgeRecordId= objectMapper.readValue(messageBody,Long.class);
+            // 解析消息：信封 / 裸 Long 双读（灰度期间新旧格式共存）
+            Long JudgeRecordId = EnvelopeCodec.unwrap(messageBody, Long.class);
 
             JudgeRecord judgeRecord =judgeRecordMapper.selectById(JudgeRecordId);
 
@@ -137,7 +148,8 @@ public class SubmitRecordHandel implements MessageHandler {
             WebsocketSendDto websocketSendDto = new WebsocketSendDto();
             websocketSendDto.setQueueName(WebsocketContexts.JUDGE_RESULT);
             websocketSendDto.setUserId(submitRecord.getUserId());
-            websocketSendDto.setResult(judgeResultDto);
+            // 推送给前端的结果使用截断副本，避免超大 code/log/输出撑爆 WS 消息
+            websocketSendDto.setResult(truncateForPush(judgeResultDto));
             rabbitTemplate.convertAndSend(
                     MqContexts.MESSAGE_EXCHANGE,
                     MqContexts.WEBSOCKET_ROUTING_KEY,
@@ -159,5 +171,39 @@ public class SubmitRecordHandel implements MessageHandler {
             // 抛出异常让事务回滚
             throw new RuntimeException("处理判题结果失败", e);
         }
+    }
+
+    /**
+     * 构建发往 WebSocket 的判题结果副本，对 code/log/expectedOutput/actual
+     * 四个大字段做长度上限截断（error 不截）。
+     *
+     * <p>边界说明：截断只影响本方法返回的 MQ 推送副本；数据库写入
+     * （submit_record 状态/耗时/内存更新）与判题比较发生在截断之前，
+     * 始终使用 judgeRecord/submitRecord 的原始完整数据。</p>
+     */
+    private JudgeResultDto truncateForPush(JudgeResultDto source) {
+        return JudgeResultDto.builder()
+                .submissionId(source.getSubmissionId())
+                .language(source.getLanguage())
+                .code(truncate(source.getCode()))
+                .submitStatus(source.getSubmitStatus())
+                .failInde(source.getFailInde())
+                .expectedOutput(truncate(source.getExpectedOutput()))
+                .actual(truncate(source.getActual()))
+                .timeUsed(source.getTimeUsed())
+                .memoryUsed(source.getMemoryUsed())
+                .error(source.getError())
+                .log(truncate(source.getLog()))
+                .build();
+    }
+
+    /**
+     * 单字段截断：超出上限时截断并附加标记后缀（总长不超过上限）。
+     */
+    private static String truncate(String value) {
+        if (value == null || value.length() <= MAX_FIELD_LENGTH) {
+            return value;
+        }
+        return value.substring(0, MAX_FIELD_LENGTH - TRUNCATED_SUFFIX.length()) + TRUNCATED_SUFFIX;
     }
 }

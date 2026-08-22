@@ -39,3 +39,6 @@ service-question/src/main/resources/static/uploads/**
 ### Runtime artifacts ###
 /data/
 hs_err_pid*.log
+
+# Mimosa 安全扫描产物
+.mimosa/

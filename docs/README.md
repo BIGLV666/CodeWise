@@ -7,10 +7,10 @@
 | 目标 | 文档 | 适用场景 |
 | --- | --- | --- |
 | 了解项目和启动方式 | [`README.md`](../README.md) | 第一次接触项目、准备本地运行 |
-| 查看服务边界和调用链 | [`technical-design.md`](technical-design.md) | 设计评审、跨服务开发 |
-| 定位代码与文档目录 | [`project-structure.md`](project-structure.md) | 熟悉仓库、查找实现位置 |
-| 查找 HTTP 接口 | [`backend-controller-api.md`](backend-controller-api.md) | 前后端联调、接口排查 |
-| 排查运行问题 | [`maintenance-guide.md`](maintenance-guide.md) | 本地或测试环境故障处理 |
+| 查看服务边界和调用链 | [`docs/technical-design.md`](technical-design.md) | 设计评审、跨服务开发 |
+| 定位代码与文档目录 | [`docs/project-structure.md`](project-structure.md) | 熟悉仓库、查找实现位置 |
+| 查找 HTTP 接口 | [`docs/backend-controller-api.md`](backend-controller-api.md) | 前后端联调、接口排查 |
+| 排查运行问题 | [`docs/maintenance-guide.md`](maintenance-guide.md) | 本地或测试环境故障处理 |
 
 ## 服务与模块文档
 
@@ -30,17 +30,17 @@
 
 ## 全局架构与业务
 
-- [`technical-design.md`](technical-design.md)：服务边界、认证透传、Feign、RabbitMQ、Redis 和判题链路。
-- [`codewise-flow-and-features.md`](codewise-flow-and-features.md)：刷题、判题、复习、社区、通知和 AI 的业务闭环。
-- [`project-structure.md`](project-structure.md)：主要目录、模块职责、数据库边界和消息依赖。
-- [`project-metrics.md`](project-metrics.md)：按固定口径记录的工程规模快照。
-- [`backend-controller-api.md`](backend-controller-api.md)：统一调用约定、服务接口索引、内部接口和 DTO 速查。
+- [`docs/technical-design.md`](technical-design.md)：服务边界、认证透传、Feign、RabbitMQ、Redis 和判题链路。
+- [`docs/codewise-flow-and-features.md`](codewise-flow-and-features.md)：刷题、判题、复习、社区、通知和 AI 的业务闭环。
+- [`docs/project-structure.md`](project-structure.md)：主要目录、模块职责、数据库边界和消息依赖。
+- [`docs/project-metrics.md`](project-metrics.md)：按固定口径记录的工程规模快照。
+- [`docs/backend-controller-api.md`](backend-controller-api.md)：统一调用约定、服务接口索引、内部接口和 DTO 速查。
 
 ## 发布与维护
 
-- [`maintenance-guide.md`](maintenance-guide.md)：部署前检查、判题容器池、消息队列、Redis 和常见故障。
-- [`maintenance/repair-plan.md`](maintenance/repair-plan.md)：按优先级维护的修复与演进计划。
-- [`v1-release-notes.md`](v1-release-notes.md)：V1 发布基线和部署前提。
+- [`docs/maintenance-guide.md`](maintenance-guide.md)：部署前检查、判题容器池、消息队列、Redis 和常见故障。
+- [`docs/maintenance/repair-plan.md`](maintenance/repair-plan.md)：按优先级维护的修复与演进计划。
+- [`docs/v1-release-notes.md`](v1-release-notes.md)：V1 发布基线和部署前提。
 
 ## 文档维护约定
 

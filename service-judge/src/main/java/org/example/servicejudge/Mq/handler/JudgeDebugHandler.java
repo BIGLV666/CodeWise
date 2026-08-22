@@ -1,8 +1,6 @@
 package org.example.servicejudge.Mq.handler;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.GetDebugTestDto;
@@ -11,7 +9,6 @@ import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.Dto.TestDto;
-import org.example.servicejudge.Mq.MessageHandler;
 import org.example.servicejudge.Util.BuildResult;
 import org.example.servicejudge.Util.CodeBuild;
 import org.example.servicejudge.entry.FunctionConfig;
@@ -23,9 +20,7 @@ import org.example.servicejudge.functionsService.Java;
 import org.example.servicejudge.judge.JudgeService;
 import org.example.servicejudge.mapper.FunctionConfigMapper;
 import org.example.servicejudge.mapper.QuestionMapper;
-import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -36,73 +31,80 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 调试判题消息处理器，负责 Redis 中调试任务的读取、执行和结果回写。
+ *
+ * <p>本类不再承担 Channel/ACK 职责（由消费者负责）。业务失败时把错误结果
+ * 写回 Redis 并回调题目服务后正常返回（消费者 ACK），不进入重试链路；
+ * 仅当错误处理本身抛出异常时才由消费者 nack 进死信。</p>
  */
 @Service
 @Slf4j
-public class JudgeDebugHandler implements MessageHandler {
-    @Autowired
-    private RabbitTemplate rabbitTemplate;
-    @Autowired
-    private RedisTemplate<String,Object> redisTemplate;
-    @Autowired
-    private QuestionMapper questionMapper;
-    @Autowired
-    private JudgeService judgeService;
-    @Autowired
-    private FunctionConfigMapper functionConfigMapper;
+public class JudgeDebugHandler {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final RabbitTemplate rabbitTemplate;
+    private final RedisTemplate<String, Object> redisTemplate;
+    private final QuestionMapper questionMapper;
+    private final JudgeService judgeService;
+    private final FunctionConfigMapper functionConfigMapper;
 
-
-    @Override
-    public String getRoutingKey() {
-        return MqContexts.JUDGE_DEBUG_ROUTING_KEY;
+    public JudgeDebugHandler(
+            RabbitTemplate rabbitTemplate,
+            RedisTemplate<String, Object> redisTemplate,
+            QuestionMapper questionMapper,
+            JudgeService judgeService,
+            FunctionConfigMapper functionConfigMapper
+    ) {
+        this.rabbitTemplate = rabbitTemplate;
+        this.redisTemplate = redisTemplate;
+        this.questionMapper = questionMapper;
+        this.judgeService = judgeService;
+        this.functionConfigMapper = functionConfigMapper;
     }
 
-    @Override
-    public void handle(String message, Channel channel, Message amqpMessage) throws IOException {
-        long deliveryTag = amqpMessage.getMessageProperties().getDeliveryTag();
-        String uuid=objectMapper.readValue(message,String.class);
+    /**
+     * 执行一个调试任务：Redis 幂等占位 -> 读取任务 -> 按题目类型判题 ->
+     * 结果写回 Redis 并回调题目服务。业务异常被内部消化为 SYSTEM_ERROR 结果。
+     *
+     * @param uuid 调试任务 ID（Redis hash key）
+     */
+    public void handle(String uuid) {
         DebugDto debugDto = null;
-        try{
-
-            if(uuid.isEmpty()){
-                log.info("uuid is empty{}",uuid);
+        try {
+            if (uuid == null || uuid.isEmpty()) {
+                log.info("uuid is empty{}", uuid);
                 throw new RuntimeException("未找到该提交");
             }
             Boolean firstConsume = redisTemplate.opsForValue()
                     .setIfAbsent(RedisContext.JUDGE_SUCCESS_KEY + uuid, "pending", 5, TimeUnit.MINUTES);
             if (Boolean.FALSE.equals(firstConsume)) {
                 log.info("uuid{}已经处理", uuid);
-                channel.basicAck(deliveryTag, false);
                 return;
             }
-            debugDto=(DebugDto) redisTemplate.opsForHash().get(RedisContext.JUDGE_DEBUG_KEY,uuid);
-            if(debugDto==null){
+            debugDto = (DebugDto) redisTemplate.opsForHash().get(RedisContext.JUDGE_DEBUG_KEY, uuid);
+            if (debugDto == null) {
                 log.info("未找到该提交");
                 throw new RuntimeException("未找到该提交");
             }
-            Question question=questionMapper.selectById(debugDto.getQuestionId());
-            if(question==null){
+            Question question = questionMapper.selectById(debugDto.getQuestionId());
+            if (question == null) {
                 log.info("该题目不存在");
                 throw new RuntimeException("该题目不存在");
             }
-            List<GetDebugTestDto>tests=debugDto.getTests() == null
+            List<GetDebugTestDto> tests = debugDto.getTests() == null
                     ? new ArrayList<>()
                     : new ArrayList<>(debugDto.getTests());
-            if(!Boolean.FALSE.equals(debugDto.getIncludeQuestionSample())
-                    && question.getSampleInput()!=null
-                    && question.getSampleOutput()!=null){
-                GetDebugTestDto getDebugTestDto=new GetDebugTestDto();
+            if (!Boolean.FALSE.equals(debugDto.getIncludeQuestionSample())
+                    && question.getSampleInput() != null
+                    && question.getSampleOutput() != null) {
+                GetDebugTestDto getDebugTestDto = new GetDebugTestDto();
                 getDebugTestDto.setInput(question.getSampleInput());
                 getDebugTestDto.setOutput(question.getSampleOutput());
                 tests.add(getDebugTestDto);
                 debugDto.setTests(tests);
             }
-            List<JudgeReturnRecordDto>res = question.getQuestionType() == QuestionType.FUNCTION
+            List<JudgeReturnRecordDto> res = question.getQuestionType() == QuestionType.FUNCTION
                     ? debugFunction(debugDto, tests)
                     : debugAcm(debugDto, tests);
-            redisTemplate.opsForHash().put(RedisContext.JUDGE_RESULT_KEY,uuid,res);
+            redisTemplate.opsForHash().put(RedisContext.JUDGE_RESULT_KEY, uuid, res);
             redisTemplate.opsForValue().set(
                     RedisContext.JUDGE_SUCCESS_KEY + uuid,
                     "success",
@@ -114,8 +116,7 @@ public class JudgeDebugHandler implements MessageHandler {
                     MqContexts.QUESTION_DEBUG_ROUTING_KEY,
                     uuid
             );
-            channel.basicAck(deliveryTag,false);
-        }catch(Exception e){
+        } catch (Exception e) {
             log.error("调试任务执行失败, taskId={}", uuid, e);
             JudgeReturnRecordDto errorResult = new JudgeReturnRecordDto();
             errorResult.setUserId(debugDto == null ? null : debugDto.getUserId());
@@ -131,10 +132,12 @@ public class JudgeDebugHandler implements MessageHandler {
                     MqContexts.QUESTION_DEBUG_ROUTING_KEY,
                     uuid
             );
-            channel.basicAck(deliveryTag,false);
         }
     }
 
+    /**
+     * 函数模式调试：生成 Main 调用器并批量执行全部用例。
+     */
     List<JudgeReturnRecordDto> debugFunction(
             DebugDto debugDto,
             List<GetDebugTestDto> tests
@@ -168,6 +171,9 @@ public class JudgeDebugHandler implements MessageHandler {
         return toReturnRecords(judgeRecords, debugDto.getUserId());
     }
 
+    /**
+     * ACM 模式调试：逐用例独立运行（互不影响）。
+     */
     private List<JudgeReturnRecordDto> debugAcm(
             DebugDto debugDto,
             List<GetDebugTestDto> tests
@@ -218,7 +224,7 @@ public class JudgeDebugHandler implements MessageHandler {
         return results;
     }
 
-    private JudgeReturnRecordDto ToJudgeReturnRecordDto(JudgeRecord judgeRecord){
+    private JudgeReturnRecordDto ToJudgeReturnRecordDto(JudgeRecord judgeRecord) {
         JudgeReturnRecordDto judgeReturnRecordDto = new JudgeReturnRecordDto();
         judgeReturnRecordDto.setLog(judgeRecord.getLog());
         judgeReturnRecordDto.setErrorMsg(judgeRecord.getErrorMsg());

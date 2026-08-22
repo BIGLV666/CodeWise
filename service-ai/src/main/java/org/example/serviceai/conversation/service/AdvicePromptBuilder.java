@@ -1,12 +1,11 @@
 package org.example.serviceai.conversation.service;
 
 
-
-
-import org.example.serviceapi.dto.ai.AiAdviceWADto;
 import org.example.serviceai.entry.AiConversationMemory;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.Message;
+import org.example.serviceapi.dto.ai.AiAdviceWADto;
+import org.example.serviceapi.dto.judge.JudgeContextDto;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,8 +27,18 @@ public final class AdvicePromptBuilder {
     private AdvicePromptBuilder() {
     }
 
-    /** 首次判题建议：只使用本次提交事件建立根上下文。 */
-    public static String buildInitial(AiAdviceWADto advice) {
+    /**
+     * 首次判题建议：只使用本次提交事件建立根上下文。
+     *
+     * <p>消息瘦身后 {@code AiAdviceWADto} 只携带 ID 引用等小字段（语言、判题状态），
+     * 代码、日志、题目描述、输入输出等大字段由调用方通过
+     * {@code QuestionFeignClient#getJudgeContext} 拉取的 {@link JudgeContextDto} 按需传入。</p>
+     *
+     * @param advice  消息载荷（提供 language/judgeStatus 等小字段）
+     * @param context 判题上下文（提供代码、日志、输入输出、题目描述等大字段）
+     * @return 首次建议提示词
+     */
+    public static String buildInitial(AiAdviceWADto advice, JudgeContextDto context) {
         String prompt = """
                 你是 CodeWise 的编程学习教练。请分析下面这次判题失败，帮助用户自己定位并修复问题。
 
@@ -72,14 +81,14 @@ public final class AdvicePromptBuilder {
                 思考问题：提出一个引导用户继续修改的问题。
                 首次建议尽量简洁，通常控制在 400 字以内。
                 """.formatted(
-                clip(advice.getQuestionContent(), MAX_QUESTION_CHARS),
+                clip(context.getQuestionContent(), MAX_QUESTION_CHARS),
                 valueOrDefault(advice.getLanguage(), "未知"),
                 valueOrDefault(advice.getJudgeStatus(), "未知"),
-                clip(advice.getCode(), MAX_CURRENT_CODE_CHARS),
-                clip(advice.getLog(), MAX_JUDGE_LOG_CHARS),
-                clip(advice.getInput(), 1_200),
-                clip(advice.getOutput(), 1_200),
-                clip(advice.getUserOutput(), 1_200)
+                clip(context.getCode(), MAX_CURRENT_CODE_CHARS),
+                clip(context.getLog(), MAX_JUDGE_LOG_CHARS),
+                clip(context.getInputData(), 1_200),
+                clip(context.getExpectedOutput(), 1_200),
+                clip(context.getUserOutput(), 1_200)
         );
         return limitPrompt(prompt);
     }

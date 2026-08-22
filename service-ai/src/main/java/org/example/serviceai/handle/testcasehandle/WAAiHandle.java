@@ -4,20 +4,22 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.MQ.AiMessageHandler;
-
 import org.example.serviceai.conversation.enums.Role;
 import org.example.serviceai.conversation.repository.AiConversationRepository;
 import org.example.serviceai.conversation.service.AdviceConversationService;
 import org.example.serviceai.conversation.service.AdvicePromptBuilder;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.service.AIService;
+import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.ai.AiAdviceWADto;
-
 import org.example.serviceapi.dto.ai.NotificationAiAdviceDto;
+import org.example.serviceapi.dto.judge.JudgeContextDto;
 import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.serviceapi.enums.BusinessType;
 import org.example.serviceapi.enums.NotificationCenterType;
+import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.event.EnvelopeCodec;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +27,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
@@ -44,6 +47,8 @@ public class WAAiHandle implements AiMessageHandler {
     private AiConversationRepository  aiConversationRepository;
     @Autowired
     private AdviceConversationService adviceConversationService;
+    @Autowired
+    private QuestionFeignClient questionFeignClient;
 
 
     @Override
@@ -51,39 +56,75 @@ public class WAAiHandle implements AiMessageHandler {
         return MqContexts.AI_WA_ADVICE_ROUTING_KEY;
     }
 
+    /**
+     * 处理 WA（答案错误）判题失败事件，生成首次 AI 解题建议。
+     *
+     * <p>消息只带 ID 引用、大字段按需拉取：{@link AiAdviceWADto} 瘦身后仅携带
+     * judgeRecordId 等 ID 与小字段；代码、日志、题目描述、失败用例输入输出等
+     * LONGTEXT 级大字段，在消费时通过
+     * {@link QuestionFeignClient#getJudgeContext(Long)} 按 judgeRecordId 从
+     * service-question 拉取 {@link JudgeContextDto} 获得。</p>
+     *
+     * <p>消息体经 {@link EnvelopeCodec#unwrap} 做「信封 / 裸格式」双读，
+     * 灰度期间新旧两种生产端格式均可消费。判题上下文拉取失败时抛出
+     * {@link IllegalStateException}，由 {@code Mq#mq} 统一 nack 进入死信队列，
+     * 与既有解析失败路径一致。</p>
+     *
+     * @param message    UTF-8 消息体字符串（信封或裸格式）
+     * @param channel    RabbitMQ 通道，用于 ack/nack
+     * @param amqpMessage 原始 AMQP 消息
+     * @throws IOException 通道 ack/nack 操作失败时抛出
+     */
     @Override
     public void handle(String message, Channel channel, Message amqpMessage) throws IOException {
         long tag = amqpMessage.getMessageProperties().getDeliveryTag();
 
-        AiAdviceWADto aiAdviceWADto = objectMapper.readValue(amqpMessage.getBody(), AiAdviceWADto.class);
+        // 双读解析：信封格式解包 payload，旧裸格式直接反序列化
+        AiAdviceWADto aiAdviceWADto = EnvelopeCodec.unwrap(
+                new String(amqpMessage.getBody(), StandardCharsets.UTF_8),
+                AiAdviceWADto.class
+        );
         if (aiAdviceWADto == null) {
             channel.basicAck(tag, false);
             return;
         }
-        if (aiAdviceWADto.getCode() == null) {
+        // 消息瘦身后以 judgeRecordId 作为拉取判题上下文的必要键，缺失直接丢弃
+        if (aiAdviceWADto.getJudgeRecordId() == null) {
             channel.basicAck(tag, false);
             return;
         }
+        // 在写入幂等标记之前按 judgeRecordId 拉取判题上下文（大字段不随消息传输）
+        Result<JudgeContextDto> judgeContextResult =
+                questionFeignClient.getJudgeContext(aiAdviceWADto.getJudgeRecordId());
+        if (judgeContextResult == null
+                || judgeContextResult.getCode() == null
+                || judgeContextResult.getCode() != 200
+                || judgeContextResult.getData() == null) {
+            // 拉取失败抛出异常，走既有 MQ 异常路径（nack → 死信），不写入幂等标记以便重试
+            throw new IllegalStateException(
+                    "拉取判题上下文失败, judgeRecordId=" + aiAdviceWADto.getJudgeRecordId());
+        }
+        JudgeContextDto judgeContext = judgeContextResult.getData();
         if(Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(aiAdviceWADto.getMessageId(), "pending", 3, TimeUnit.MINUTES))){
             channel.basicAck(tag, false);
             return;
         }
         try {
-            //尝试创建根会话
+            //尝试创建根会话（大字段全部来自按需拉取的判题上下文）
             Conversation conversation = new Conversation();
             conversation.setConversationName("新会话");
-            conversation.setLog(aiAdviceWADto.getLog());
-            conversation.setCode(aiAdviceWADto.getCode());
+            conversation.setLog(judgeContext.getLog());
+            conversation.setCode(judgeContext.getCode());
             conversation.setMessageId(aiAdviceWADto.getMessageId());
             conversation.setUserId(aiAdviceWADto.getUserId());
             conversation.setStatus(aiAdviceWADto.getJudgeStatus());
             conversation.setLanguage(aiAdviceWADto.getLanguage());
             conversation.setQuestionId(aiAdviceWADto.getQuestionId());
-            conversation.setQuestionContent(aiAdviceWADto.getQuestionContent());
+            conversation.setQuestionContent(judgeContext.getQuestionContent());
             conversation.setSubmitId(aiAdviceWADto.getSubmitId());
-            conversation.setInputData(aiAdviceWADto.getInput());
-            conversation.setExpectedOutput(aiAdviceWADto.getOutput());
-            conversation.setUserOutput(aiAdviceWADto.getUserOutput());
+            conversation.setInputData(judgeContext.getInputData());
+            conversation.setExpectedOutput(judgeContext.getExpectedOutput());
+            conversation.setUserOutput(judgeContext.getUserOutput());
             conversation.setCreateTime(LocalDateTime.now());
             int r = aiConversationRepository.save(conversation);
             org.example.serviceai.entry.Message message1 = null;
@@ -99,22 +140,22 @@ public class WAAiHandle implements AiMessageHandler {
                 org.example.serviceai.entry.Message reply = adviceConversationService.ask(
                         conversation1.getUserId(),
                         conversation1.getConversationId(),
-                        aiAdviceWADto.getQuestionContent(),
-                        aiAdviceWADto.getCode(),
+                        judgeContext.getQuestionContent(),
+                        judgeContext.getCode(),
                         Role.SYSTEM
                 );
                 //构建推送
                 buildNotificationDto(aiAdviceWADto, reply);
             }
             if (r == 1) {
-                String prompt = AdvicePromptBuilder.buildInitial(aiAdviceWADto);
+                String prompt = AdvicePromptBuilder.buildInitial(aiAdviceWADto, judgeContext);
                 String res = aiService.callAi(prompt);
                 if (res.contains("信息不全")) {
                     channel.basicReject(tag, false);
                     return;
                 }
                 //添加一次ai回答
-                message1 = append(res, conversation, aiAdviceWADto);
+                message1 = append(res, conversation, judgeContext);
                 message1 = aiConversationRepository.appendMessage(conversation.getConversationId(), message1);
                 //构建推送
                 buildNotificationDto(aiAdviceWADto, message1);
@@ -127,14 +168,14 @@ public class WAAiHandle implements AiMessageHandler {
         }
 
     }
-    private org.example.serviceai.entry.Message append(String res,Conversation conversation,AiAdviceWADto aiAdviceWADto){
+    private org.example.serviceai.entry.Message append(String res,Conversation conversation,JudgeContextDto judgeContext){
         org.example.serviceai.entry.Message  message=new org.example.serviceai.entry.Message();
         message.setContent(res);
         message.setCreateTime(LocalDateTime.now());
         message.setRole(Role.ASSISTANT);
         message.setUserId(conversation.getUserId());
         message.setConversationId(conversation.getConversationId());
-        message.setCurrentCode(aiAdviceWADto.getCode());
+        message.setCurrentCode(judgeContext.getCode());
         return message;
     }
     private void buildNotificationDto(
@@ -171,7 +212,7 @@ public class WAAiHandle implements AiMessageHandler {
     }
 
 
-    private String getLegacyPrompt(AiAdviceWADto aiAdviceWADto) {
+    private String getLegacyPrompt(AiAdviceWADto aiAdviceWADto, JudgeContextDto judgeContext) {
         return """
                 你是一名编程解题教练。你的任务不是直接给出答案，而是分析用户当前的解题思路和代码，
                 先帮助用户保证程序正确，再提示可能的优化方向，让用户自己完成解题。
@@ -274,13 +315,13 @@ public class WAAiHandle implements AiMessageHandler {
                 - 不要重复大段题目或用户代码。
                 - 总长度尽量控制在250字以内。
                 """.formatted(
-                aiAdviceWADto.getQuestionContent(),
+                judgeContext.getQuestionContent(),
                 aiAdviceWADto.getLanguage(),
-                aiAdviceWADto.getCode(),
-                aiAdviceWADto.getLog(),
-                aiAdviceWADto.getInput(),
-                aiAdviceWADto.getOutput(),
-                aiAdviceWADto.getUserOutput()
+                judgeContext.getCode(),
+                judgeContext.getLog(),
+                judgeContext.getInputData(),
+                judgeContext.getExpectedOutput(),
+                judgeContext.getUserOutput()
         );
     }
 

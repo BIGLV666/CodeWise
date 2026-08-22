@@ -181,8 +181,10 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ## 10. Redis 与 RabbitMQ 维护
 
-- 判题、通知和 AI 建议均依赖 RabbitMQ，修改 routing key 时同时检查生产者、队列绑定和消费者。
-- 消费者必须考虑重复投递，优先使用业务唯一 ID 或数据库唯一键实现幂等。
+- 判题主链路已改为事务性 Outbox + 统一消息信封：提交经 `event_outbox` 中转投递，判题队列为 `judge.submit.queue` / `judge.debug.queue` / `judge.retry.queue`（均挂 DLX），延迟重试经 `judge.wait.queue` TTL 弹回，死信入 `judge.dead.queue` 并登记 `failure_submit`。架构说明、迭代手册与重放操作见 `docs/maintenance/messaging-reliability.md`。
+- 新增队列必须挂 DLX；改队列参数必须换新队列名（RabbitMQ 队列参数不可变）。
+- 修改 routing key 时同时检查生产者、队列绑定和消费者。
+- 消费者必须考虑重复投递，优先使用业务唯一 ID 或数据库唯一键实现幂等；消费入口统一用 `EnvelopeCodec.unwrap` 双读（信封/裸格式）。
 - 调试结果应先写 Redis 并标记成功，再发送结果通知，避免客户端收到通知后查不到数据。
 - Redis 双桶回写失败时不得删除旧桶；Lua 切桶和 Redisson 任务锁必须一起保留。
 
@@ -196,10 +198,11 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ### 提交一直 pending
 
-1. 检查判题消息是否进入 RabbitMQ。
-2. 检查 `service-judge` 消费日志和 ACK/NACK。
-3. 检查 Docker 容器池是否初始化成功。
-4. 检查结果消息是否被题目服务消费。
+1. 查 `codewise_question.event_outbox`：`status='DEAD'`（投递超限，走 `/api/question/outbox/replay/{id}` 重放）或 PENDING 积压（Relay 未运行 / broker 断连，`last_error` 有原因）。
+2. 检查判题消息是否进入 RabbitMQ（`judge.submit.queue` 深度）。
+3. 检查 `service-judge` 消费日志（eventId / retryCount / 最终结果）与死信队列 `judge.dead.queue`。
+4. 检查 Docker 容器池是否初始化成功。
+5. 检查结果消息是否被题目服务消费（`question.queue`）。
 
 ### 函数题 CE 或 RE
 
@@ -214,11 +217,11 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ## 12. 发布检查清单
 
-- 相关模块编译和针对性测试通过。
+- 相关模块编译和针对性测试通过；改了 `service-api`/`service-common` 先 `install` 再构建业务模块。
 - SQL 完整脚本与迁移脚本同步更新。
 - Nacos 配置项已在目标环境准备。
-- Feign DTO、MQ 消息 DTO 保持生产者和消费者兼容。
-- 新增消费者具备幂等和失败处理。
+- Feign DTO、MQ 消息 DTO 保持生产者和消费者兼容；跨服务 DTO 改字段 = 生产者与全部消费者同批发布，改前 grep 全部使用点。
+- 新增消费者具备幂等和失败处理；新增队列挂 DLX，改队列参数换新队列名并排空旧队列（操作手册见 `docs/maintenance/messaging-reliability.md`）。
 - 日志不包含密码、Token 和用户完整代码等敏感信息。
 - 判题改动验证 AC、WA、CE、RE、TLE 五类结果。
 - WebSocket/SSE 改动验证断线和异常返回。
@@ -229,8 +232,8 @@ DELETE /api/judge/containers/{language}/{containerId}
 ## 13. 当前技术债
 
 - 根 Maven 工程尚未聚合所有模块。
-- 自动化测试覆盖仍偏少，Docker 判题缺少隔离环境集成测试。
+- 自动化测试覆盖仍偏少，Docker 判题缺少隔离环境集成测试（本机跑全上下文测试需先起 Nacos/Redis/RabbitMQ）。
 - 判题沙箱的 PID、CPU、文件系统和进程回收限制不完整。
-- RabbitMQ publisher confirm、死信队列和失败补偿仍需完善。
+- RabbitMQ 死信队列、延迟重试与失败补偿已落地（见 `docs/maintenance/messaging-reliability.md`）；剩余：publisher confirm 未启用（当前至少一次 + 消费幂等）、`ai.queue` 尚未挂 DLX、消息/复习/社区链路未迁移统一信封、question 侧 `SubmitRecordHandel` 仍在事务内 ACK。
 - Feign 超时、熔断、降级和统一异常契约仍需收敛。
 - 需要补充 traceId、结构化日志和判题资源监控。
