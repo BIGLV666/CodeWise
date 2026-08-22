@@ -2,6 +2,9 @@ package org.example.servicequestion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.entry.SubmitRecord;
@@ -19,14 +22,8 @@ public class SubmitRecordService {
 
     @Autowired
     private SubmitRecordMapper submitRecordMapper;
-
-    @Transactional
-    public SubmitRecord addSubmitRecord(SubmitRecord submitRecord) {
-        if (submitRecordMapper.insert(submitRecord) <= 0) {
-            throw new RuntimeException("添加提交记录失败");
-        }
-        return submitRecord;
-    }
+    @Autowired
+    private UserFeignClient userFeignClient;
 
     public SubmitRecord getSubmitRecordById(Long submitRecordId) {
         if (submitRecordId == null) {
@@ -65,20 +62,15 @@ public class SubmitRecordService {
     }
 
     @Transactional
-    public SubmitRecord updateSubmitRecord(SubmitRecord submitRecord) {
-        if (submitRecord.getSubmitRecordId() == null) {
-            throw new RuntimeException("提交记录ID不能为空");
-        }
-        if (submitRecordMapper.updateById(submitRecord) <= 0) {
-            throw new RuntimeException("更新提交记录失败");
-        }
-        return submitRecordMapper.selectById(submitRecord.getSubmitRecordId());
-    }
-
-    @Transactional
     public void deleteSubmitRecord(Long submitRecordId) {
-        if (submitRecordMapper.deleteById(submitRecordId) <= 0) {
-            throw new RuntimeException("删除提交记录失败");
+
+        Long userId = UserContext.getUserId();
+        if(userId==null){
+            throw new IllegalArgumentException("请登录后重试");
+        }
+        int r=submitRecordMapper.delete(new QueryWrapper<SubmitRecord>().eq("submit_record_id",submitRecordId).eq("user_id",userId));
+        if(r==0){
+            throw new IllegalArgumentException("未找到属于您的该记录");
         }
     }
 

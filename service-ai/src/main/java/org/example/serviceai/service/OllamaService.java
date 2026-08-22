@@ -22,14 +22,6 @@ public class OllamaService implements CallAi {
 
     }
     /**
-     * 检查服务是否可用（健康检查）
-     */
-    @Override
-    public boolean isAvailable() {
-        return true;
-    }
-
-    /**
      * 获取服务优先级（数值越小优先级越高）
      */
     @Override

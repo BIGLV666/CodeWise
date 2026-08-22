@@ -2,6 +2,7 @@ package org.example.servicequestion.controller;
 
 import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
+import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicequestion.dto.FunctionDto;
 import org.example.servicequestion.dto.FunctionTestCaseDto;
 import org.example.servicequestion.dto.FunctionTestCaseGenerateRequest;
@@ -23,6 +24,7 @@ import java.io.IOException;
 import java.util.List;
 
 @RestController
+@RequireAdmin
 @RequestMapping("/api/question/function")
 public class FunctionQuestionParseController {
     @Autowired

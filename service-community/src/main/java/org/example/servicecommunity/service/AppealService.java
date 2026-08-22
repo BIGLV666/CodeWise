@@ -30,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -127,7 +128,7 @@ public class AppealService {
         }
         return "";
     }
-
+    @Transactional
     public void submitAppeal(AppealDto dto) {
         Appeal appeal ;
         boolean is=true;
@@ -250,6 +251,7 @@ public class AppealService {
      * @param pass true=恢复内容, false=拒绝申诉
      * @param adminReason 管理员回复
      */
+    @Transactional
     public void handleAppeal(Long appealId, boolean pass, String adminReason) {
         Appeal appeal = appealMapper.selectById(appealId);
         if (appeal == null) {
@@ -272,6 +274,12 @@ public class AppealService {
                 case POST -> {
                     Post p = (Post) post;
                     p.setStatus(1);
+
+
+                    redisTemplate.opsForHash().delete(RedisContext.POST_ID_KEY, p.getPostId().toString());
+                    redisTemplate.opsForHash().delete(RedisContext.POST_KEY, p.getPostId().toString(), p.getPostId().toString());
+                    redisTemplate.opsForZSet().remove(RedisContext.HOST_POST_KEY, p.getPostId().toString());
+
                     postMapper.updateById(p);
                 }
                 case COMMENT -> {

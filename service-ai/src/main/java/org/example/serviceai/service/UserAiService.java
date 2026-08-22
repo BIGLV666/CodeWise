@@ -20,6 +20,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URI;
+import java.net.Inet6Address;
 import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -53,6 +54,7 @@ public class UserAiService {
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
     }
 
@@ -84,6 +86,7 @@ public class UserAiService {
                 outputStream.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
 
+            rejectRedirect(endpoint, connection);
             int responseLength = readStream(connection, onChunk);
             log.info("Custom AI stream completed, configId={}, model={}, responseLength={}",
                     configId, selectedModel, responseLength);
@@ -190,6 +193,11 @@ public class UserAiService {
                     request,
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
             );
+            if (response.statusCode() >= 300 && response.statusCode() < 400) {
+                validateRedirect(normalizedBaseUrl + "/models",
+                        response.headers().firstValue("Location").orElse(null));
+                throw new IllegalStateException("模型列表请求不允许重定向");
+            }
             if (response.statusCode() == 401 || response.statusCode() == 403) {
                 throw new IllegalArgumentException("API Key 无效或没有读取模型列表的权限");
             }
@@ -238,7 +246,9 @@ public class UserAiService {
     }
 
     private HttpURLConnection openConnection(String endpoint, String apiKey) throws Exception {
+        validateUrl(endpoint);
         HttpURLConnection connection = (HttpURLConnection) new URL(endpoint).openConnection();
+        connection.setInstanceFollowRedirects(false);
         connection.setRequestMethod("POST");
         connection.setRequestProperty("Authorization", "Bearer " + apiKey);
         connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
@@ -262,6 +272,19 @@ public class UserAiService {
             }
         }
         return responseLength;
+    }
+
+    private void rejectRedirect(String sourceUrl, HttpURLConnection connection) {
+        int statusCode;
+        try {
+            statusCode = connection.getResponseCode();
+        } catch (Exception exception) {
+            throw new IllegalStateException("无法读取 AI 服务响应状态", exception);
+        }
+        if (statusCode >= 300 && statusCode < 400) {
+            validateRedirect(sourceUrl, connection.getHeaderField("Location"));
+            throw new IllegalStateException("自定义 AI 请求不允许重定向");
+        }
     }
 
     private String parseContent(String line) {
@@ -373,14 +396,10 @@ public class UserAiService {
             if (uri.getUserInfo() != null || uri.getHost() == null) {
                 throw new IllegalArgumentException("API 地址格式不正确");
             }
-            InetAddress address = InetAddress.getByName(uri.getHost());
-            if (address.isAnyLocalAddress()
-                    || address.isLoopbackAddress()
-                    || address.isLinkLocalAddress()
-                    || address.isSiteLocalAddress()
-                    || address.isMulticastAddress()) {
-                throw new IllegalArgumentException("不允许访问本机或内网 AI 地址");
+            if (uri.getQuery() != null || uri.getFragment() != null) {
+                throw new IllegalArgumentException("API 地址不能包含查询参数或片段");
             }
+            validateResolvedHost(uri.getHost());
             String normalized = uri.toString();
             while (normalized.endsWith("/")) {
                 normalized = normalized.substring(0, normalized.length() - 1);
@@ -401,6 +420,80 @@ public class UserAiService {
 
     private String chatEndpoint(String baseUrl) {
         return normalizeBaseUrl(baseUrl) + "/chat/completions";
+    }
+
+    private void validateUrl(String endpoint) {
+        URI uri;
+        try {
+            uri = URI.create(endpoint);
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("API 地址格式不正确", exception);
+        }
+        if (!"https".equalsIgnoreCase(uri.getScheme())
+                || uri.getHost() == null
+                || uri.getUserInfo() != null
+                || uri.getQuery() != null
+                || uri.getFragment() != null) {
+            throw new IllegalArgumentException("自定义 AI 地址必须是无查询参数的 HTTPS 地址");
+        }
+        validateResolvedHost(uri.getHost());
+    }
+
+    private void validateRedirect(String sourceUrl, String location) {
+        if (location == null || location.isBlank()) {
+            throw new IllegalStateException("AI 服务返回了无效重定向");
+        }
+        URI source = URI.create(sourceUrl);
+        URI target = source.resolve(location);
+        validateUrl(target.toString());
+    }
+
+    private void validateResolvedHost(String host) {
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            if (addresses.length == 0) {
+                throw new IllegalArgumentException("API 地址无法解析");
+            }
+            for (InetAddress address : addresses) {
+                if (isBlockedAddress(address)) {
+                    throw new IllegalArgumentException("不允许访问本机或内网 AI 地址");
+                }
+            }
+        } catch (IllegalArgumentException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new IllegalArgumentException("API 地址无法解析", exception);
+        }
+    }
+
+    private boolean isBlockedAddress(InetAddress address) {
+        if (address.isAnyLocalAddress()
+                || address.isLoopbackAddress()
+                || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress()
+                || address.isMulticastAddress()) {
+            return true;
+        }
+        byte[] bytes = address.getAddress();
+        if (bytes.length == 4) {
+            int first = Byte.toUnsignedInt(bytes[0]);
+            int second = Byte.toUnsignedInt(bytes[1]);
+            int third = Byte.toUnsignedInt(bytes[2]);
+            return first == 0
+                    || first == 10
+                    || first == 100 && second >= 64 && second <= 127
+                    || first == 127
+                    || first == 169 && second == 254
+                    || first == 172 && second >= 16 && second <= 31
+                    || first == 192 && second == 0 && third == 0
+                    || first == 192 && second == 0 && third == 2
+                    || first == 192 && second == 88 && third == 99
+                    || first == 192 && second == 168
+                    || first == 198 && (second == 18 || second == 19 || second == 51)
+                    || first >= 224;
+        }
+        return address instanceof Inet6Address
+                && (bytes[0] & 0xfe) == 0xfc;
     }
 
     private UserAiConfigVo toDetailVo(UserAiConfig config) {

@@ -94,9 +94,7 @@ public class FunctionQuestionParseService {
         question.setStatus(1);
         question.setAiStatue("success");
         question.setCreateUserId(
-                functionDto.getCreateUserId() == null
-                        ? UserContext.getUserId()
-                        : functionDto.getCreateUserId()
+                UserContext.getUserId()
         );
         question.setCreateTime(LocalDateTime.now());
         question.setUpdateTime(LocalDateTime.now());

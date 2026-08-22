@@ -27,7 +27,19 @@ public interface CallAi {
      * 检查服务是否可用（健康检查）
      */
     default boolean isAvailable() {
-        return true;
+        long start = System.nanoTime();
+        String response = callAi("Reply with OK.", 100);
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+        return response != null
+                && !response.isBlank()
+                && elapsedMillis <= getHealthCheckTimeout();
+    }
+
+    /**
+     * 健康探测允许的最大响应时间（毫秒）
+     */
+    default long getHealthCheckTimeout() {
+        return 10000L;
     }
 
     /**

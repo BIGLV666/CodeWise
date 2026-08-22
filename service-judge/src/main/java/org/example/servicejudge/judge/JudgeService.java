@@ -4,6 +4,7 @@ import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.model.HostConfig;
+import com.github.dockerjava.api.model.Capability;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.function.Consumer;
 
 @Service
 @Slf4j
@@ -44,6 +46,11 @@ public class JudgeService implements JudgeInterface {
     private static final long BATCH_STARTUP_TIMEOUT_MS = 7_000L;
     private static final long CONTAINER_BORROW_TIMEOUT_SECONDS = 10L;
     private static final long MEMORY_LIMIT_BYTES = 256L * 1024 * 1024;
+    private static final long CPU_PERIOD_MICROS = 100_000L;
+    private static final long CPU_QUOTA_MICROS = 100_000L;
+    private static final long PID_LIMIT = 64L;
+    private static final long OUTPUT_LIMIT_BYTES = 4L * 1024 * 1024;
+    private static final String JUDGE_USER = "1000:1000";
 
     @Autowired
     private DockerClient dockerClient;
@@ -56,6 +63,8 @@ public class JudgeService implements JudgeInterface {
     private final Map<String, Set<String>> allContainerIds = new ConcurrentHashMap<>();
     private final Map<String, AtomicInteger> configuredContainerCounts = new ConcurrentHashMap<>();
     private final Map<String, Object> containerPoolLocks = new ConcurrentHashMap<>();
+    /** 执行超时或进程树清理失败的容器不能再次进入空闲池。 */
+    private final Set<String> taintedContainerIds = ConcurrentHashMap.newKeySet();
     private static final Map<LanguageSpec, Integer> INITIAL_CONTAINER_COUNTS = Map.of(
             LanguageSpec.JAVA, 2,
             LanguageSpec.PYTHON, 1,
@@ -229,7 +238,7 @@ public class JudgeService implements JudgeInterface {
             return;
         }
         String availableContainerId = containerId;
-        if (!cleanContainerWorkspace(containerId)) {
+        if (taintedContainerIds.remove(containerId) || !cleanContainerWorkspace(containerId)) {
             availableContainerId = replaceContainer(spec, containerId);
         }
         if (availableContainerId != null && !pool.offer(availableContainerId)) {
@@ -989,14 +998,27 @@ public class JudgeService implements JudgeInterface {
 
     // ========== 创建容器 ==========
     private String createContainer(LanguageSpec spec) {
+        // 资源限制和权限限制必须在容器创建时设置，不能依赖用户提交的脚本自觉遵守。
         HostConfig hostConfig = HostConfig.newHostConfig()
                 .withMemory(MEMORY_LIMIT_BYTES)
                 .withMemorySwap(MEMORY_LIMIT_BYTES)
-                .withNetworkMode("none");
+                .withCpuPeriod(CPU_PERIOD_MICROS)
+                .withCpuQuota(CPU_QUOTA_MICROS)
+                .withPidsLimit(PID_LIMIT)
+                .withReadonlyRootfs(true)
+                .withNetworkMode("none")
+                .withCapDrop(Capability.ALL)
+                .withSecurityOpts(List.of("no-new-privileges:true"))
+                .withTmpFs(Map.of(
+                        "/workspace", "rw,uid=1000,gid=1000,size=64m",
+                        "/tmp", "rw,uid=1000,gid=1000,size=16m"
+                ));
 
         CreateContainerResponse container = dockerClient.createContainerCmd(spec.image)
                 .withHostConfig(hostConfig)
-                .withCmd("sh", "-c", "mkdir -p /workspace && while true; do sleep 3600; done")
+                .withUser(JUDGE_USER)
+                .withWorkingDir("/workspace")
+                .withCmd("sh", "-c", "while true; do sleep 3600; done")
                 .exec();
 
         dockerClient.startContainerCmd(container.getId()).exec();
@@ -1151,7 +1173,11 @@ public class JudgeService implements JudgeInterface {
                     .exec(new ResultCallback.Adapter<>())
                     .awaitCompletion(timeoutMillis, TimeUnit.MILLISECONDS);
             if (!completed) {
-                log.warn("容器批量执行超时");
+                // Docker exec 超时只会结束等待，不保证被执行程序的子进程已经退出。
+                // 将容器标记为污染并在归还时销毁重建，可彻底清理整棵进程树。
+                taintedContainerIds.add(containerId);
+                log.warn("容器内执行超时，标记容器并重建以清理进程树: containerId={}, scriptPath={}",
+                        containerId, scriptPath);
                 return 124;
             }
             Integer exitCode = dockerClient.inspectExecCmd(execCmd.getId()).exec().getExitCode();
@@ -1160,6 +1186,7 @@ public class JudgeService implements JudgeInterface {
             Thread.currentThread().interrupt();
             return 1;
         } catch (Exception e) {
+            taintedContainerIds.add(containerId);
             log.error("批量执行命令失败", e);
             return 1;
         }

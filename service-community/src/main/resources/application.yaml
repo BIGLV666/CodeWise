@@ -14,6 +14,18 @@ spring:
 codewise:
   mq:
     enabled: true
+  async:
+    cascade-delete:
+      core-pool-size: 2
+      max-pool-size: 8
+      queue-capacity: 100
+      keep-alive-seconds: 60
+      await-termination-seconds: 30
+    bucket-consumer:
+      core-pool-size: 2
+      max-pool-size: 4
+      queue-capacity: 100
+      await-termination-seconds: 30
 
 server:
   port: 8087

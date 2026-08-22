@@ -23,13 +23,15 @@ import org.example.servicecommunity.vo.CursorPageResult;
 import org.example.servicecommunity.vo.HomePostVo;
 import org.example.servicecommunity.vo.PostVo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -47,6 +49,9 @@ public class PostService {
     private RedisTemplate<String, Object> redisTemplate;
     @Autowired
     private UserFeignClient userFeignClient;
+    @Autowired
+    @Qualifier("communityCascadeDeleteExecutor")
+    private ThreadPoolTaskExecutor cascadeDeleteExecutor;
 
     public String getRequestId() {
         return UUID.randomUUID().toString();
@@ -164,14 +169,17 @@ public class PostService {
     }
 
     public PostVo getPostById(Long postId) {
-        PostVo postvo = (PostVo) redisTemplate.opsForHash().get(RedisContext.POST_VO_KEY,postId.toString());
-        if(postvo != null) {
-            postvo.setLikeCount(Long.parseLong(redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId)==null? String.valueOf(0L) : redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId).toString())+postvo.getLikeCount());
+        Post post = (Post) redisTemplate.opsForHash().get(RedisContext.POST_KEY,postId.toString());
+        if(post != null) {
+            post.setLikeCount(Long.parseLong(redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId)==null? String.valueOf(0L) : redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId).toString())+post.getLikeCount());
+            Long r= likeRecordMapper.selectCount(new QueryWrapper<LikeRecord>().eq("user_id",UserContext.getUserId()).eq("post_id",post.getPostId()).eq("type","POST"));
+            PostVo postvo = new PostVo(post);
+            postvo.setIsLike(r != 0);
             return postvo;
         }
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Post::getPostId, postId);
-         Post post = postMapper.selectOne(wrapper);
+        post = postMapper.selectOne(wrapper);
         if (post == null) {
             throw new IllegalArgumentException("post not found");
         }
@@ -208,7 +216,7 @@ public class PostService {
 
         Result<UserDto> userDto = userFeignClient.getUserInfo(Long.parseLong(postVo.getUserId()));
         postVo.setUserDto(userDto.getData() == null ? null : userDto.getData());
-        redisTemplate.opsForHash().put(RedisContext.POST_VO_KEY, postVo.getPostId().toString(), postVo);
+        redisTemplate.opsForHash().put(RedisContext.POST_KEY, post.getPostId().toString(), post);
         return postVo;
     }
 
@@ -362,7 +370,7 @@ public class PostService {
             throw new IllegalArgumentException("update post failed");
         }
         redisTemplate.opsForHash().delete(RedisContext.POST_ID_KEY, post.getPostId().toString());
-        redisTemplate.opsForHash().delete(RedisContext.POST_VO_KEY, post.getPostId().toString(), post.getPostId().toString());
+        redisTemplate.opsForHash().delete(RedisContext.POST_KEY, post.getPostId().toString(), post.getPostId().toString());
         redisTemplate.opsForZSet().remove(RedisContext.HOST_POST_KEY, post.getPostId().toString());
         PostVo result = new PostVo(post);
         result.setTags(tags.stream().map(Tags::getTagName).toList());
@@ -388,33 +396,51 @@ public class PostService {
         }
         redisTemplate.opsForZSet().remove(RedisContext.HOST_POST_KEY, postId.toString());
         redisTemplate.opsForHash().delete(RedisContext.POST_ID_KEY, postId.toString());
-        redisTemplate.opsForHash().delete(RedisContext.POST_VO_KEY, postId.toString(), postId.toString());
+        redisTemplate.opsForHash().delete(RedisContext.POST_KEY, postId.toString(), postId.toString());
 
-        CompletableFuture.runAsync(() -> {
+        log.info("cascade delete task submitting, postId={}, commentCount={}", postId, commentIds.size());
+        Runnable cascadeDeleteTask = () -> {
+            log.info("cascade delete task started, postId={}, commentCount={}", postId, commentIds.size());
             String deleteCommentKey = RedisContext.DELETE_COMMENT_KEY + "post:" + postId;
             String deleteLikeRecordKey = RedisContext.DELETE_LIKE_RECORD_KEY + "post:" + postId;
             redisTemplate.opsForValue().set(deleteCommentKey, "pending", 30, TimeUnit.MINUTES);
             redisTemplate.opsForValue().set(deleteLikeRecordKey, "pending", 30, TimeUnit.MINUTES);
+            log.info("cascade delete task marked pending, postId={}", postId);
             try {
-                tagsMapper.delete(new QueryWrapper<Tags>()
+                int deletedTags = tagsMapper.delete(new QueryWrapper<Tags>()
                         .eq("post_id", postId)
                         .eq("type", PostType.POST.getType()));
-                commentMapper.delete(new QueryWrapper<Comment>()
+                log.info("cascade delete tags completed, postId={}, deletedCount={}", postId, deletedTags);
+                int deletedComments = commentMapper.delete(new QueryWrapper<Comment>()
                         .eq("post_id", postId)
                         .eq("type", PostType.POST.getType()));
-                likeRecordMapper.delete(new QueryWrapper<LikeRecord>().eq("post_id", postId).eq("type", "POST"));
+                log.info("cascade delete comments completed, postId={}, deletedCount={}", postId, deletedComments);
+                int deletedPostLikes = likeRecordMapper.delete(new QueryWrapper<LikeRecord>()
+                        .eq("post_id", postId).eq("type", "POST"));
+                log.info("cascade delete post likes completed, postId={}, deletedCount={}", postId, deletedPostLikes);
+                int deletedCommentLikes = 0;
                 if (!commentIds.isEmpty()) {
-                    likeRecordMapper.delete(new QueryWrapper<LikeRecord>()
+                    deletedCommentLikes = likeRecordMapper.delete(new QueryWrapper<LikeRecord>()
                             .eq("type", "COMMENT")
                             .in("post_id", commentIds));
                 }
+                log.info("cascade delete comment likes completed, postId={}, commentCount={}, deletedCount={}",
+                        postId, commentIds.size(), deletedCommentLikes);
                 redisTemplate.opsForValue().set(deleteCommentKey, "success", 30, TimeUnit.MINUTES);
                 redisTemplate.opsForValue().set(deleteLikeRecordKey, "success", 30, TimeUnit.MINUTES);
+                log.info("cascade delete task succeeded, postId={}", postId);
             } catch (Exception e) {
                 log.error("delete post cascade failed, postId={}", postId, e);
                 redisTemplate.opsForValue().set(deleteCommentKey, "failed", 30, TimeUnit.MINUTES);
                 redisTemplate.opsForValue().set(deleteLikeRecordKey, "failed", 30, TimeUnit.MINUTES);
+                log.info("cascade delete task marked failed, postId={}", postId);
             }
-        });
+        };
+        try {
+            cascadeDeleteExecutor.execute(cascadeDeleteTask);
+        } catch (RejectedExecutionException e) {
+            log.warn("cascade delete task rejected by executor, running in caller thread, postId={}", postId, e);
+            cascadeDeleteTask.run();
+        }
     }
 }

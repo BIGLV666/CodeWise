@@ -13,12 +13,29 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import java.io.IOException;
+import java.util.Set;
 
 @AutoConfiguration
 public class UserAuthInterceptor implements HandlerInterceptor {
     // 内部通信密钥（和网关保持一致）
     private static final String INTERNAL_TOKEN = "codewise-secret-2026";
     private static final Integer ADMIN_ROLE =2;
+    private static final Set<String> PUBLIC_PATHS = Set.of(
+            "/api/user/login",
+            "/api/user/emaillogin",
+            "/api/user/emailloginforcode",
+            "/api/user/getemailcode",
+            "/api/user/emailregister",
+            "/api/user/register",
+            "/api/user/updatepasswordforemail",
+            "/api/user/updatefromcode"
+    );
+    private static final Set<String> PUBLIC_PATH_PATTERNS = Set.of(
+            "/uploads/**",
+            "/websocket/**",
+            "/ws/**",
+            "/sockjs/**"
+    );
     AntPathMatcher antPathMatcher = new AntPathMatcher();
     @Lazy
     @Autowired(required = false)
@@ -42,37 +59,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         if (ip != null) {
             UserContext.setCurrentIp(ip);
         }
-        // ====== 1. 放行 WebSocket 握手 ======
-        String upgrade = request.getHeader("Upgrade");
-        if ("websocket".equalsIgnoreCase(upgrade)) {
-            System.out.println("✅ 放行 WebSocket 握手: " + path);
-            return true;
-        }
-
-        // ====== 2. 放行 WebSocket 相关路径 ======
-        if (path.startsWith("/websocket") || path.startsWith("/ws")) {
-            System.out.println("✅ 放行 WebSocket 路径: " + path);
-            return true;
-        }
-
-        // ====== 3. 放行 SockJS 相关路径 ======
-        if (path.contains("/sockjs") || path.contains("/info")) {
-            System.out.println("✅ 放行 SockJS: " + path);
-            return true;
-        }
-
-
-
-        // 1. 登录/注册接口放行（不需要登录）
-        if (path.contains("login") || path.contains("register")||path.contains("updatepasswordforemail")||path.contains("updateformcode")) {
-            return true;
-        }
-        //2.放行静态资源
-        if(path.contains("uploads")){
-            return true;
-        }
-
-        // 2. 验证内部 Token（确保请求来自网关）
+        // 验证内部 Token 后，才允许进入任何匿名白名单。
         String internalToken = request.getHeader("X-Internal-Token");
         if (internalToken == null || !internalToken.equals(INTERNAL_TOKEN)) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
@@ -85,7 +72,22 @@ public class UserAuthInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        // 3. 从请求头获取 userId（网关塞的）
+        String normalizedPath = path.endsWith("/") && path.length() > 1
+                ? path.substring(0, path.length() - 1)
+                : path;
+        if (PUBLIC_PATHS.contains(normalizedPath)
+                || PUBLIC_PATH_PATTERNS.stream().anyMatch(pattern -> antPathMatcher.match(pattern, normalizedPath))) {
+            return true;
+        }
+
+        // WebSocket 握手的 JWT 校验由网关和 WebSocket 握手拦截器共同完成。
+        String upgrade = request.getHeader("Upgrade");
+        if ("websocket".equalsIgnoreCase(upgrade)) {
+            System.out.println("✅ 放行已通过内部校验的 WebSocket 握手: " + path);
+            return true;
+        }
+
+        // 从请求头获取 userId（网关塞的）
         String userIdStr = request.getHeader("X-User-Id");
         if (userIdStr != null && !userIdStr.isEmpty()) {
             UserContext.setUserId(Long.parseLong(userIdStr));

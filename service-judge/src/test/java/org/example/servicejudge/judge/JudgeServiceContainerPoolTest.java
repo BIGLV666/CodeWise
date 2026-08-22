@@ -162,6 +162,8 @@ class JudgeServiceContainerPoolTest {
         CreateContainerResponse response = mock(CreateContainerResponse.class);
         when(dockerClient.createContainerCmd(anyString())).thenReturn(createContainerCmd);
         when(createContainerCmd.withHostConfig(any(HostConfig.class))).thenReturn(createContainerCmd);
+        when(createContainerCmd.withUser(anyString())).thenReturn(createContainerCmd);
+        when(createContainerCmd.withWorkingDir(anyString())).thenReturn(createContainerCmd);
         when(createContainerCmd.withCmd(any(String[].class))).thenReturn(createContainerCmd);
         when(createContainerCmd.exec()).thenReturn(response);
         when(response.getId()).thenReturn("java-2");

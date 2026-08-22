@@ -11,7 +11,7 @@ public  class RedisContext {
     public static final String  REQUEST_ID_KEY = "request_id_key";
     //======热帖缓存-=======================
     public static final String POST_ID_KEY = "post_id_key";
-    public static final String POST_VO_KEY = "post_vo_key";
+    public static final String POST_KEY = "post_key";
     //============题目缓存键=================
     public static final String  QUESTION_ID_KEY = "question_id_key";
     public static final String  QUESTION_TOTAL_KEY = "question_total_key";

@@ -53,7 +53,6 @@ public class AiConversationMemaryService {
                 return;
             }
             AiConversationMemory aiConversationMemory = aiConversationMemoryMapper.selectOne(new QueryWrapper<AiConversationMemory>().eq("conversation_id", conversationId).eq("user_id", userId));
-            List<Message> messages = messageMapper.selectList(new QueryWrapper<Message>().eq("conversation_id", conversationId).eq("user_id", userId).orderByAsc("message_id"));
             Conversation conversation = conversationMapper.selectById(conversationId);
             if (conversation == null) {
                 return;
@@ -61,14 +60,15 @@ public class AiConversationMemaryService {
             if (!conversation.getUserId().equals(userId)) {
                 return;
             }
-            List<Message> pendingMessages = getPendingMessages(
-                    messages,
+            List<Message> pendingMessages = selectPendingMessages(
+                    conversationId,
+                    userId,
                     aiConversationMemory == null ? null : aiConversationMemory.getEndMessageId()
             );
             if (pendingMessages.size() < 14) {
                 return;
             }
-            List<Message> batch = new ArrayList<>(pendingMessages.subList(0, 14));
+            List<Message> batch = pendingMessages;
             Long batchEndMessageId = batch.getLast().getMessageId();
             List<Message> recentMessages = new ArrayList<>();
             List<Message> recentSubmissions = new ArrayList<>();
@@ -111,17 +111,16 @@ public class AiConversationMemaryService {
         }
     }
 
-    private List<Message> getPendingMessages(List<Message> messages, Long endMessageId) {
-        if (endMessageId == null) {
-            return messages;
+    private List<Message> selectPendingMessages(Long conversationId, Long userId, Long endMessageId) {
+        QueryWrapper<Message> query = new QueryWrapper<Message>()
+                .eq("conversation_id", conversationId)
+                .eq("user_id", userId)
+                .orderByAsc("message_id")
+                .last("LIMIT 14");
+        if (endMessageId != null) {
+            query.gt("message_id", endMessageId);
         }
-        List<Message> pending = new ArrayList<>();
-        for (Message message : messages) {
-            if (message.getMessageId() != null && message.getMessageId() > endMessageId) {
-                pending.add(message);
-            }
-        }
-        return pending;
+        return messageMapper.selectList(query);
     }
 
     private void splitMessages(

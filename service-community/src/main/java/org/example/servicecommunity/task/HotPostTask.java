@@ -15,6 +15,6 @@ public class HotPostTask {
     private RedisTemplate<String,Object> redisTemplate;
     @Scheduled(cron = "0 */5 * * * *")
     public void DeletePostVo() {
-        redisTemplate.delete(RedisContext.POST_VO_KEY);
+        redisTemplate.delete(RedisContext.POST_KEY);
     }
 }

@@ -1,5 +1,8 @@
 package org.example.serviceai.service;
 
+import lombok.Getter;
+
+@Getter
 public class AiProviderHttpException extends RuntimeException {
 
     private final int statusCode;
@@ -14,14 +17,6 @@ public class AiProviderHttpException extends RuntimeException {
         super(buildMessage(provider, statusCode, responseBody, retryAfter));
         this.statusCode = statusCode;
         this.retryAfter = retryAfter;
-    }
-
-    public int getStatusCode() {
-        return statusCode;
-    }
-
-    public String getRetryAfter() {
-        return retryAfter;
     }
 
     private static String buildMessage(

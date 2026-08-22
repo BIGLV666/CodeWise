@@ -54,8 +54,8 @@ public class QuestionService {
 
 
     public Long getTotalQuestionCount() throws InterruptedException {
-
-        Object total =redisTemplate.opsForValue().get(RedisContext.QUESTION_TOTAL_KEY);
+        Long total= 0L;
+        total =(Long) redisTemplate.opsForValue().get(RedisContext.QUESTION_TOTAL_KEY);
         if (total == null) {
             boolean tryLock = redissonClient.getLock(LOCK_ADD_QUESTION).tryLock();
             RLock lock = redissonClient.getLock(LOCK_ADD_QUESTION);
@@ -68,8 +68,8 @@ public class QuestionService {
                 } catch (Exception e) {
 
                     log.error("获取总数失败{}",e.getMessage());
-                    throw new RuntimeException(e);
-                    //throw new IllegalStateException("获取题目总数失败，请稍后重试");
+                    //throw new RuntimeException(e);
+                    throw new IllegalStateException("获取题目总数失败，请稍后重试");
                 } finally {
                     lock.unlock();
                 }
@@ -77,7 +77,7 @@ public class QuestionService {
             }
         }
 
-        return 0L;
+        return total;
     }
 
     @Transactional
@@ -191,9 +191,7 @@ public class QuestionService {
         if(userDto.getCode()!=200){
             throw new RuntimeException(userDto.getMessage());
         }
-        System.out.println(userDto+"----"+UserContext.getUserId());
-        if(!Objects.equals(userDto.getData().getUserId(), UserContext.getUserId().toString())){
-            if(userDto.getData().getRoleId()==1)
+        if(!Objects.equals(userDto.getData().getUserId(), UserContext.getUserId().toString())&&!userDto.getData().getRoleId().equals(2)){
                 throw  new RuntimeException("无资格删除非己题目");
         }
 
@@ -250,7 +248,7 @@ public class QuestionService {
         Long nextCursor = null;
         Boolean hasNext = false;
 
-        if (list != null && !list.isEmpty()) {
+        if (!list.isEmpty()) {
             if (list.size() > pageSize) {
                 // 取前 pageSize 条作为当前页
                 records = returnQuestionDtoList.subList(0, pageSize);

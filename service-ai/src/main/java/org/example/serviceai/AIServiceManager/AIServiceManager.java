@@ -1,6 +1,7 @@
 package org.example.serviceai.AIServiceManager;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.intifer.CallAi;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +10,9 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -25,11 +29,22 @@ public class AIServiceManager {
     // 服务健康状态缓存
     private final Map<String, Boolean> healthCache = new ConcurrentHashMap<>();
 
+    // 下一次健康探测时间
+    private final Map<String, Long> nextHealthCheckAt = new ConcurrentHashMap<>();
+
     // 失败计数
     private final Map<String, AtomicInteger> failCount = new ConcurrentHashMap<>();
 
     // 最大失败次数
     private static final int MAX_FAIL_COUNT = 3;
+    private static final long UNAVAILABLE_CHECK_INTERVAL_MILLIS = 30_000L;
+    private static final long AVAILABLE_CHECK_INTERVAL_MILLIS = 180_000L;
+    private final ScheduledExecutorService healthCheckExecutor =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "AI-Service-Health-Checker");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     @PostConstruct
     public void init() {
@@ -44,8 +59,9 @@ public class AIServiceManager {
 
         // 初始化状态
         for (CallAi service : availableServices) {
-            healthCache.put(service.getModelName(), true);
+            healthCache.put(service.getModelName(), false);
             failCount.put(service.getModelName(), new AtomicInteger(0));
+            nextHealthCheckAt.put(service.getModelName(), 0L);
             log.info("注册AI服务: {} (优先级: {})",
                     service.getModelName(), service.getPriority());
         }
@@ -93,23 +109,7 @@ public class AIServiceManager {
 
         // 检查缓存
         Boolean cached = healthCache.get(modelName);
-        if (cached != null && cached) {
-            return true;
-        }
-
-        // 实时检查
-        try {
-            boolean available = service.isAvailable();
-            healthCache.put(modelName, available);
-            if (available) {
-                failCount.get(modelName).set(0);
-            }
-            return available;
-        } catch (Exception e) {
-            log.warn("服务 {} 健康检查失败: {}", modelName, e.getMessage());
-            healthCache.put(modelName, false);
-            return false;
-        }
+        return Boolean.TRUE.equals(cached);
     }
 
     /**
@@ -124,6 +124,8 @@ public class AIServiceManager {
 
             if (fails >= MAX_FAIL_COUNT) {
                 healthCache.put(modelName, false);
+                nextHealthCheckAt.put(modelName,
+                        System.currentTimeMillis() + UNAVAILABLE_CHECK_INTERVAL_MILLIS);
                 log.warn("服务 {} 连续失败{}次，标记为不可用", modelName, MAX_FAIL_COUNT);
                 // 切换到下一个服务
                 switchToNext();
@@ -170,28 +172,48 @@ public class AIServiceManager {
      * 启动健康检查定时任务
      */
     private void startHealthCheck() {
-        // 使用定时任务每30秒检查一次
-        new Thread(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(30000);
-                    for (CallAi service : availableServices) {
-                        try {
-                            boolean available = service.isAvailable();
-                            healthCache.put(service.getModelName(), available);
-                            if (available) {
-                                failCount.get(service.getModelName()).set(0);
-                            }
-                        } catch (Exception e) {
-                            log.debug("健康检查失败: {}", service.getModelName());
-                        }
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+        healthCheckExecutor.scheduleAtFixedRate(this::checkDueServices, 0, 30, TimeUnit.SECONDS);
+    }
+
+    private void checkDueServices() {
+        long now = System.currentTimeMillis();
+        for (CallAi service : availableServices) {
+            String modelName = service.getModelName();
+            long nextCheck = nextHealthCheckAt.getOrDefault(modelName, 0L);
+            if (nextCheck > now) {
+                continue;
             }
-        }, "AI-Service-Health-Checker").start();
+
+            boolean wasHealthy = Boolean.TRUE.equals(healthCache.get(modelName));
+            boolean available;
+            try {
+                available = service.isAvailable();
+            } catch (Exception e) {
+                available = false;
+                log.warn("AI服务探测异常，model={}, error={}", modelName, e.getMessage(), e);
+            }
+
+            healthCache.put(modelName, available);
+            if (available) {
+                failCount.get(modelName).set(0);
+            }
+            nextHealthCheckAt.put(modelName, now + (available
+                    ? AVAILABLE_CHECK_INTERVAL_MILLIS
+                    : UNAVAILABLE_CHECK_INTERVAL_MILLIS));
+
+            if (wasHealthy != available) {
+                log.info("AI服务健康状态变化，model={}, available={}, nextCheckInSeconds={}",
+                        modelName, available, available ? 180 : 30);
+            } else {
+                log.debug("AI服务探测完成，model={}, available={}, nextCheckInSeconds={}",
+                        modelName, available, available ? 180 : 30);
+            }
+        }
+    }
+
+    @PreDestroy
+    public void stopHealthCheck() {
+        healthCheckExecutor.shutdownNow();
     }
 
     /**

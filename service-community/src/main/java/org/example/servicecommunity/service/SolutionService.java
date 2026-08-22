@@ -86,7 +86,7 @@ public class SolutionService {
         if (!tags.isEmpty() && tagsMapper.batchInsert(tags) != tags.size()) {
             throw new IllegalArgumentException("保存题解标签失败");
         }
-        redisTemplate.opsForValue().set(RedisContext.REQUEST_ID_KEY+":"+requestId,"success");
+        redisTemplate.opsForValue().set(RedisContext.REQUEST_ID_KEY+":"+requestId,"success",2,TimeUnit.MINUTES);
         return toHomeSolutionVo(solution, tags);
     }
 
@@ -144,7 +144,7 @@ public class SolutionService {
         SolutionVo solutionVo = new SolutionVo(solution);
         Result<UserDto> userDto = userFeignClient.getUserInfo(Long.parseLong(solutionVo.getSolutionUserId()));
         solutionVo.setUserDto(userDto.getData()==null ? new UserDto() : userDto.getData());
-        solutionVo.setIsLike(likeRecordMapper.selectOne(new QueryWrapper<LikeRecord>().eq("type",PostType.SOLUTION.getType()).eq("post_id",solutionId))!=null);
+        solutionVo.setIsLike(likeRecordMapper.selectOne(new QueryWrapper<LikeRecord>().eq("user_id",UserContext.getUserId()).eq("type",PostType.SOLUTION.getType()).eq("post_id",solutionId))!=null);
         return solutionVo;
     }
 

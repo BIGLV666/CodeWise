@@ -24,10 +24,10 @@ public class RedisBucketSwitcher {
         );
     }
 
-    /** 原子切换双桶，并返回切换前需要消费的桶编号。 */
+    /** 原子切换双桶，并返回刚刚封闭的桶编号。 */
     public long switchBucket(String bucketKey) {
         Long bucketId = redisTemplate.execute(switchBucketScript, List.of(bucketKey));
-        if (bucketId == null) {
+        if (bucketId == null || (bucketId != 0 && bucketId != 1)) {
             throw new IllegalStateException("Redis 双桶切换失败");
         }
         return bucketId;

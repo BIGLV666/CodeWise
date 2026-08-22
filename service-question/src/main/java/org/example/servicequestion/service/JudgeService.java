@@ -27,14 +27,13 @@ public class JudgeService {
     @Autowired
     private SubmitRecordMapper submitRecordMapper;
     @Autowired
-    private TestCaseMapper  testCaseMapper;
-    @Autowired
     private RabbitTemplate rabbitTemplate;
 
     @Autowired
     private RedisTemplate<String,Object> redisTemplate;
 
     public Long judge(GetCodeDto getCodeDto) {
+
         String code = getCodeDto.getCode();
         String language = getCodeDto.getLanguage();
         Long questionId = getCodeDto.getQuestionId();

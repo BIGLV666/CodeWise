@@ -66,7 +66,7 @@ public class ReviewService {
      *
      * 添加题目到复习中
      */
-    public String addQuestionToReview(Long questionId){
+    public void addQuestionToReview(Long questionId){
         try {
             Review review = Review.builder().questionId(questionId).userId(UserContext.getUserId())
                     .lastQuality(0).lastReviewTime(LocalDateTime.now()).nextReviewTime(LocalDateTime.now().plusDays(1))
@@ -75,7 +75,6 @@ public class ReviewService {
             if(r!=1){
                 throw new IllegalArgumentException("添加失败请稍后重试");
             }
-            return  "success";
         }catch (DuplicateKeyException e){
             throw new IllegalArgumentException("该题目已在您的复习计划");
         }

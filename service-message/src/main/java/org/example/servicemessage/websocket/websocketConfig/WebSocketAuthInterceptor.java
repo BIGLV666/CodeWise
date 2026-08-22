@@ -1,6 +1,7 @@
 package org.example.servicemessage.websocket.websocketConfig;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.example.servicecommon.until.JwtUntil;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
@@ -15,6 +16,8 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
 
     private final JwtUntil jwtUtil = new JwtUntil();
 
+    private static final String INTERNAL_TOKEN="codewise-secret-2026";
+
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
@@ -23,6 +26,16 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
         if (request instanceof ServletServerHttpRequest) {
             ServletServerHttpRequest servletRequest = (ServletServerHttpRequest) request;
             HttpServletRequest httpRequest = servletRequest.getServletRequest();
+
+            String internalToken =httpRequest.getHeader("X-Internal-Token");
+
+            if(!INTERNAL_TOKEN.equals(internalToken)){
+                return false;
+            }
+
+
+
+
 
             // 从网关透传的 Header 获取 userId
             String userIdHeader = httpRequest.getHeader("X-User-Id");

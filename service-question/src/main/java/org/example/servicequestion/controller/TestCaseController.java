@@ -2,6 +2,7 @@ package org.example.servicequestion.controller;
 
 import org.example.apigovernancespringbootstarter.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
+import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicequestion.dto.InsertTestCaseDto;
 import org.example.servicequestion.entry.TestCase;
 import org.example.servicequestion.service.TestCaseService;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
+@RequireAdmin
 @RequestMapping("/api/question")
 public class TestCaseController {
     @Autowired

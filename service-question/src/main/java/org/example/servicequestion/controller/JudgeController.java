@@ -25,13 +25,13 @@ public class JudgeController {
     private SubmitRecordService submitRecordService;
 
     @PostMapping("/judge")
-    @RateLimit(limit = 120, window = 60)
+    @RateLimit(limit = 5, window = 60)
     public Result<Long> judge(@RequestBody GetCodeDto getCodeDto) {
         Long submitRecordId = judgeService.judge(getCodeDto);
         return Result.success(submitRecordId);
     }
     @PostMapping("/debug")
-    @RateLimit(limit = 60, window = 60)
+    @RateLimit(limit = 5, window = 60)
     public Result<String> debug(@RequestBody DebugDto getCodeDto) {
         return Result.success(judgeService.debug(getCodeDto));
     }
