@@ -664,12 +664,11 @@ public class ReviewService {
     /**
      * 使用默认 SM-2 参数计算下一次复习时间。
      *
-     * @param review 用户某道题的复习状态记录
+     * @param review  用户某道题的复习状态记录
      * @param quality 本次复习质量评分，范围 0~5
-     * @return 已在内存中更新后的 Review 对象，调用方负责持久化
      */
-    public Review calculateNextReviewInterval(Review review, Integer quality) {
-        return calculateNextReviewInterval(review, quality, null);
+    public void calculateNextReviewInterval(Review review, Integer quality) {
+        calculateNextReviewInterval(review, quality, null);
     }
 
     /**

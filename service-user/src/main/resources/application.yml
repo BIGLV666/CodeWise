@@ -2,7 +2,7 @@ spring:
   application:
     name: service-user
   config:
-    import: nacos:service-user.yaml   # ? Nacos ???
+    import: optional:nacos:service-user.yaml   # Nacos 不可用时环境变量兜底
   cloud:
     nacos:
       discovery:

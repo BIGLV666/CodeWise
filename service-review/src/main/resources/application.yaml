@@ -2,7 +2,7 @@ spring:
   application:
     name: service-review
   config:
-    import: nacos:service-review.yaml
+    import: optional:nacos:service-review.yaml
   cloud:
     nacos:
       discovery:

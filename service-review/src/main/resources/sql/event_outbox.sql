@@ -1,6 +1,7 @@
 -- 事务性 Outbox 事件表（复习提醒 -> 通知中心 消息可靠性）
 -- 库：codewise_review（service-review 独立建表，结构与 codewise_question.event_outbox 同构）
 -- 与业务写入同事务提交，由 service-common OutboxRelay 批量认领投递（FOR UPDATE SKIP LOCKED）
+use codewise_review;
 CREATE TABLE IF NOT EXISTS event_outbox (
   outbox_id BIGINT AUTO_INCREMENT PRIMARY KEY,
   event_id VARCHAR(64) NOT NULL COMMENT '事件唯一ID，消费幂等键',
