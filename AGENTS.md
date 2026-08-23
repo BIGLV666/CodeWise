@@ -72,5 +72,5 @@ Then build/test individual services:
 
 ## Where to learn more
 
-`docs/technical-design.md`, `docs/project-structure.md`, `docs/backend-controller-api.md`, `docs/service-ai/README.md`, `docs/maintenance-guide.md`.
+`docs/technical-design.md`, `docs/project-structure.md`, `docs/backend-controller-api.md`, `docs/service-ai/README.md`, `docs/maintenance-guide.md`, `docs/architecture-and-highlights.md` (full architecture + business-flow diagrams + interview talking points).
 
