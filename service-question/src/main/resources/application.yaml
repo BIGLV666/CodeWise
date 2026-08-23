@@ -18,7 +18,6 @@ codewise:
     enabled: true
   function-artifact:
     root: ./data/function-artifacts
-    judge-mode: local
     docker-command: docker
     docker-image: codewise-java-judge:17
     timeout-seconds: 30

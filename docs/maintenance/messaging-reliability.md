@@ -1,7 +1,7 @@
 # 消息可靠性改造说明（P1 消息与事务专项）
 
-> 对应 `docs/maintenance/repair-plan.md` P1「消息与事务」条目的实现说明。
-> 范围：Transactional Outbox、统一消息信封、延迟重试/指数退避/DLQ/人工重放、大字段出 MQ、统一 Feign 拦截器、Judge 消费者拆分、JudgeService 拆分。
+> 对应 `docs/maintenance/repair-plan.md` P1「消息与事务」条目的实现说明；第 9 节为 P0-5「Message 与 AI 消费可靠性」专项的实现说明。
+> 范围：Transactional Outbox、统一消息信封、延迟重试/指数退避/DLQ/人工重放、大字段出 MQ、统一 Feign 拦截器、Judge 消费者拆分、JudgeService 拆分；Message/AI 消费幂等状态机（consumed_event）、AI 队列 v2 拓扑、ai_message 生成状态。
 
 ## 1. 新 MQ 拓扑（judge 主链路）
 
@@ -87,8 +87,83 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 ## 8. 已知限制与后续项
 
 - publisher confirm 未启用（依赖 Nacos 变更），当前为至少一次 + 消费幂等。
-- service-ai 的 `ai.queue` 仍未挂 DLX/重试（repair-plan P0「Message 与 AI 消费可靠性」独立条目，未在本专项范围）。
+- `message.queue` / `notification.queue` 仍未挂 DLX（RabbitMQ 队列参数不可变，补挂需换新队列名并排空，收益是失败消息进 DLQ 而非依赖 consumed_event FAILED 留存，见第 9 节）。
 - token 出源码、Gateway 头清洗等安全项属 P0-1，另行处理。
+
+## 9. Message 与 AI 消费可靠性（P0-5 专项）
+
+> 对应 `repair-plan.md` P0 第 5 节七项。核心思路：消费幂等从「Redis 先写标记」改为「数据库 consumed_event 状态机」，配合 AI 队列 v2 拓扑（DLX + 延迟重试 + 死信登记）。
+
+### 9.1 AI 队列 v2 拓扑
+
+```
+ai.exchange (direct)
+ ├─ ai.testcase.routing  → ai.testcase.queue (DLX=ai.dlx, DLK=ai.dead)
+ ├─ ai.wa-advice.routing → ai.advice.queue   (DLX=ai.dlx, DLK=ai.dead)
+ ├─ ai.testcase.wait.queue：无消费者，DLX=ai.exchange / DLK=ai.testcase.routing
+ └─ ai.advice.wait.queue： 无消费者，DLX=ai.exchange / DLK=ai.wa-advice.routing
+       消费失败 → per-message TTL(5s/10s/20s) → 到期弹回对应主队列
+ai.dlx (direct) ── ai.dead ──→ ai.dead.queue
+       └─ AiDeadLetterHandler：尽力提取 eventId，consumed_event 落 FAILED（不覆盖 COMPLETED）
+```
+
+- 常量与声明：`MqContexts` / `MqConfig`（service-common），`AI_TESTCASE_QUEUE`、`AI_ADVICE_QUEUE`、`AI_TESTCASE_WAIT_QUEUE`、`AI_ADVICE_WAIT_QUEUE`、`AI_DLX`、`AI_DLQ`。
+- 消费入口：service-ai `MQ/Mq.java` 分发器（骨架照抄 `JudgeSubmitConsumer`）：毒消息（`IllegalArgumentException` 载荷解析失败）直接死信；业务异常读 `x-codewise-retry-count` 头指数退避，按 routing key 转投对应等待队列后 ACK 原消息；3 次超限死信。handler 只抛异常、不接触 Channel；会话校验等业务失败抛 `IllegalStateException` 走重试，`IllegalArgumentException` 仅保留毒消息语义。
+- testcase 生成失败补偿（发「删除题目」消息）只在重试超限的终态尝试发送一次（handler 自读 `x-codewise-retry-count` 头判断），重试期间不补偿。
+- **旧 `ai.queue` 已弃用**（参数不可变无法补挂 DLX，`Ai_QUEUE_NAME` 已 @Deprecated 不再声明）。
+
+### 9.2 consumed_event 消费幂等状态机
+
+两张同构表（各服务各库，禁止跨库）：
+
+- `codewise_message.consumed_event`（DDL：`service-message/src/main/resources/sql.sql`），eventId = NotificationDto.messageId / EmailMessage.eventId。
+- `codewise_ai.consumed_event`（DDL：`service-ai/src/main/resources/sql/consumed_event.sql`，多一列 `result_ref`），eventId = 信封 eventId（裸格式兜底 messageId）。
+
+状态机与 claim 语义：
+
+| 状态 | 含义 |
+|------|------|
+| PROCESSING | 已认领（INSERT 占位，`uk_event_id` 兜底幂等），业务未全部完成 |
+| COMPLETED | 业务彻底完成（邮件已发出 / 推送成功 / AI 建议通知已发出），**唯一跳过态** |
+| FAILED | 重试超限（死信登记）或业务主动放弃，终态留存供人工重放 |
+
+- claim：INSERT 成功 = NEW；唯一键冲突按既有行分派：COMPLETED → 真重复直接 ACK；PROCESSING/FAILED → RECLAIM 重新接管（broker 对未 ACK 消息重投，崩溃残留行必须可重跑，at-least-once）。
+- `recordFailure`：`retry_count = retry_count + 1` 原子自增、last_error 截断 500 字符，状态保持 PROCESSING。
+- 覆盖消费者：service-message `EmailService`（email.routing）、`AiAdviceHandle`（notification.ai.advice.routing）；service-ai `WAAiHandle`（ai.wa-advice.routing）。4 个通知 handler（like/review/checked/appeal）维持原有「业务成功后写标记 + DB 唯一键」安全模式。
+- service-message `mq/Mq.java` 分发器对 handler 未捕获异常（如 DB 抖动导致 claim 失败）做兜底：退避 5s 后 nack 重投，消息不丢（这两个队列未挂 DLX，nack(requeue=false) 等于丢弃）。
+
+### 9.3 关键丢失/提前完成风险的消除
+
+- **邮件失败直接 ACK** → 失败 nack 重投立即重试，3 次超限 `markFailed` 留存后丢弃；日志只记收件人与主题，不落验证码正文。`EmailMessage` 新增 eventId，service-common 生产端 3 参构造自动生成 UUID；旧格式消息消费端生成一次性 UUID 兜底（仅靠 broker 重投语义）。
+- **AI 建议通知失败被提前标记完成** → WAAiHandle：claim → 生成建议落库 → `markResultRef`（记 ai_message 主键）→ 发通知 → 成功才 `complete`。通知失败异常上抛交分发器延迟重试；重投命中 result_ref 非空时跳过生成、仅补发通知。Redis pending 标记已整体移除。
+- **WA 建议重试的事件级防重**（避免 AI 故障期间重复副作用）：追问分支以事件首次认领时间（consumed_event.create_time）为界——该事件已落过 SYSTEM 追问时不再新增：上次占位行 FAILED/GENERATING → 复用该行重试生成（`restartFailedGeneration` 原子重置）；已 COMPLETED（result_ref 丢失窗口）→ 只补结果引用与通知，不再生成。每个事件至多一条 SYSTEM 追问与一条 ASSISTANT 占位行。引用悬空（行被删）→ markFailed 终态留痕。
+- **ai_message 生成状态**：新增 `status` 列（`GENERATING/COMPLETED/FAILED/CANCELLED`，迁移脚本 `service-ai/src/main/resources/sql/migration_20260823_ai_message_status.sql`，存量 ASSISTANT 行回填 COMPLETED）。同步与 SSE 流式路径均先插 GENERATING 占位行，收尾一律 `WHERE status='GENERATING'` 原子更新：完成→COMPLETED，异常→FAILED（保留部分内容），超时/客户端断开→CANCELLED。SSE 超时只取消本流占位行（按 messageId 精准取消，不影响同会话并发流）。
+- **SSE 错误脱敏**：`AiAdviceController#toUserMessage` 仅透出 `AiProviderHttpException` 分类文案（认证失败/限流/HTTP 状态码），其余异常返回固定文案「AI 服务暂时不可用，请稍后重试」，原始异常仅服务端日志留痕。
+
+### 9.4 部署与排空步骤（AI v2 上线时）
+
+1. 按顺序构建：`service-common install` → service-message / service-ai（同批发布；`EmailMessage` 加字段、AI 队列改名均要求同批）。
+2. **先在 RabbitMQ 管理台删除旧 `ai.queue` 到 `ai.exchange` 的两条旧绑定**（ai.testcase.routing、ai.wa-advice.routing），再发布新版本——否则灰度期间新消息会同时投递旧队列（无消费者）造成堆积。
+3. 执行 DDL：`codewise_message` 追加 `consumed_event`；`codewise_ai` 建 `consumed_event`（或执行主 DDL 增量部分）、执行 `migration_20260823_ai_message_status.sql`。
+4. 旧 `ai.queue` 若仍有残留消息，管理台（15672）按消息路由键 moveTo `ai.advice.queue` / `ai.testcase.queue`，确认排空后删除旧队列。
+
+### 9.5 人工重放（consumed_event FAILED 行）
+
+```sql
+-- 排查失败留存
+SELECT event_id, routing_key, status, retry_count, last_error, update_time
+FROM consumed_event WHERE status = 'FAILED' ORDER BY update_time DESC;
+
+-- 重放：状态改回 PROCESSING 后，把原始消息重发到对应交换机/路由键
+-- （或由生产方重发同一 eventId 的消息，消费端按 RECLAIM 重新接管）
+UPDATE consumed_event SET status = 'PROCESSING', retry_count = 0 WHERE event_id = '<eventId>';
+```
+
+### 9.6 观测点（建议接入告警）
+
+- 两库 `consumed_event` 中 `status='FAILED'` 或 PROCESSING 超过 5 分钟的行数。
+- `ai.dead.queue` 深度 > 0；`ai.*.wait.queue` 深度持续增长（下游持续失败）。
+- service-ai `ai_message` 中 GENERATING 超过 5 分钟的行（SSE 崩溃未收尾，onTimeout 兜底会转 CANCELLED）。
 
 ---
 
@@ -146,7 +221,8 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 1. **开启 publisher confirm**：Nacos 加 `spring.rabbitmq.publisher-confirm-type: correlated` → 改 `OutboxRelay#publishOne` 为 confirm 回调成功后才标 SENT（仅改 common 一处，调用方无感）。
 2. **其余服务迁移到信封**：消息/复习/社区等链路逐个改 `EnvelopeCodec.unwrap` 双读 → 全量切换后可强制信封（unwrap 去掉裸格式分支，`schemaVersion` 校验加强）。
 3. **payload 结构变更**：`schemaVersion` +1，消费端按版本分支兼容一个迭代周期后删旧分支。
-4. **ai.queue 补 DLX/重试**：照抄 judge 三队列模式（repair-plan P0 项）。
+4. **message/notification 队列补 DLX**：照抄 judge/AI 的「新队列名 + wait 队列 + DLQ」模式，将邮件/通知失败从「consumed_event FAILED 留存」升级为「死信进 DLQ 可管理台重放」（repair-plan 后续项）。
+5. **consumed_event 模式推广**：4 个通知 handler（like/review/checked/appeal）如需统一到数据库幂等，复用 claim/complete/recordFailure/markFailed 骨架。
 
 ## E. 修改共享模块的纪律
 

@@ -18,8 +18,13 @@ import java.util.Map;
 @Component
 @Slf4j
 public class Mq {
+
+    /** 基础设施异常（如 DB 抖动导致幂等 claim 失败）时的重投退避，避免无退避热循环；测试可调零。 */
+    long infraBackoffMs = 5_000L;
+
     private final List<MessageHandler> handlers;
-    private final Map<String, MessageHandler> handlerMap = new HashMap<>();
+    /** 路由键 → 处理器注册表（包可见便于单测注入）。 */
+    final Map<String, MessageHandler> handlerMap = new HashMap<>();
 
     public Mq(List<MessageHandler> handlers) {
         this.handlers = handlers;
@@ -36,7 +41,11 @@ public class Mq {
         }
     }
 
-    /** 同时消费邮件/WebSocket 队列和通知中心队列。ACK/NACK 由具体处理器负责。 */
+    /**
+     * 同时消费邮件/WebSocket 队列和通知中心队列。业务失败由处理器自行 ACK/NACK；
+     * 处理器自身 try/catch 之外的异常（如 DB 抖动导致 claim/recordFailure 失败）在此兜底：
+     * 退避后 nack 重投，消息不丢（这两个队列未挂 DLX，nack(requeue=false) 等于丢弃）。
+     */
     @RabbitListener(queues = {MqContexts.MESSAGE_QUEUE_NAME, MqContexts.NOTIFICATION_QUEUE_NAME})
     public void consume(Message message,
                         @Header(AmqpHeaders.RECEIVED_ROUTING_KEY) String routingKey,
@@ -51,6 +60,25 @@ public class Mq {
 
         String messageBody = new String(message.getBody(), StandardCharsets.UTF_8);
         log.info("收到消息，routingKey={}，deliveryTag={}", routingKey, deliveryTag);
-        handler.handle(messageBody, channel, message);
+        try {
+            handler.handle(messageBody, channel, message);
+        } catch (Exception exception) {
+            log.error("消息处理抛出未捕获异常，退避 {}ms 后重投: routingKey={}, deliveryTag={}",
+                    infraBackoffMs, routingKey, deliveryTag, exception);
+            sleepQuietly();
+            channel.basicNack(deliveryTag, false, true);
+        }
+    }
+
+    /** 退避等待，被中断时恢复中断标记后继续重投（消息优先不丢）。 */
+    private void sleepQuietly() {
+        if (infraBackoffMs <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(infraBackoffMs);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

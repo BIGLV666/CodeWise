@@ -2,25 +2,43 @@ package org.example.servicemessage.email.emailService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
+import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.dto.EmailMessage;
+import org.example.servicemessage.consumedevent.service.ConsumedEventService;
 import org.example.servicemessage.mq.MessageHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
-import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.util.UUID;
+
+/**
+ * 邮件发送消费者（email.routing，手动 ACK）。
+ *
+ * <p>以 {@link EmailMessage#getEventId()} 作为幂等键走 consumed_event 数据库幂等：
+ * 发送成功置 COMPLETED 后 ACK；失败按 retry_count 计数，不足 3 次 nack 重投立即
+ * 重试，达到 3 次置 FAILED 留存（人工重放 = 将该行 status 改回 PROCESSING 后重发）
+ * 后 nack 丢弃。旧格式消息无 eventId，生成一次性 UUID 兜底（此类消息仅依赖 broker
+ * 对未 ACK 消息的重投语义）。</p>
+ */
 @Service
 public class EmailService implements MessageHandler {
     private final Logger log = LoggerFactory.getLogger(this.getClass());
 
+    /** 最大立即重试次数，达到后失败留存并丢弃。 */
+    private static final int MAX_RETRY_COUNT = 3;
+
     @Autowired
     private JavaMailSender mailSender;
+    @Autowired
+    private ConsumedEventService consumedEventService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -28,40 +46,84 @@ public class EmailService implements MessageHandler {
         return MqContexts.MESSAGE_ROUTING_KEY;
     }
 
-
-
-
-
-    public void handle(String emailmessage, Channel channel, Message amqpMessage) {
-        log.info("进入发送");
+    /**
+     * 消费一条邮件消息：载荷解析失败（毒消息）直接 nack 丢弃；eventId 已 COMPLETED
+     * 时 ACK 跳过；发送成功落 COMPLETED 后 ACK；发送失败重投重试或超限留存。
+     */
+    @Override
+    public void handle(String emailmessage, Channel channel, Message amqpMessage) throws IOException {
+        long deliveryTag = amqpMessage.getMessageProperties().getDeliveryTag();
+        EmailMessage message;
         try {
-            EmailMessage message = objectMapper.readValue(emailmessage, EmailMessage.class);
-            log.info("收到邮件任务，收件人: {}", message.getTo());
+            message = objectMapper.readValue(emailmessage, EmailMessage.class);
+        } catch (Exception e) {
+            log.error("邮件消息载荷解析失败，按毒消息丢弃", e);
+            channel.basicNack(deliveryTag, false, false);
+            return;
+        }
 
-            MimeMessage mail = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(mail, true, "UTF-8");
-            helper.setFrom("379299583@qq.com");
-            helper.setTo(message.getTo());
-            helper.setSubject(message.getSubject());
-            if (isCodeEmail(message.getContent())) {
-                helper.setText(buildHtmlContent(message.getContent()), true);
-            } else if (isHtmlEmail(message.getContent())) {
-                helper.setText(message.getContent(), true);
-            } else {
-                helper.setText(message.getContent(), false);
-            }
-            mailSender.send(mail);
+        String eventId = message.getEventId();
+        if (eventId == null || eventId.isBlank()) {
+            // 旧格式消息无幂等键：生成一次性 UUID 兜底
+            eventId = UUID.randomUUID().toString();
+            log.warn("旧格式邮件消息缺少 eventId，已生成一次性幂等键: {}", eventId);
+        }
 
-            channel.basicAck(amqpMessage.getMessageProperties().getDeliveryTag(), false);
+        if (consumedEventService.claim(eventId, getRoutingKey())
+                == ConsumedEventService.ClaimResult.DUPLICATE_COMPLETED) {
+            log.info("邮件事件已消费，跳过发送: eventId={}", eventId);
+            channel.basicAck(deliveryTag, false);
+            return;
+        }
+
+        try {
+            sendMail(message);
+            consumedEventService.complete(eventId);
+            channel.basicAck(deliveryTag, false);
             log.info("邮件发送成功: {}", message.getTo());
         } catch (Exception e) {
-            log.error("邮件任务处理失败: {}", e.getMessage(), e);
-            try {
-                channel.basicAck(amqpMessage.getMessageProperties().getDeliveryTag(), false);
-            } catch (Exception ackEx) {
-                log.error("确认消息失败: {}", ackEx.getMessage());
-            }
+            handleFailure(eventId, message, e, deliveryTag, channel);
         }
+    }
+
+    /**
+     * 组装并发送邮件，异常交由调用方统一按业务失败处置。
+     */
+    private void sendMail(EmailMessage message) throws MessagingException {
+        log.info("收到邮件任务，收件人: {}", message.getTo());
+        MimeMessage mail = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(mail, true, "UTF-8");
+        helper.setFrom("379299583@qq.com");
+        helper.setTo(message.getTo());
+        helper.setSubject(message.getSubject());
+        if (isCodeEmail(message.getContent())) {
+            helper.setText(buildHtmlContent(message.getContent()), true);
+        } else if (isHtmlEmail(message.getContent())) {
+            helper.setText(message.getContent(), true);
+        } else {
+            helper.setText(message.getContent(), false);
+        }
+        mailSender.send(mail);
+    }
+
+    /**
+     * 发送失败后的统一处置：不足 {@value MAX_RETRY_COUNT} 次 nack 重投立即重试；
+     * 达到后置 FAILED 留存并 nack 丢弃。日志只记录收件人与主题，不记录正文
+     * （验证码等敏感内容）。
+     */
+    private void handleFailure(String eventId, EmailMessage message, Exception e, long deliveryTag, Channel channel)
+            throws IOException {
+        int retryCount = consumedEventService.recordFailure(eventId, e.toString());
+        if (retryCount < MAX_RETRY_COUNT) {
+            log.warn("邮件发送失败，重投重试: eventId={}, retryCount={}, to={}, subject={}",
+                    eventId, retryCount, message.getTo(), message.getSubject(), e);
+            channel.basicNack(deliveryTag, false, true);
+            return;
+        }
+        consumedEventService.markFailed(eventId, e.toString());
+        log.error("邮件发送失败超限（{} 次），留存失败记录后丢弃: eventId={}, to={}, subject={}",
+                MAX_RETRY_COUNT, eventId, message.getTo(), message.getSubject(), e);
+        channel.basicNack(deliveryTag, false, false);
     }
 
     private boolean isCodeEmail(String content) {

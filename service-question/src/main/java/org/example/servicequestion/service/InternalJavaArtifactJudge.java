@@ -16,6 +16,15 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+/**
+ * 内部 Java 函数产物验收器：AI 生成的 Generator/Main 源码一律在 Docker 沙箱内
+ * 编译并执行，不允许宿主机执行（repair-plan §3 判题沙箱约束）。
+ *
+ * <p>沙箱保证：容器无网络（--network none）、内存 256m、CPU 1.0、进程数 128、
+ * 只读根文件系统、/tmp 为 noexec tmpfs；工作目录以只读之外挂载进容器，
+ * 编译产物与输入输出文件全部落回挂载目录。宿主机本地执行路径已移除，
+ * Docker 不可用时验收直接失败（不静默降级）。</p>
+ */
 @Component
 public class InternalJavaArtifactJudge {
     private static final int REQUIRED_CASE_COUNT = 50;
@@ -23,20 +32,17 @@ public class InternalJavaArtifactJudge {
     private final ObjectMapper objectMapper;
     private final String dockerImage;
     private final String dockerCommand;
-    private final String judgeMode;
     private final int timeoutSeconds;
 
     public InternalJavaArtifactJudge(
             ObjectMapper objectMapper,
             @Value("${codewise.function-artifact.docker-image:codewise-java-judge:17}") String dockerImage,
             @Value("${codewise.function-artifact.docker-command:docker}") String dockerCommand,
-            @Value("${codewise.function-artifact.judge-mode:local}") String judgeMode,
             @Value("${codewise.function-artifact.timeout-seconds:30}") int timeoutSeconds
     ) {
         this.objectMapper = objectMapper;
         this.dockerImage = dockerImage;
         this.dockerCommand = dockerCommand;
-        this.judgeMode = judgeMode;
         this.timeoutSeconds = timeoutSeconds;
     }
 
@@ -51,9 +57,6 @@ public class InternalJavaArtifactJudge {
         Files.writeString(artifactDirectory.resolve("validate.sh"), buildScript(seed), StandardCharsets.UTF_8);
 
         try {
-            if ("local".equalsIgnoreCase(judgeMode)) {
-                return validateLocally(artifactDirectory, judgeWorkspace, seed);
-            }
             validateInDocker(artifactDirectory);
             return readValidatedCases(artifactDirectory);
         } finally {
@@ -61,7 +64,8 @@ public class InternalJavaArtifactJudge {
         }
     }
 
-    private void prepareJudgeWorkspace(
+    /** 准备判题工作区：源码规范化命名、清理上次产物（包可见便于离线单测）。 */
+    void prepareJudgeWorkspace(
             Path artifactDirectory,
             Path judgeWorkspace,
             Path generatorSource,
@@ -110,96 +114,8 @@ public class InternalJavaArtifactJudge {
         }
     }
 
-    private List<ValidatedCase> validateLocally(
-            Path artifactDirectory,
-            Path judgeWorkspace,
-            long seed
-    ) throws IOException, InterruptedException {
-        Path classesDirectory = judgeWorkspace.resolve("classes");
-        Files.createDirectories(classesDirectory);
-        Path logFile = artifactDirectory.resolve("judge.log");
-        String compileClassPath = System.getProperty("java.class.path", "");
-        String runtimeClassPath = classesDirectory + java.io.File.pathSeparator + compileClassPath;
-
-        runLocal(
-                List.of(
-                        "javac", "-cp", compileClassPath,
-                        "-encoding", "UTF-8",
-                        "-d", classesDirectory.toString(),
-                        "Generator.java", "Main.java"
-                ),
-                judgeWorkspace,
-                logFile,
-                "本地编译失败"
-        );
-        runLocal(
-                List.of(
-                        "java", "-cp", runtimeClassPath,
-                        "Generator", String.valueOf(seed), String.valueOf(REQUIRED_CASE_COUNT)
-                ),
-                judgeWorkspace,
-                null,
-                artifactDirectory.resolve("inputs.jsonl"),
-                logFile,
-                "随机生成器执行失败"
-        );
-        runLocal(
-                List.of("java", "-cp", runtimeClassPath, "Main"),
-                judgeWorkspace,
-                artifactDirectory.resolve("inputs.jsonl"),
-                artifactDirectory.resolve("outputs.jsonl"),
-                logFile,
-                "标准答案执行失败"
-        );
-
-        return readValidatedCases(artifactDirectory);
-    }
-
-    private void runLocal(
-            List<String> command,
-            Path directory,
-            Path logFile,
-            String errorMessage
-    ) throws IOException, InterruptedException {
-        runLocal(command, directory, null, null, logFile, errorMessage);
-    }
-
-    private void runLocal(
-            List<String> command,
-            Path directory,
-            Path inputFile,
-            Path outputFile,
-            Path logFile,
-            String errorMessage
-    ) throws IOException, InterruptedException {
-        ProcessBuilder builder = new ProcessBuilder(command).directory(directory.toFile());
-        if (inputFile != null) {
-            builder.redirectInput(inputFile.toFile());
-        }
-        if (outputFile != null) {
-            builder.redirectOutput(outputFile.toFile());
-            builder.redirectError(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
-        } else {
-            builder.redirectError(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
-            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(logFile.toFile()));
-        }
-
-        Process process;
-        try {
-            process = builder.start();
-        } catch (IOException exception) {
-            throw new IllegalStateException("本地 Java 环境不可用，请确认 javac/java 已加入 PATH", exception);
-        }
-        if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            throw new IllegalStateException(errorMessage + "：执行超时");
-        }
-        if (process.exitValue() != 0) {
-            throw new IllegalStateException(errorMessage + "，详情见 judge.log");
-        }
-    }
-
-    private List<ValidatedCase> readValidatedCases(Path artifactDirectory) throws IOException {
+    /** 读取并校验生成器/标准答案产物（包可见便于离线单测）。 */
+    List<ValidatedCase> readValidatedCases(Path artifactDirectory) throws IOException {
         List<String> inputs = Files.readAllLines(artifactDirectory.resolve("inputs.jsonl"), StandardCharsets.UTF_8);
         List<String> outputs = Files.readAllLines(artifactDirectory.resolve("outputs.jsonl"), StandardCharsets.UTF_8);
         if (inputs.size() != REQUIRED_CASE_COUNT || outputs.size() != REQUIRED_CASE_COUNT) {
@@ -218,7 +134,8 @@ public class InternalJavaArtifactJudge {
         return cases;
     }
 
-    private String buildScript(long seed) {
+    /** 构建容器内执行的验收脚本（包可见便于离线单测）。 */
+    String buildScript(long seed) {
         return """
                 #!/bin/sh
                 set -eu

@@ -24,6 +24,8 @@ public class Message {
     private Long userId;
     private String currentCode;
     private Role role;
+    /** ASSISTANT 消息生成状态；USER/SYSTEM 行恒为 null */
+    private MessageStatus status;
     private LocalDateTime createTime;
 
 }

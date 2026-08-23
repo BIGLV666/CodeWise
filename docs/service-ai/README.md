@@ -4,7 +4,7 @@
 
 当前 AI MVP 已形成三个闭环：
 
-1. WA、RE、TLE 等判题失败后异步生成建议，先入库，再通过消息服务 WebSocket 推送。
+1. WA、RE、TLE 等判题失败后异步生成建议，先入库，再通过消息服务 WebSocket 推送。消费幂等与进度由 `consumed_event` 状态机（`PROCESSING/COMPLETED/FAILED`）在数据库落底，通知发送成功前事件绝不定为 COMPLETED。
 2. 用户在题目侧边栏追问，后端通过 POST SSE 流式返回模型文本，完成后保存消息。
 3. 每次回答落库后异步检查会话长度，由 Ollama 小模型增量压缩或重建会话记忆。
 
@@ -25,11 +25,14 @@ service-ai/src/main/java/org/example/serviceai
 │   │   ├── AdvicePromptBuilder          首次建议和追问 Prompt
 │   │   └── AiConversationMemaryService  摘要更新、重建与锁
 │   └── vo                               题目会话索引
-├── entry                                Conversation / Message / Memory
+├── entry                                Conversation / Message / MessageStatus / ConsumedEvent
 ├── mapper                               MyBatis-Plus Mapper
+├── MQ
+│   ├── Mq                              AI 双队列分发器（延迟重试 / 死信分派）
+│   └── handler/AiDeadLetterHandler      死信登记（consumed_event 置 FAILED）
 ├── handle/testcasehandle
-│   └── WAAiHandle                       自动判题建议消费者
-└── service                              AIService 与模型适配器
+│   └── WAAiHandle                       自动判题建议消费者（事件状态机）
+└── service                              AIService、ConsumedEventService 与模型适配器
 ```
 
 Prompt 构建、模型调用、持久化和推送分别放在对应层，不由 Controller 或 Mapper 混合承担。
@@ -38,17 +41,18 @@ Prompt 构建、模型调用、持久化和推送分别放在对应层，不由 
 
 ```text
 service-judge 判题失败
-  -> RabbitMQ AI 事件
-  -> WAAiHandle
+  -> Outbox 事件（信封 eventId）→ ai.exchange / ai.wa-advice.routing
+  -> ai.advice.queue（挂 ai.dlx，消费失败按 5s/10s/20s 延迟重试，3 次超限死信 ai.dead.queue）
+  -> WAAiHandle：consumed_event 认领（eventId 幂等）
   -> 创建或查找用户/题目的根会话
   -> 云端模型生成建议
-  -> 保存 ASSISTANT Message
-  -> RabbitMQ AI_ADVICE 通知事件
+  -> 保存 ASSISTANT Message，并记 result_ref
+  -> RabbitMQ AI_ADVICE 通知事件（发送成功才把事件置 COMPLETED）
   -> service-message / AiAdviceHandle
   -> WebSocket AI_ADVICE 用户队列
 ```
 
-自动建议先入库再推送。WebSocket 允许丢失，但用户重新打开会话时仍能从数据库读取回答。AI 建议不进入通知中心收件箱。
+自动建议先入库再推送。通知发送失败时事件保持非 COMPLETED，由 ai.advice.wait.queue 延迟重试；重试命中 result_ref 时只补发通知、不重复生成。重试超限进入 `ai.dead.queue`，`AiDeadLetterHandler` 把事件置 FAILED 留存供人工重放（见 `docs/maintenance/messaging-reliability.md` 第 9 节）。WebSocket 允许丢失，但用户重新打开会话时仍能从数据库读取回答。AI 建议不进入通知中心收件箱。
 
 ## 4. 用户追问与 SSE
 
@@ -75,9 +79,14 @@ data: 已写入 ai_message 的完整 Message
 
 event: done
 data: [DONE]
+
+event: error
+data: 对用户安全的固定文案
 ```
 
-异常使用 `error` 事件。接口为 POST SSE，前端使用 `fetch()` 读取响应流，不能直接使用只支持 GET 的原生 `EventSource`。
+异常使用 `error` 事件，文案已脱敏：仅 `AiProviderHttpException` 透出分类提示（认证失败 / 请求过于频繁 / HTTP 状态码），其余一律返回「AI 服务暂时不可用，请稍后重试」，原始异常只在服务端日志留痕。接口为 POST SSE，前端使用 `fetch()` 读取响应流，不能直接使用只支持 GET 的原生 `EventSource`。
+
+流式生成前先落一条 `status=GENERATING` 的 ASSISTANT 占位消息，收尾按结果原子更新（见第 8 节状态表）；连接超时会触发 `onTimeout`，把仍在生成的消息置为 CANCELLED。
 
 模型已经输出任意 chunk 后，策略层不再切换 Provider，避免把两个模型的回答拼接到同一条消息。首个 Provider 尚未输出内容时才允许降级。
 
@@ -147,7 +156,18 @@ KEY idx_ai_message_conversation_cursor (conversation_id, message_id);
 UNIQUE KEY uk_ai_memory_conversation_user (conversation_id, user_id);
 ```
 
-已有数据库按 `service-ai/src/main/resources/sql/migration_*.sql` 顺序执行迁移。Nacos 的 `service-ai.yaml` 数据源需要指向 `codewise_ai`。
+已有数据库按 `service-ai/src/main/resources/sql/migration_*.sql` 顺序执行迁移（当前：`migration_20260823_ai_message_status.sql` 为 ai_message 增加 status 列并把存量 ASSISTANT 行回填 COMPLETED；`consumed_event.sql` 建消费幂等状态表）。Nacos 的 `service-ai.yaml` 数据源需要指向 `codewise_ai`。
+
+ASSISTANT 消息的生成状态（`ai_message.status`，USER/SYSTEM 行为 NULL）：
+
+| 状态 | 含义 |
+| --- | --- |
+| `GENERATING` | 占位行已落库，模型正在生成 |
+| `COMPLETED` | 生成完成，content 为完整回答 |
+| `FAILED` | 生成失败，保留已生成的部分内容 |
+| `CANCELLED` | SSE 超时或客户端断开，保留部分内容 |
+
+状态收尾一律 `WHERE status='GENERATING'` 原子更新，迟到的回调不会覆盖已收尾的行。
 
 ## 9. HTTP 接口
 
@@ -163,7 +183,7 @@ UNIQUE KEY uk_ai_memory_conversation_user (conversation_id, user_id);
 
 | ID | 用途 |
 | --- | --- |
-| `eventId` | MQ 消费与 WebSocket 推送幂等 |
+| `eventId` | 信封事件 ID，consumed_event 消费幂等键（裸格式消息兜底用 messageId） |
 | `conversationId` | 用户与题目的根会话 |
 | `messageId` | 数据库消息、排序和前端去重 |
 | `submitId` | 判题提交事件及未来代码 diff |

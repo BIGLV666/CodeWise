@@ -148,10 +148,25 @@ public class MqConfig {
 
 
     //==============Ai===========队列
+    // ========== AI 队列 v2：testcase/advice 独立队列，统一挂 ai.dlx ==========
+    // 旧 ai.queue 因 broker 端参数不可变无法补挂 DLX，已弃用（不再声明）。
+
     @Bean
-    public Queue aiQueue(){
-        return QueueBuilder.durable(Ai_QUEUE_NAME).build();
+    Queue aiTestcaseQueue() {
+        return QueueBuilder.durable(AI_TESTCASE_QUEUE)
+                .deadLetterExchange(AI_DLX)
+                .deadLetterRoutingKey(AI_DEAD_ROUTING_KEY)
+                .build();
     }
+
+    @Bean
+    Queue aiAdviceQueue() {
+        return QueueBuilder.durable(AI_ADVICE_QUEUE)
+                .deadLetterExchange(AI_DLX)
+                .deadLetterRoutingKey(AI_DEAD_ROUTING_KEY)
+                .build();
+    }
+
     @Bean
     public DirectExchange aiExchange() {
         return new DirectExchange(Ai_EXCHANGE, true, false);
@@ -160,16 +175,56 @@ public class MqConfig {
     @Bean
     public Binding aiTestBinding() {
         return BindingBuilder
-                .bind(aiQueue())
+                .bind(aiTestcaseQueue())
                 .to(aiExchange())
                 .with(Ai_TESTCASE_ROUTING_KEY);
     }
+
     @Bean
-    public Binding REAdviceBinding() {
+    public Binding aiAdviceBinding() {
         return BindingBuilder
-                .bind(aiQueue())
+                .bind(aiAdviceQueue())
                 .to(aiExchange())
                 .with(AI_WA_ADVICE_ROUTING_KEY);
+    }
+
+    /**
+     * 延迟重试等待队列：无消费者。消费失败时按指数退避设置 per-message TTL
+     * 投入本队列，TTL 到期后经 DLX 弹回 ai.testcase.queue，实现无插件的延迟重试。
+     */
+    @Bean
+    Queue aiTestcaseWaitQueue() {
+        return QueueBuilder.durable(AI_TESTCASE_WAIT_QUEUE)
+                .deadLetterExchange(Ai_EXCHANGE)
+                .deadLetterRoutingKey(Ai_TESTCASE_ROUTING_KEY)
+                .build();
+    }
+
+    /**
+     * 延迟重试等待队列：无消费者。TTL 到期后经 DLX 弹回 ai.advice.queue。
+     */
+    @Bean
+    Queue aiAdviceWaitQueue() {
+        return QueueBuilder.durable(AI_ADVICE_WAIT_QUEUE)
+                .deadLetterExchange(Ai_EXCHANGE)
+                .deadLetterRoutingKey(AI_WA_ADVICE_ROUTING_KEY)
+                .build();
+    }
+
+    /** AI 死信交换机与死信队列：毒消息、重试超限统一死信于此，供人工重放。 */
+    @Bean
+    DirectExchange aiDeadExchange() {
+        return new DirectExchange(AI_DLX);
+    }
+
+    @Bean
+    Queue aiDeadQueue() {
+        return QueueBuilder.durable(AI_DLQ).build();
+    }
+
+    @Bean
+    Binding aiDeadBinding() {
+        return BindingBuilder.bind(aiDeadQueue()).to(aiDeadExchange()).with(AI_DEAD_ROUTING_KEY);
     }
     //======================================题目队列==========================
     @Bean

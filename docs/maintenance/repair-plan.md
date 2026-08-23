@@ -36,7 +36,7 @@
 - [-] 禁止或严格限制容器网络访问。
 - [-] 增加进程树清理，防止子进程残留和 fork bomb。
 - [-] 避免使用不安全的 Docker TCP 2375。
-- [ ] AI 生成的执行产物默认进入沙箱，不允许宿主机执行。
+- [-] AI 生成的执行产物默认进入沙箱，不允许宿主机执行。（2026-08-23：`InternalJavaArtifactJudge` 移除本地执行路径与 `judge-mode` 开关，验收一律走 Docker 沙箱——无网络/256m/1CPU/128 进程/只读根/noexec tmpfs；离线单测 + `CODEWISE_DOCKER_IT=true` 门控集成测试）
 
 ### 4. Community 正确性
 
@@ -51,13 +51,15 @@
 
 ### 5. Message 与 AI 消费可靠性
 
-- [ ] 修复“先写 pending/幂等标记，后执行业务”的消息丢失风险。
-- [ ] 为事件增加数据库唯一 `eventId`，并增加 `PROCESSING/COMPLETED/FAILED` 状态。
-- [ ] 邮件发送失败不能直接 ACK，应支持重试和失败保留。
-- [ ] AI 建议通知发送失败时不能把业务状态提前标记为完成。
-- [ ] 为 AI 队列增加 DLX、重试队列和死信处理。
-- [ ] 为 Assistant 消息增加 `GENERATING/COMPLETED/FAILED/CANCELLED` 状态。
-- [ ] SSE 错误事件不要直接返回原始异常信息。
+> 2026-08-23 已完成下列七项，实现说明见 `docs/maintenance/messaging-reliability.md` 第 9 节与 `docs/service-ai/README.md`。
+
+- [-] 修复“先写 pending/幂等标记，后执行业务”的消息丢失风险。（AiAdviceHandle/WAAiHandle 改为 consumed_event 状态机：claim 占位 PROCESSING，业务成功才置 COMPLETED，COMPLETED 为唯一跳过态，崩溃残留的 PROCESSING 行在消息重投时可重新接管）
+- [-] 为事件增加数据库唯一 `eventId`，并增加 `PROCESSING/COMPLETED/FAILED` 状态。（codewise_message、codewise_ai 各建 consumed_event 表，`uk_event_id` 唯一键；EmailMessage 增加 eventId，生产端自动生成）
+- [-] 邮件发送失败不能直接 ACK，应支持重试和失败保留。（失败 nack 重投立即重试，3 次超限后 consumed_event 落 FAILED 终态留存，人工重放见维护手册）
+- [-] AI 建议通知发送失败时不能把业务状态提前标记为完成。（通知发送成功前事件保持非 COMPLETED；建议落库先记 result_ref，延迟重试命中 result_ref 时只补发通知、不重复生成）
+- [-] 为 AI 队列增加 DLX、重试队列和死信处理。（新拓扑 ai.testcase.queue/ai.advice.queue 挂 ai.dlx，双 wait 队列 TTL 弹回指数退避 5s/10s/20s，ai.dead.queue + AiDeadLetterHandler 登记；旧 ai.queue 弃用待排空）
+- [-] 为 Assistant 消息增加 `GENERATING/COMPLETED/FAILED/CANCELLED` 状态。（ai_message 新增 status 列，同步与 SSE 流式路径先生成占位行再按 `WHERE status='GENERATING'` 原子收尾，失败/超时保留部分内容）
+- [-] SSE 错误事件不要直接返回原始异常信息。（仅透出 AiProviderHttpException 分类文案，其余返回固定文案，原始异常仅服务端日志留痕）
 
 ### 6. Review 正确性
 
@@ -121,7 +123,7 @@
 
 ### 阶段一：安全与正确性
 
-- [ ] Docker 化执行不可信代码。
+- [ ] Docker 化执行不可信代码。（2026-08-23 已先移除宿主机 javac/java 执行：执行器桩化返回 SYSTEM_ERROR，仅保留 HTTP/MQ 骨架；容器化实现约定走 Docker SDK HTTP API 而非 docker CLI 子进程，配合 network none/资源限制/只读根/noexec tmpfs/容器内 timeout，待实现）
 - [ ] 增加 CPU、内存、超时、输出和进程限制。
 - [ ] 增加数据库事务和 CAS 状态更新。
 - [ ] 增加 eventId/submitId 幂等。
