@@ -114,3 +114,20 @@ create table review_record (
     index idx_review_date (review_date)
 ) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci comment='每日复习记录表';
 
+-- ==========================================================
+-- 已消费事件幂等与状态表（复习判题消息消费幂等）
+-- event_id 为全局幂等键：claim 插入 PROCESSING，业务成功转 COMPLETED，超限转 FAILED
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS consumed_event (
+    id BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT COMMENT '主键',
+    event_id VARCHAR(64) NOT NULL COMMENT '全局唯一事件ID（幂等键）',
+    routing_key VARCHAR(64) DEFAULT NULL COMMENT '来源路由键',
+    status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' COMMENT '状态：PROCESSING/COMPLETED/FAILED',
+    retry_count INT NOT NULL DEFAULT 0 COMMENT '已失败尝试次数',
+    last_error VARCHAR(500) DEFAULT NULL COMMENT '最近一次失败原因（截断）',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_event_id (event_id),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='已消费事件幂等与状态表';
+

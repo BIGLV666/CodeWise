@@ -1,7 +1,6 @@
 package org.example.servicereview.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionDto;
@@ -10,6 +9,7 @@ import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
+import org.example.servicecommon.event.EnvelopeCodec;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.ReviewConfigDto;
 import org.example.servicereview.dto.UpdateReviewDto;
@@ -36,6 +36,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -52,13 +53,14 @@ public class ReviewService {
     private ReviewRecordMapper reviewRecordMapper;
     @Autowired
     private QuestionFeignClient  questionFeignClient;
-    private final ObjectMapper objectMapper = new ObjectMapper();
     @Autowired
     private TransactionTemplate transactionTemplate;
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
     @Autowired
     private RedissonClient redissonClient;
+    @Autowired
+    private ConsumedEventService consumedEventService;
     private final BigDecimal EFLOW= BigDecimal.valueOf(1.3);
     private final BigDecimal DEFAULT_EASINESS_FACTOR = BigDecimal.valueOf(2.5);
 
@@ -299,7 +301,15 @@ public class ReviewService {
      * 消费复习判题结果消息，并根据判题结果推进用户的复习状态。
      * <p>
      * 该方法监听 review 队列，只处理 {@link MqContexts#REVIEW_JUDGE_RECORD_ROUTING_KEY}
-     * 对应的消息。消息体会被解析为 {@link ReviewJudgeRecordDto}。
+     * 对应的消息。消息体经 {@link EnvelopeCodec#unwrap} 做「统一信封 / 裸 DTO」双读，
+     * 灰度期间两种格式均可解析。
+     * </p>
+     * <p>
+     * 事件级幂等：以 {@code review:judge:{judgeRecordId}} 作为 consumed_event 的幂等键。
+     * claim 与业务更新在同一个数据库事务内执行——事务回滚时 claim 占位行随之消失，
+     * 消息重投后可重新接管；业务成功后 complete 也同事务提交，保证「业务提交」与
+     * 「幂等行转 COMPLETED」原子。COMPLETED 是唯一跳过态；PROCESSING/FAILED 残留行
+     * 在重投时按 RECLAIM 重新执行，重复副作用由今日快照成员判断兜底。
      * </p>
      * <p>
      * 处理流程：
@@ -308,8 +318,10 @@ public class ReviewService {
      *     <li>读取用户复习配置，如果关闭自动复习，则 ACK 后跳过；</li>
      *     <li>根据判题结果计算 SM-2 quality；</li>
      *     <li>如果本次提交不计入复习，例如 CE 且配置为不计入，则 ACK 后跳过；</li>
+     *     <li>事务内认领事件幂等行（已 COMPLETED 则 ACK 跳过）；</li>
      *     <li>更新用户该题目的 {@link Review} 复习状态；</li>
-     *     <li>同步更新当天 {@link ReviewRecord} 快照中的 pending/completed/ac 列表。</li>
+     *     <li>同步更新当天 {@link ReviewRecord} 快照中的 pending/completed/ac 列表；</li>
+     *     <li>事务内将幂等行置为 COMPLETED，随后 ACK。</li>
      * </ol>
      * </p>
      *
@@ -329,13 +341,16 @@ public class ReviewService {
                  channel.basicAck(tag,false);
                  return;
              }
-             ReviewJudgeRecordDto reviewJudgeRecordDto=objectMapper.readValue(amqpMessage.getBody(),ReviewJudgeRecordDto.class);
+             ReviewJudgeRecordDto reviewJudgeRecordDto=EnvelopeCodec.unwrap(
+                     new String(amqpMessage.getBody(), StandardCharsets.UTF_8), ReviewJudgeRecordDto.class);
              if(reviewJudgeRecordDto == null
-                     || reviewJudgeRecordDto.getUserId() == null || reviewJudgeRecordDto.getQuestionId() == null){
+                     || reviewJudgeRecordDto.getUserId() == null || reviewJudgeRecordDto.getQuestionId() == null
+                     || reviewJudgeRecordDto.getJudgeRecordId() == null){
                  channel.basicNack(tag, false, false);
                  log.error("复习判题消息缺少必要字段");
                  return;
              }
+             String eventId="review:judge:" + reviewJudgeRecordDto.getJudgeRecordId();
              ReviewConfig reviewConfig=getReviewConfig(reviewJudgeRecordDto.getUserId());
              if(Integer.valueOf(0).equals(reviewConfig.getEnableAutoReview())){
                  log.info("用户已关闭自动复习计划, userId: {}, questionId: {}",
@@ -350,7 +365,7 @@ public class ReviewService {
                   channel.basicAck(tag,false);
                   return;
               }
-              processReviewWithLock(reviewJudgeRecordDto, q, reviewConfig);
+              processReviewWithLock(reviewJudgeRecordDto, q, reviewConfig, eventId);
               clearReviewRetry(amqpMessage);
               channel.basicAck(tag,false);
 
@@ -388,8 +403,16 @@ public class ReviewService {
         );
     }
 
-    /** 使用用户当天快照对应的分布式锁，保护完整的读改写过程。 */
-    private void processReviewWithLock(ReviewJudgeRecordDto dto, Integer quality, ReviewConfig reviewConfig)
+    /**
+     * 使用用户当天快照对应的分布式锁，保护完整的读改写过程。
+     * <p>
+     * 事件幂等 claim 与 complete 都放在 {@code transactionTemplate.execute} 的回调内，
+     * 与业务更新同事务提交/回滚：回滚时 claim 行一并消失（重投可重新接管），
+     * 提交时幂等行与业务结果原子落库（不会出现业务已提交但幂等行仍是 PROCESSING）。
+     * </p>
+     */
+    private void processReviewWithLock(ReviewJudgeRecordDto dto, Integer quality, ReviewConfig reviewConfig,
+                                       String eventId)
             throws InterruptedException {
         String lockKey = "review:record:" + dto.getUserId() + ":" + LocalDate.now();
         RLock lock = redissonClient.getLock(lockKey);
@@ -398,10 +421,10 @@ public class ReviewService {
             throw new IllegalStateException("复习记录正在更新，请稍后重试");
         }
         try {
-            Boolean updated = transactionTemplate.execute(status -> updateReviewState(dto, quality, reviewConfig));
+            Boolean updated = transactionTemplate.execute(status -> updateReviewState(dto, quality, reviewConfig, eventId));
             if (Boolean.FALSE.equals(updated)) {
-                log.info("复习题目已完成或不属于今日计划，跳过更新，userId={}，questionId={}",
-                        dto.getUserId(), dto.getQuestionId());
+                log.info("事件已完成或复习题目已完成/不属于今日计划，跳过更新，eventId={}，userId={}，questionId={}",
+                        eventId, dto.getUserId(), dto.getQuestionId());
             }
         } finally {
             if (lock.isHeldByCurrentThread()) {
@@ -410,8 +433,23 @@ public class ReviewService {
         }
     }
 
-    /** 在同一事务中更新 SM-2 状态和当天复习快照。 */
-    private boolean updateReviewState(ReviewJudgeRecordDto dto, Integer quality, ReviewConfig reviewConfig) {
+    /**
+     * 在同一事务中更新 SM-2 状态和当天复习快照。
+     * <p>
+     * 事务体顺序：事件幂等 claim（DUPLICATE_COMPLETED 直接跳过）→ 快照成员判断 →
+     * SM-2 更新 → 今日快照更新 → complete（与业务同提交）。快照成员判断与复习状态
+     * 流转语义保持原样，作为 RECLAIM 重投场景下的第二层幂等兜底。
+     * </p>
+     */
+    private boolean updateReviewState(ReviewJudgeRecordDto dto, Integer quality, ReviewConfig reviewConfig,
+                                      String eventId) {
+        ConsumedEventService.ClaimResult claimResult =
+                consumedEventService.claim(eventId, MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY);
+        if (claimResult == ConsumedEventService.ClaimResult.DUPLICATE_COMPLETED) {
+            log.info("事件已消费完成，幂等跳过, eventId={}，userId={}，questionId={}",
+                    eventId, dto.getUserId(), dto.getQuestionId());
+            return false;
+        }
         ReviewRecord todayRecord = reviewRecordMapper.getTodayRecord(dto.getUserId());
         if (todayRecord == null) {
             return false;
@@ -435,6 +473,7 @@ public class ReviewService {
             throw new RuntimeException("更新复习记录失败");
         }
         updateTodayReviewRecord(dto, todayRecord, pending, completed);
+        consumedEventService.complete(eventId);
         return true;
     }
 
@@ -501,7 +540,7 @@ public class ReviewService {
      * @param reviewConfig 用户复习配置，用于判断 CE 是否计入复习
      * @return SM-2 quality，范围通常为 0~5；-1 表示不计入本次复习
      */
-    private Integer getQuality(ReviewJudgeRecordDto reviewJudgeRecordDto, ReviewConfig reviewConfig) {
+    Integer getQuality(ReviewJudgeRecordDto reviewJudgeRecordDto, ReviewConfig reviewConfig) {
 
         if (reviewJudgeRecordDto == null) {
             return -1;
@@ -678,7 +717,7 @@ public class ReviewService {
      * @param quality 本次复习质量评分
      * @return 调整后的难度因子，最低不低于默认下限 1.3
      */
-    private BigDecimal calculateEasinessFactor(BigDecimal oldEf, Integer quality) {
+    BigDecimal calculateEasinessFactor(BigDecimal oldEf, Integer quality) {
         return calculateEasinessFactor(oldEf, quality, EFLOW);
     }
 
@@ -694,7 +733,7 @@ public class ReviewService {
      * @param minEf 最低难度因子下限
      * @return 调整后的难度因子
      */
-    private BigDecimal calculateEasinessFactor(BigDecimal oldEf, Integer quality, BigDecimal minEf) {
+    BigDecimal calculateEasinessFactor(BigDecimal oldEf, Integer quality, BigDecimal minEf) {
         BigDecimal qDiff = BigDecimal.valueOf(5 - quality);
         BigDecimal change = BigDecimal.valueOf(0.1)
                 .subtract(qDiff.multiply(BigDecimal.valueOf(0.08).add(qDiff.multiply(BigDecimal.valueOf(0.02)))));

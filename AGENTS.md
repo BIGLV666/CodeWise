@@ -66,6 +66,7 @@ Then build/test individual services:
 - Stack: JDK 21, Spring Boot 3.2.4, MySQL 8, Redis, RabbitMQ, Nacos, Docker. Python 3.11+ for the agent.
 - `service-judge` needs a prebuilt Docker image `codewise-java-judge:17`; it pre-warms a per-language container pool (2 Java, 1 each Python/C/C++), managed via `/api/judge/containers`.
 - Function-testcase generation requires the same `CODEWISE_INTERNAL_TOKEN` in `service-ai` and `service-question`.
+- Since 2026-08 ALL services require `CODEWISE_INTERNAL_TOKEN` (no default; startup fails without it). The gateway injects it as `X-Internal-Token` after stripping client-forged `X-User-Id`/`X-User-Name`/`X-Internal-Token`/`X-Real-IP`; downstream interceptors/Feign read the same value from config. `service-gateway`, `service-message`, `service-review` also require `JWT_SECRET`. Gateway trusts client IP only from remoteAddress unless `codewise.gateway.trust-forwarded-for=true`.
 - Custom model keys are encrypted with `API_KEY_MASTER_KEY` (AES-GCM); never commit real keys. Runtime function artifacts land in `data/function-artifacts/` (not versioned).
 - Python agent: `JWT_SECRET` must match Java `jwt.secret` or it returns `401 Token 签名无效`; config via `CodeWise-Agent/.env`, tables from `CodeWise-Agent/sql/agent_tables.sql`.
 

@@ -17,4 +17,15 @@
           </foreach>
         group by question_id
     </select>
+
+    <!-- 判题收尾 CAS：仅 judging -> success 命中一次，重复投递返回 0 由调用方幂等跳过 -->
+    <update id="updateJudgeSuccess">
+        update submit_record
+        set submit_status = #{submitStatus},
+            judge_status = 'success',
+            time_used = #{timeUsed},
+            memory_used = #{memoryUsed}
+        where submit_record_id = #{submitRecordId}
+          and judge_status = 'judging'
+    </update>
 </mapper>

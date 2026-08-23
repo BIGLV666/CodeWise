@@ -7,6 +7,7 @@ import org.example.serviceapi.enums.WebSocketQueueName;
 import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
+import org.example.servicecommon.event.EnvelopeCodec;
 import org.example.serviceapi.dto.notification.NotificationReviewMqDto;
 import org.example.servicemessage.mq.MessageHandler;
 import org.example.servicemessage.notificationcenter.entry.NotificationCenter;
@@ -46,7 +47,8 @@ public class ReviewHandle implements MessageHandler {
         NotificationDto notificationDto;
         NotificationReviewMqDto reviewDto;
         try {
-            notificationDto = objectMapper.readValue(message, NotificationDto.class);
+            // 信封/裸格式双读：Outbox 投递的消息为统一信封（payload 为 NotificationDto），旧格式裸 DTO 兼容
+            notificationDto = EnvelopeCodec.unwrap(message, NotificationDto.class);
             validate(notificationDto);
             reviewDto = objectMapper.readValue(notificationDto.getExtraData(), NotificationReviewMqDto.class);
             validate(reviewDto);

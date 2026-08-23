@@ -12,8 +12,8 @@
 - [-] 修复提交记录删除接口的 IDOR 风险。
 - [-] 函数题创建时禁止信任客户端提交的 `createUserId`。
 - [-] 函数测试用例批量插入增加 owner/admin 校验。
-- [ ] Gateway 转发前删除客户端提交的 `X-User-Id`、`X-User-Name`、`X-Internal-Token`、`X-Real-IP`，再注入可信值。
-- [ ] 将内部 Token、JWT Secret、其他敏感配置移出源码，改为环境变量、Nacos 加密配置或密钥管理服务。
+- [-] Gateway 转发前删除客户端提交的 `X-User-Id`、`X-User-Name`、`X-Internal-Token`、`X-Real-IP`，再注入可信值。（2026-08-23：AuthGlobalFilter 改「先剥离后注入」，公共路径/WS 分支不再透传伪造头；WS 分支补注 X-User-Name；X-Forwarded-For 默认不信任（`codewise.gateway.trust-forwarded-for=false` 只用 remoteAddress），7 个离线单测覆盖）
+- [-] 将内部 Token、JWT Secret、其他敏感配置移出源码，改为环境变量、Nacos 加密配置或密钥管理服务。（2026-08-23：`codewise.internal-token` 全服务无默认值经 `CODEWISE_INTERNAL_TOKEN` 注入（gateway/拦截器/Feign 三处同源）；service-common JwtUntil 改构造器注入；gateway yaml 密钥改 `${JWT_SECRET}`；UserAuthInterceptor 不再全量打印请求头；文档同步脱敏。部署要求：8 个服务均需 `CODEWISE_INTERNAL_TOKEN`，gateway/message/review 另需 `JWT_SECRET`，缺失启动失败属预期）
 - [-] 收紧 `UserAuthInterceptor` 的匿名放行规则，删除基于 `contains("login")`、`contains("/info")`、`contains("uploads")` 的宽泛匹配。
 - [-] WebSocket 入口不能完全绕过内部身份校验。
 
@@ -22,9 +22,9 @@
 - [-] 为主 Judge 队列真正配置 DLX/DLQ 参数，确认 `basicNack(requeue=false)` 会进入死信队列。（新队列 judge.submit/debug/retry.queue 已挂 judge.dlx，旧 judge.queue 因参数不可变弃用，见 `docs/maintenance/messaging-reliability.md`）
 - [-] 拆分 submit、debug、retry 队列，避免不同消息结构共用一个队列。
 - [-] 确认并启用 `@EnableScheduling`，验证 Pending 任务补偿扫描实际运行。
-- [ ] 统一 ACK/NACK 时机，避免事务提交前 ACK。（judge 侧消费者已统一：毒消息/重试/死信分派且 ACK 在事务提交后；question 侧 `SubmitRecordHandel` 仍在事务内 ACK，待后续处理）
+- [-] 统一 ACK/NACK 时机，避免事务提交前 ACK。（judge 侧消费者已统一；2026-08-23 question 侧 `SubmitRecordHandel`/`TestCaseHandle` 重构为「非事务消费者 + TransactionTemplate 事务体 + 提交后 ACK」，消除双重 nack，失败单次 nack + Redis 重试计数 3 次留存，WebSocket 推送移至 ACK 后尽力而为）
 - [-] 避免在数据库事务中长时间执行 Docker 和 MQ 操作。（判题执行移出事务；MQ 发布经 Outbox 表内登记、Relay 批量短事务投递）
-- [ ] 为判题结果更新增加原子幂等控制，防止重复回调重复增加计数。
+- [-] 为判题结果更新增加原子幂等控制，防止重复回调重复增加计数。（2026-08-23：`submit_record` 增加 `judge_status='judging'→'success'` CAS（updateJudgeSuccess），命中才执行 total_submit/total_ac 计数与 REVIEW 转发，三者在同一事务原子提交；重复投递 CAS 返回 0 幂等跳过）
 - [-] 增加消息消费日志：eventId、submitId、routingKey、重试次数和最终结果。
 
 ### 3. 判题沙箱
@@ -63,10 +63,10 @@
 
 ### 6. Review 正确性
 
-- [ ] Mastered 题目答错后必须回退到 Active 或待复习状态。
-- [ ] 增加事件级幂等表，防止同一判题结果重复更新复习计划。
-- [ ] 修复 Redis 幂等标记先于数据库提交造成的误判。
-- [ ] 提醒消息发布增加 Outbox 或 Publisher Confirm。
+- [ ] Mastered 题目答错后必须回退到 Active 或待复习状态。（2026-08-23 用户决策：保持 Mastered 终态不回退。现状备忘：SM-2 对答错本有惩罚逻辑（repetitions=0、间隔重置 1 天），但已 Mastered 的题不进每日快照、消费端跳过，惩罚不执行且 `updateReview` 在 status=1 时拒绝人工调整——若未来想恢复复习，需同时放开快照判断与状态回退。）
+- [-] 增加事件级幂等表，防止同一判题结果重复更新复习计划。（2026-08-23：codewise_review 建 consumed_event 表，幂等键 `review:judge:{judgeRecordId}`，消费改 `EnvelopeCodec.unwrap` 双读；原有快照成员判断保留为第二层兜底）
+- [-] 修复 Redis 幂等标记先于数据库提交造成的误判。（2026-08-23 核查：该反模式在判题消费链路原不存在（历史重构已消除）；新幂等方案的 claim 行与业务更新同事务，回滚即消失、重投可重新接管，从设计上排除该误判）
+- [-] 提醒消息发布增加 Outbox 或 Publisher Confirm。（2026-08-23：service-review 启用 service-common 通用 Outbox（codewise_review 建 event_outbox 表），两个提醒任务改 `outboxService.append(REVIEW_REMINDER...)`，消费端 ReviewHandle 双读信封；messageId 按天幂等 + 消费端既有幂等不变）
 
 ## 二、P1：可靠性和可维护性
 

@@ -3,6 +3,7 @@ package org.example.servicemessage.websocket.websocketConfig;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.example.servicecommon.until.JwtUntil;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
@@ -11,12 +12,28 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeInterceptor;
 
 import java.util.Map;
+
+/**
+ * WebSocket 握手鉴权拦截器。
+ *
+ * <p>内部令牌与 JWT 密钥均由配置注入（{@code codewise.internal-token}、
+ * {@code jwt.secret}、{@code jwt.expiration-ms}，经环境变量
+ * CODEWISE_INTERNAL_TOKEN / JWT_SECRET 提供），不再硬编码。</p>
+ */
 @Component
 public class WebSocketAuthInterceptor implements HandshakeInterceptor {
 
-    private final JwtUntil jwtUtil = new JwtUntil();
+    private final JwtUntil jwtUtil;
 
-    private static final String INTERNAL_TOKEN="codewise-secret-2026";
+    private final String internalToken;
+
+    public WebSocketAuthInterceptor(
+            @Value("${codewise.internal-token}") String internalToken,
+            @Value("${jwt.secret}") String jwtSecret,
+            @Value("${jwt.expiration-ms}") long jwtExpirationMillis) {
+        this.internalToken = internalToken;
+        this.jwtUtil = new JwtUntil(jwtSecret, jwtExpirationMillis);
+    }
 
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
@@ -29,10 +46,9 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
 
             String internalToken =httpRequest.getHeader("X-Internal-Token");
 
-            if(!INTERNAL_TOKEN.equals(internalToken)){
+            if(!this.internalToken.equals(internalToken)){
                 return false;
             }
-
 
 
 

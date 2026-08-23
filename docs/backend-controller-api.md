@@ -53,11 +53,12 @@ Authorization: Bearer <token>
 Authorization: Bearer <token>
 ```
 
-网关验证后会向下游追加：
+网关验证后会向下游追加（内部 Token 经 `CODEWISE_INTERNAL_TOKEN` 环境变量配置，转发前会剥离客户端伪造的同名头）：
 
 ```http
 X-User-Id: <userId>
-X-Internal-Token: codewise-secret-2026
+X-User-Name: <userName>
+X-Internal-Token: <环境变量注入，勿硬编码>
 X-Real-IP: <clientIp>
 ```
 

@@ -7,6 +7,7 @@ import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.util.AntPathMatcher;
@@ -15,11 +16,21 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.io.IOException;
 import java.util.Set;
 
+/**
+ * 下游服务统一身份拦截器：校验网关注入的 {@code X-Internal-Token}，
+ * 并把 {@code X-User-Id}、{@code X-User-Name}、{@code X-Real-IP} 写入 {@link UserContext}。
+ *
+ * <p>内部 Token 一律来自 {@code codewise.internal-token} 配置（环境变量
+ * {@code CODEWISE_INTERNAL_TOKEN}），无默认值——缺失时启动失败即暴露配置遗漏。
+ * 请求头细节不落日志（历史版本曾全量打印请求头，含 Authorization 与内部 Token）。</p>
+ */
 @AutoConfiguration
 public class UserAuthInterceptor implements HandlerInterceptor {
-    // 内部通信密钥（和网关保持一致）
-    private static final String INTERNAL_TOKEN = "codewise-secret-2026";
-    private static final Integer ADMIN_ROLE =2;
+    /** 管理员角色标识 */
+    private static final Integer ADMIN_ROLE = 2;
+    /** 内部通信密钥：与网关配置保持一致，无默认值（缺失即启动失败） */
+    @Value("${codewise.internal-token}")
+    private String internalToken;
     private static final Set<String> PUBLIC_PATHS = Set.of(
             "/api/user/login",
             "/api/user/emaillogin",
@@ -43,25 +54,14 @@ public class UserAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        // 打印所有请求头
-        System.out.println("========== 所有请求头 ==========");
-        java.util.Enumeration<String> headerNames = request.getHeaderNames();
-        while (headerNames.hasMoreElements()) {
-            String headerName = headerNames.nextElement();
-            System.out.println(headerName + ": " + request.getHeader(headerName));
-        }
-        System.out.println("=================================");
-
         String path = request.getRequestURI();
         String ip = request.getHeader("X-Real-IP");
-        System.out.println(request.getHeader("X-Real-IP"));
-        System.out.println(request);
         if (ip != null) {
             UserContext.setCurrentIp(ip);
         }
         // 验证内部 Token 后，才允许进入任何匿名白名单。
-        String internalToken = request.getHeader("X-Internal-Token");
-        if (internalToken == null || !internalToken.equals(INTERNAL_TOKEN)) {
+        String headerToken = request.getHeader("X-Internal-Token");
+        if (headerToken == null || !headerToken.equals(internalToken)) {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
             response.setContentType("application/json;charset=UTF-8");
             try {
@@ -83,7 +83,6 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         // WebSocket 握手的 JWT 校验由网关和 WebSocket 握手拦截器共同完成。
         String upgrade = request.getHeader("Upgrade");
         if ("websocket".equalsIgnoreCase(upgrade)) {
-            System.out.println("✅ 放行已通过内部校验的 WebSocket 握手: " + path);
             return true;
         }
 

@@ -25,4 +25,10 @@ public final class EventTypes {
 
     /** AI 判题建议请求：judge -> ai，payload 为瘦身后的事件引用 DTO */
     public static final String AI_ADVICE_REQUEST = "AI_ADVICE_REQUEST";
+
+    /** 复习场景判题结果：question -> review，payload 为 ReviewJudgeRecordDto */
+    public static final String REVIEW_JUDGE_RECORD = "REVIEW_JUDGE_RECORD";
+
+    /** 复习提醒通知：review -> message，payload 为 NotificationDto（含每日幂等 messageId） */
+    public static final String REVIEW_REMINDER = "REVIEW_REMINDER";
 }

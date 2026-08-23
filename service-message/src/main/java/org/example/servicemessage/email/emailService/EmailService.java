@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,11 @@ public class EmailService implements MessageHandler {
     private JavaMailSender mailSender;
     @Autowired
     private ConsumedEventService consumedEventService;
+
+    /** 发件人地址，经 codewise.mail.from 配置，默认保留原硬编码值以兼容现有部署。 */
+    @Value("${codewise.mail.from:379299583@qq.com}")
+    private String mailFrom;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -93,7 +99,7 @@ public class EmailService implements MessageHandler {
         log.info("收到邮件任务，收件人: {}", message.getTo());
         MimeMessage mail = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(mail, true, "UTF-8");
-        helper.setFrom("379299583@qq.com");
+        helper.setFrom(mailFrom);
         helper.setTo(message.getTo());
         helper.setSubject(message.getSubject());
         if (isCodeEmail(message.getContent())) {

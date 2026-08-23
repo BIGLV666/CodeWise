@@ -34,6 +34,16 @@ CodeWise 是面向编程学习、在线判题、错题复习和题解社区的 S
 
 生产或共享环境不得把密码、JWT 密钥、模型密钥写入仓库。连接信息通过 Nacos 或环境变量维护。
 
+必需环境变量（2026-08 起无默认值，缺失启动失败属预期）：
+
+| 变量 | 作用范围 | 说明 |
+|------|----------|------|
+| `CODEWISE_INTERNAL_TOKEN` | 全部 8 个服务 | 网关/下游拦截器/Feign 三处同值的内部通信 Token |
+| `JWT_SECRET` | service-gateway、service-message、service-review | JWT 签名密钥，与 Python Agent `.env` 的 `JWT_SECRET` 同值（HS384） |
+| `API_KEY_MASTER_KEY` | service-ai | 自定义模型 API Key 的 AES-GCM 主密钥 |
+
+网关 IP 信任策略：默认 `codewise.gateway.trust-forwarded-for=false` 只信任 TCP remoteAddress 并剥离客户端 X-Forwarded-For；部署在可信 LB 之后才置 true。数据库增量：`codewise_review` 需执行 `event_outbox.sql` 与 `consumed_event` 建表（service-review resources）。
+
 ## 4. 数据库约定
 
 业务库按服务拆分，名称采用 `codewise_<模块名>`，例如：

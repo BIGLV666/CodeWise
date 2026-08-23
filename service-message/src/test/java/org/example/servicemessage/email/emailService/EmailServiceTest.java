@@ -4,6 +4,7 @@ import com.rabbitmq.client.Channel;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.example.servicemessage.consumedevent.service.ConsumedEventService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
 
@@ -41,6 +43,12 @@ class EmailServiceTest {
 
     @InjectMocks
     private EmailService emailService;
+
+    @BeforeEach
+    void setUp() {
+        // @InjectMocks 不会填充 @Value 字段，测试内手动给发件人赋默认值
+        ReflectionTestUtils.setField(emailService, "mailFrom", "379299583@qq.com");
+    }
 
     @Test
     void handleParsesJsonMessageAndAcknowledgesIt() throws Exception {

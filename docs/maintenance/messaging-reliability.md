@@ -52,8 +52,9 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 - 投递：`OutboxRelay` 每秒批量认领（`FOR UPDATE SKIP LOCKED`，多实例/多服务安全），失败指数退避 `10s * 2^n`，8 次后转 DEAD。
 - 启用：服务 yaml `codewise.outbox.enabled: true`（question 与 judge 均已启用；relay 默认启用，开关 `codewise.outbox.relay.enabled`）。
 - 覆盖事件：
-  - question：JUDGE_SUBMIT_REQUEST（提交判题）、JUDGE_DEBUG_REQUEST（调试）
+  - question：JUDGE_SUBMIT_REQUEST（提交判题）、JUDGE_DEBUG_REQUEST（调试）、REVIEW_JUDGE_RECORD（复习场景判题结果转发 review）
   - judge：JUDGE_RESULT_CALLBACK（结果回调 question）、AI_ADVICE_REQUEST（AI 建议，WA/RE/TLE 时）
+  - review：REVIEW_REMINDER（复习到期提醒，codewise_review 库同构 event_outbox 表）
 - 当前以「发送不抛异常」为成功（至少一次）；后续 Nacos 开启 `publisher-confirm-type: correlated` 后可升级为 confirm 确认再标 SENT（仅改 OutboxRelay）。
 
 ## 4. 重试 / DLQ / 人工重放
@@ -73,15 +74,17 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 
 ## 6. 统一 Feign 拦截器
 
-`service-common` `FeignHeaderAutoConfiguration` 提供全局 `commonFeignRequestInterceptor`：透传 X-User-Id/X-User-Name/X-Real-IP（来自 UserContext），注入 X-Internal-Token（读 `codewise.internal-token`，默认 `codewise-secret-2026` 与 UserAuthInterceptor 现行校验一致）。ai/community/judge/question/review 五份本地副本已删除。
+`service-common` `FeignHeaderAutoConfiguration` 提供全局 `commonFeignRequestInterceptor`：透传 X-User-Id/X-User-Name/X-Real-IP（来自 UserContext），注入 X-Internal-Token（读 `codewise.internal-token`，无默认值，经环境变量 `CODEWISE_INTERNAL_TOKEN` 注入，与网关 `AuthGlobalFilter`、`UserAuthInterceptor` 三处同值）。ai/community/judge/question/review 五份本地副本已删除。
 
 ## 7. 相关配置项速查
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
-| `codewise.outbox.enabled` | false | 启用 Outbox 组件（question/judge 已显式 true） |
+| `codewise.outbox.enabled` | false | 启用 Outbox 组件（question/judge/review 已显式 true） |
 | `codewise.outbox.relay.enabled` | true | 启用定时投递器 |
-| `codewise.internal-token` | codewise-secret-2026 | 统一 Feign 拦截器内部 Token |
+| `codewise.internal-token` | 无（必填） | 内部通信 Token，经 `CODEWISE_INTERNAL_TOKEN` 环境变量注入，缺失启动失败 |
+| `jwt.secret` | 无（必填） | JWT 密钥，经 `JWT_SECRET` 环境变量注入（gateway/message/review），与 Python Agent 同值 |
+| `codewise.gateway.trust-forwarded-for` | false | 网关是否信任 X-Forwarded-For（部署在可信 LB 后才置 true，直连时只用 remoteAddress） |
 | `codewise.mq.enabled` | - | 既有开关，控制 MqConfig 声明 |
 
 ## 8. 已知限制与后续项
@@ -129,7 +132,7 @@ ai.dlx (direct) ── ai.dead ──→ ai.dead.queue
 
 - claim：INSERT 成功 = NEW；唯一键冲突按既有行分派：COMPLETED → 真重复直接 ACK；PROCESSING/FAILED → RECLAIM 重新接管（broker 对未 ACK 消息重投，崩溃残留行必须可重跑，at-least-once）。
 - `recordFailure`：`retry_count = retry_count + 1` 原子自增、last_error 截断 500 字符，状态保持 PROCESSING。
-- 覆盖消费者：service-message `EmailService`（email.routing）、`AiAdviceHandle`（notification.ai.advice.routing）；service-ai `WAAiHandle`（ai.wa-advice.routing）。4 个通知 handler（like/review/checked/appeal）维持原有「业务成功后写标记 + DB 唯一键」安全模式。
+- 覆盖消费者：service-message `EmailService`（email.routing）、`AiAdviceHandle`（notification.ai.advice.routing）；service-ai `WAAiHandle`（ai.wa-advice.routing）；service-review `ReviewService.setReview`（reviews.judge.record.routing，幂等键 `review:judge:{judgeRecordId}`，claim 行与 SM-2 业务更新同事务）。4 个通知 handler（like/review/checked/appeal）维持原有「业务成功后写标记 + DB 唯一键」安全模式。
 - service-message `mq/Mq.java` 分发器对 handler 未捕获异常（如 DB 抖动导致 claim 失败）做兜底：退避 5s 后 nack 重投，消息不丢（这两个队列未挂 DLX，nack(requeue=false) 等于丢弃）。
 
 ### 9.3 关键丢失/提前完成风险的消除
@@ -219,7 +222,7 @@ UPDATE consumed_event SET status = 'PROCESSING', retry_count = 0 WHERE event_id 
 ## D. 升级路径（已排好的后续项）
 
 1. **开启 publisher confirm**：Nacos 加 `spring.rabbitmq.publisher-confirm-type: correlated` → 改 `OutboxRelay#publishOne` 为 confirm 回调成功后才标 SENT（仅改 common 一处，调用方无感）。
-2. **其余服务迁移到信封**：消息/复习/社区等链路逐个改 `EnvelopeCodec.unwrap` 双读 → 全量切换后可强制信封（unwrap 去掉裸格式分支，`schemaVersion` 校验加强）。
+2. **其余服务迁移到信封**：复习链路已迁移（question→review 走 Outbox 信封、review 消费与 message 的 ReviewHandle 均双读）；消息/社区等剩余链路继续逐个改 `EnvelopeCodec.unwrap` 双读 → 全量切换后可强制信封（unwrap 去掉裸格式分支，`schemaVersion` 校验加强）。
 3. **payload 结构变更**：`schemaVersion` +1，消费端按版本分支兼容一个迭代周期后删旧分支。
 4. **message/notification 队列补 DLX**：照抄 judge/AI 的「新队列名 + wait 队列 + DLQ」模式，将邮件/通知失败从「consumed_event FAILED 留存」升级为「死信进 DLQ 可管理台重放」（repair-plan 后续项）。
 5. **consumed_event 模式推广**：4 个通知 handler（like/review/checked/appeal）如需统一到数据库幂等，复用 claim/complete/recordFailure/markFailed 骨架。
