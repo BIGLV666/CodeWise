@@ -2,7 +2,7 @@ spring:
   application:
     name: service-gateway
   config:
-    import: optional:nacos:service-gateway.yaml   # Nacos 不可用时环境变量兜底，不拦启动
+    import: nacos:service-gateway.yaml   # Nacos 配置中心
   cloud:
     nacos:
       discovery:
