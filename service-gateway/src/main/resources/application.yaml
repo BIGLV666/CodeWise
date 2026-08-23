@@ -1,10 +1,15 @@
 spring:
   application:
     name: service-gateway
+  config:
+    import: optional:nacos:service-gateway.yaml   # Nacos 不可用时环境变量兜底，不拦启动
   cloud:
     nacos:
       discovery:
         server-addr: localhost:8848
+      config:
+        server-addr: localhost:8848
+        file-extension: yaml
     gateway:
       globalcors:
         cors-configurations:
@@ -74,6 +79,7 @@ spring:
             - Path=/api/community/**
 
 
+
 jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000
@@ -88,5 +94,6 @@ logging:
   level:
     org.springframework.cloud.gateway: DEBUG
     org.springframework.web: DEBUG
+
 
 
