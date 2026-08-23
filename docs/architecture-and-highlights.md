@@ -145,6 +145,11 @@ REVIEW 场景判题结果 → Outbox(REVIEW_JUDGE_RECORD) → reviews.queue
   ▼ 每日 10:00/21:00 定时扫描（Redisson 锁防多实例重复）
       → Outbox(REVIEW_REMINDER，messageId 按 天+用户 幂等) → notification.queue
       → ReviewHandle（信封/裸双读 + Redis/DB 唯一键双层幂等）→ 通知中心 + WebSocket
+  ▼ 掌握祝贺：SM-2 间隔达到阈值 状态 0→1 首次转掌握时
+      → 同事务 Outbox(REVIEW_MASTERED：userId/questionId/掌握时间/加入时间/总复习次数)
+      → notification.review.mastered.routing → ReviewMasteredHandle（信封双读 + consumed_event 幂等）
+      → Feign 异步取题目名 → 收件箱(REVIEW_MASTERED) + WebSocket INBOX_REVIEW 祝贺推送
+      （掌握后 status=1 不再进入每日快照 = 自动移出复习计划）
 ```
 
 **一句话**：经典 SM-2 间隔重复算法 + 事件级幂等 + Outbox 提醒，整条链路可重放。

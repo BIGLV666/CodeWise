@@ -342,5 +342,12 @@ public class MqConfig {
                 .to(NotificationExchange())
                 .with(NOTIFICATION_APPEAL_ROUTING_KEY);
     }
+    @Bean
+    public Binding notificationReviewMasteredBinding() {
+        return BindingBuilder
+                .bind(NotificationQueue())
+                .to(NotificationExchange())
+                .with(NOTIFICATION_REVIEW_MASTERED_ROUTING_KEY);
+    }
 
 }

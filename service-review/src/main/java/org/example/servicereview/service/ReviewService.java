@@ -5,11 +5,14 @@ import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
+import org.example.servicecommon.dto.ReviewMasteredDto;
 import org.example.servicecommon.event.EnvelopeCodec;
+import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.ReviewConfigDto;
 import org.example.servicereview.dto.UpdateReviewDto;
@@ -39,6 +42,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -61,8 +65,13 @@ public class ReviewService {
     private RedissonClient redissonClient;
     @Autowired
     private ConsumedEventService consumedEventService;
+    @Autowired
+    private OutboxService outboxService;
     private final BigDecimal EFLOW= BigDecimal.valueOf(1.3);
     private final BigDecimal DEFAULT_EASINESS_FACTOR = BigDecimal.valueOf(2.5);
+    /** 复习掌握事件时间字段格式（MQ 转换器无 Java 时间模块，统一走字符串） */
+    private static final DateTimeFormatter MASTERED_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /**
      *
@@ -376,7 +385,7 @@ public class ReviewService {
                  Long retryCount = redisTemplate.opsForHash().increment(
                          RedisContext.REVIEW_JUDGE_RETRY_COUNT_KEY, retryId, 1
                  );
-                 boolean exhausted = retryCount != null && retryCount >= 3;
+                 boolean exhausted = retryCount >= 3;
                  if (exhausted) {
                      redisTemplate.opsForHash().put(
                              RedisContext.REVIEW_JUDGE_FAILED_KEY,
@@ -437,8 +446,13 @@ public class ReviewService {
      * 在同一事务中更新 SM-2 状态和当天复习快照。
      * <p>
      * 事务体顺序：事件幂等 claim（DUPLICATE_COMPLETED 直接跳过）→ 快照成员判断 →
-     * SM-2 更新 → 今日快照更新 → complete（与业务同提交）。快照成员判断与复习状态
-     * 流转语义保持原样，作为 RECLAIM 重投场景下的第二层幂等兜底。
+     * SM-2 更新 → 首次转掌握时经 Outbox 登记祝贺事件 → 今日快照更新 →
+     * complete（与业务同提交）。快照成员判断与复习状态流转语义保持原样，
+     * 作为 RECLAIM 重投场景下的第二层幂等兜底。
+     * </p>
+     * <p>
+     * 复习掌握事件与 SM-2 更新同事务：状态由 学习中(0) 变为 已掌握(1) 与事件登记
+     * 原子一致，事务回滚时两者一并撤销；提交后由 OutboxRelay 至少一次投递。
      * </p>
      */
     private boolean updateReviewState(ReviewJudgeRecordDto dto, Integer quality, ReviewConfig reviewConfig,
@@ -468,13 +482,49 @@ public class ReviewService {
         if (review == null) {
             throw new IllegalArgumentException("未找到对应的复习记录");
         }
+        // calculateNextReviewInterval 原地修改并返回同一对象，更新前的状态需先留底用于 0→1 判定
+        Integer previousStatus = review.getStatus();
         Review calculated = calculateNextReviewInterval(review, quality, reviewConfig);
         if (reviewMapper.updateById(calculated) == 0) {
             throw new RuntimeException("更新复习记录失败");
         }
+        publishMasteredIfFirstTransition(previousStatus, calculated);
         updateTodayReviewRecord(dto, todayRecord, pending, completed);
         consumedEventService.complete(eventId);
         return true;
+    }
+
+    /**
+     * 复习计划首次由 学习中(0) 转为 已掌握(1) 时，经 Outbox 发布复习掌握祝贺事件。
+     * <p>
+     * 必须与 SM-2 更新同事务调用（当前调用点在 {@code updateReviewState} 事务体内、
+     * {@code updateById} 成功之后）：状态变掌握与事件登记原子一致，事务回滚时
+     * Outbox 行随业务一并消失；事务提交后由 OutboxRelay 至少一次投递，消费端
+     * 以 messageId（{@code review:mastered:{userId}:{questionId}}，掌握是终态，
+     * 天然唯一）幂等去重。题目名不在此填充，由消费端经 Feign 异步补齐。
+     * </p>
+     *
+     * @param previousStatus SM-2 计算前的复习状态
+     * @param calculated     SM-2 计算后的复习记录（已含最新 reviewCount/status）
+     */
+    private void publishMasteredIfFirstTransition(Integer previousStatus, Review calculated) {
+        if (!Integer.valueOf(0).equals(previousStatus)
+                || !Integer.valueOf(1).equals(calculated.getStatus())) {
+            return;
+        }
+        ReviewMasteredDto masteredDto = ReviewMasteredDto.builder()
+                .messageId("review:mastered:" + calculated.getUserId() + ":" + calculated.getQuestionId())
+                .userId(calculated.getUserId())
+                .questionId(calculated.getQuestionId())
+                .masteredTime(LocalDateTime.now().format(MASTERED_TIME_FORMATTER))
+                .joinTime(calculated.getCreateTime() == null
+                        ? null : calculated.getCreateTime().format(MASTERED_TIME_FORMATTER))
+                .totalReviewCount(calculated.getReviewCount() == null ? 0 : calculated.getReviewCount())
+                .build();
+        outboxService.append(EventTypes.REVIEW_MASTERED,
+                MqContexts.NOTIFICATION_EXCHANGE,
+                MqContexts.NOTIFICATION_REVIEW_MASTERED_ROUTING_KEY,
+                masteredDto);
     }
 
     /**

@@ -54,7 +54,9 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 - 覆盖事件：
   - question：JUDGE_SUBMIT_REQUEST（提交判题）、JUDGE_DEBUG_REQUEST（调试）、REVIEW_JUDGE_RECORD（复习场景判题结果转发 review）
   - judge：JUDGE_RESULT_CALLBACK（结果回调 question）、AI_ADVICE_REQUEST（AI 建议，WA/RE/TLE 时）
-  - review：REVIEW_REMINDER（复习到期提醒，codewise_review 库同构 event_outbox 表）
+  - review：REVIEW_REMINDER（复习到期提醒，codewise_review 库同构 event_outbox 表）、
+    REVIEW_MASTERED（掌握祝贺：SM-2 状态 0→1 时与更新同事务发布，payload 为
+    ReviewMasteredDto，题目名由 message 消费端 Feign 补齐）
 - 当前以「发送不抛异常」为成功（至少一次）；后续 Nacos 开启 `publisher-confirm-type: correlated` 后可升级为 confirm 确认再标 SENT（仅改 OutboxRelay）。
 
 ## 4. 重试 / DLQ / 人工重放

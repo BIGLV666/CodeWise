@@ -31,4 +31,7 @@ public final class EventTypes {
 
     /** 复习提醒通知：review -> message，payload 为 NotificationDto（含每日幂等 messageId） */
     public static final String REVIEW_REMINDER = "REVIEW_REMINDER";
+
+    /** 复习掌握祝贺：review -> message，payload 为 ReviewMasteredDto（题目名由消费端 Feign 补齐） */
+    public static final String REVIEW_MASTERED = "REVIEW_MASTERED";
 }

@@ -8,5 +8,7 @@ public enum NotificationCenterType {
     REVIEW,
     AI_ADVICE,
     CHECKED,
-    APPEAL
+    APPEAL,
+    /** 复习掌握祝贺（review -> message，extraData 为 ReviewMasteredDto） */
+    REVIEW_MASTERED
 }

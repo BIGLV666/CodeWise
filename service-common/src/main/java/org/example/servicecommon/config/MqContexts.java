@@ -81,5 +81,7 @@ public  class MqContexts {
     public static final String NOTIFICATION_AI_ADVICE_ROUTING_KEY = "notification.ai.advice.routing";
     public static final String NOTIFICATION_CHECKED_ROUTING_KEY = "notification.checked.routing";
     public static final String NOTIFICATION_APPEAL_ROUTING_KEY = "notification.appeal.routing";
+    /** 复习掌握祝贺通知：review -> message（经 Outbox），payload 为 ReviewMasteredDto */
+    public static final String NOTIFICATION_REVIEW_MASTERED_ROUTING_KEY = "notification.review.mastered.routing";
 
 }
