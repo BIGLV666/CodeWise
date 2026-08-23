@@ -165,7 +165,8 @@ class ReviewServiceConsumedIdempotencyTest {
 
         verify(channel).basicNack(DELIVERY_TAG, false, false);
         verifyNoInteractions(consumedEventService);
-        verify(transactionTemplate, never()).execute(any());
+        // 毒消息不进入事务（stubbing 不计 interaction，故用 verifyNoInteractions）
+        verifyNoInteractions(transactionTemplate);
     }
 
     private void stubLockAndRedis() throws InterruptedException {

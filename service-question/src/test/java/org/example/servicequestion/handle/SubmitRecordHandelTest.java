@@ -123,7 +123,8 @@ class SubmitRecordHandelTest {
         handler.handle("not-a-json", channel, amqpMessage());
 
         verify(channel).basicAck(1L, false);
-        verify(transactionTemplate, never()).execute(any());
+        // 毒消息不进入事务（stubbing 不计 interaction，故用 verifyNoInteractions）
+        verifyNoInteractions(transactionTemplate);
         verify(judgeRecordMapper, never()).selectById(any());
     }
 
