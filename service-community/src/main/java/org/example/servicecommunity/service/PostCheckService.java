@@ -100,8 +100,8 @@ public class PostCheckService {
 
         List<HomePostVo> records;
         Long nextCursor = null;
-        Boolean hasNext = false;
-        if (list != null && !list.isEmpty()) {
+        boolean hasNext = false;
+        if (!list.isEmpty()) {
             if (list.size() > pageSize) {
                 records = returnPostVoList.subList(0, pageSize);
                 HomePostVo lastRecord = records.getLast();
@@ -186,7 +186,7 @@ public class PostCheckService {
         if(r==0){
             throw new IllegalArgumentException("更新帖子状态失败");
         }
-        
+
         // 下架时记录到下架表
         if (status == TACK_DOWN) {
             TakeDownPost takeDownPost = new TakeDownPost();
@@ -198,7 +198,7 @@ public class PostCheckService {
             takeDownPost.setAdminId(UserContext.getUserId());
             takeDownPostMapper.insert(takeDownPost);
         }
-        
+
         if (status == NORMAL) {
             redisTemplate.opsForZSet().add(RedisContext.HOST_POST_KEY, postId.toString(), 0.0);
         } else {
@@ -229,7 +229,7 @@ public class PostCheckService {
 
         List<Comment> records;
         Long nextCursor = null;
-        Boolean hasNext = false;
+        boolean hasNext = false;
 
         if (returnPostVoList != null && !returnPostVoList.isEmpty()) {
             if (returnPostVoList.size() > pageSize) {
@@ -278,7 +278,7 @@ public class PostCheckService {
         if(r==0){
             throw new IllegalArgumentException("更新评论状态失败");
         }
-        
+
         // 下架时记录到下架表
         if (status == TACK_DOWN) {
             TakeDownPost takeDownPost = new TakeDownPost();
@@ -297,7 +297,7 @@ public class PostCheckService {
             takeDownPost.setAdminId(UserContext.getUserId());
             takeDownPostMapper.insert(takeDownPost);
         }
-        
+
         sendCommentMessage(comment, status == NORMAL ? CheckAction.RESTORE : CheckAction.TAKE_DOWN);
     }
 
@@ -385,7 +385,7 @@ public class PostCheckService {
         if(r==0){
             throw new IllegalArgumentException("更新题解状态失败");
         }
-        
+
         // 下架时记录到下架表
         if (status == TACK_DOWN) {
             TakeDownPost takeDownPost = new TakeDownPost();
@@ -397,7 +397,7 @@ public class PostCheckService {
             takeDownPost.setAdminId(UserContext.getUserId());
             takeDownPostMapper.insert(takeDownPost);
         }
-        
+
         sendMessageToUser(solution.getSolutionUserId(),
                 status == NORMAL ? CheckAction.RESTORE : CheckAction.TAKE_DOWN,
                 PostType.SOLUTION, solutionId, solution.getSolutionTitle(), PostType.SOLUTION, solutionId, null,
@@ -685,12 +685,12 @@ public class PostCheckService {
             wrapper.lt(TakeDownPost::getId, lastId);
         }
         wrapper.orderByDesc(TakeDownPost::getId).last("LIMIT " + pageSize);
-        
+
         List<TakeDownPost> records = takeDownPostMapper.selectList(wrapper);
         if (records.isEmpty()) {
             return new CursorPageResult<>(Collections.emptyList(), null, false, 0L);
         }
-        
+
         // 收集所有管理员 ID
         Set<Long> adminIds = new HashSet<>();
         for (TakeDownPost record : records) {
@@ -698,7 +698,7 @@ public class PostCheckService {
                 adminIds.add(record.getAdminId());
             }
         }
-        
+
         // 批量查询管理员信息
         Map<Long, String> adminNameMap = new HashMap<>();
         if (!adminIds.isEmpty()) {
@@ -709,7 +709,7 @@ public class PostCheckService {
                 }
             }
         }
-        
+
         // 组装 VO
         List<TakeDownPostVo> voList = new ArrayList<>();
         for (TakeDownPost record : records) {
@@ -723,19 +723,19 @@ public class PostCheckService {
             vo.setAdminId(record.getAdminId());
             vo.setAdminName(adminNameMap.get(record.getAdminId()));
             vo.setCreateTime(record.getCreateTime());
-            
+
             // 获取关联内容的标题和内容摘要
             fillTakeDownContent(vo, record);
-            
+
             voList.add(vo);
         }
-        
-        Long nextCursor = records.get(records.size() - 1).getId();
+
+        Long nextCursor = records.getLast().getId();
         boolean hasMore = records.size() == pageSize;
-        
+
         return new CursorPageResult<>(voList, nextCursor, hasMore, (long) voList.size());
     }
-    
+
     /**
      * 填充下架记录的内容信息
      */
@@ -746,8 +746,8 @@ public class PostCheckService {
                     Post post = postMapper.selectById(record.getRootId());
                     if (post != null) {
                         vo.setTitle(post.getPostTitle());
-                        vo.setContent(post.getPostContent() != null && post.getPostContent().length() > 100 
-                            ? post.getPostContent().substring(0, 100) + "..." 
+                        vo.setContent(post.getPostContent() != null && post.getPostContent().length() > 100
+                            ? post.getPostContent().substring(0, 100) + "..."
                             : post.getPostContent());
                     }
                     break;
@@ -755,8 +755,8 @@ public class PostCheckService {
                     Solution solution = solutionMapper.selectById(record.getRootId());
                     if (solution != null) {
                         vo.setTitle(solution.getSolutionTitle());
-                        vo.setContent(solution.getSolutionContent() != null && solution.getSolutionContent().length() > 100 
-                            ? solution.getSolutionContent().substring(0, 100) + "..." 
+                        vo.setContent(solution.getSolutionContent() != null && solution.getSolutionContent().length() > 100
+                            ? solution.getSolutionContent().substring(0, 100) + "..."
                             : solution.getSolutionContent());
                     }
                     break;
@@ -764,8 +764,8 @@ public class PostCheckService {
                     Comment comment = commentMapper.selectById(record.getRootId());
                     if (comment != null) {
                         vo.setTitle("评论");
-                        vo.setContent(comment.getComment() != null && comment.getComment().length() > 100 
-                            ? comment.getComment().substring(0, 100) + "..." 
+                        vo.setContent(comment.getComment() != null && comment.getComment().length() > 100
+                            ? comment.getComment().substring(0, 100) + "..."
                             : comment.getComment());
                     }
                     break;

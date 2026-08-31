@@ -116,6 +116,7 @@ Authorization: Bearer <token>
 | `difficulty` | `Integer` | 否 | 难度过滤 |
 | `status` | `Integer` | 否 | 状态过滤 |
 | `title` | `String` | 否 | 标题关键字 |
+| `type` | `String` | 否 | 题目类型过滤 |
 
 返回：`Result<CursorPageResult<ReturnQuestionDto>>`
 
@@ -148,19 +149,29 @@ Authorization: Bearer <token>
 - 如果请求带有有效登录态，后端会根据 `submit_record` 聚合当前用户在本页题目上的提交状态；未登录或无提交记录时状态为 `0`。
 - 状态聚合优先级为：只要该用户该题存在任意一次 `AC`，则返回 `1`；否则只要提交过，返回 `2`。
 
-### WebSocket 广播测试
+### 查询题目总数
 
 ```http
-GET /api/question/test-ws
+GET /api/question/total
 Authorization: Bearer <token>
 ```
 
-说明：
+返回：`Result<Long>`，当前题库题目总数。
 
-- 向 `/topic/judge-result` 广播测试消息。
-- 主要用于联调 WebSocket，不是核心业务接口。
+### 标题/标签模糊搜索
 
-返回：普通字符串。
+```http
+GET /api/question/likeserach?likeKey=dp
+Authorization: Bearer <token>
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `likeKey` | `String` | 是 | 模糊匹配关键字 |
+
+返回：`Result<List<QuestionVo>>`。
 
 ## service-question 函数题
 
@@ -235,6 +246,55 @@ Content-Type: application/json
 - 该接口要求管理员权限，避免普通用户向任意题目注入隐藏测试数据。
 
 返回：`Result<Integer>`，`data` 为本次新增数量。
+
+### AI 生成函数测试用例（异步任务）
+
+```http
+POST /api/question/function/test-cases/generate
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+请求体：`FunctionTestCaseGenerateRequest`（题目 ID、生成数量等生成配置）。
+
+返回：`Result<FunctionTestCaseGenerationTaskVo>`，`data` 为异步任务信息（`taskId`、`status`：`PENDING/SUCCESS/FAILED` 等）。
+
+说明：接口立即返回任务 ID，生成在后台异步执行；任务结果 30 分钟 TTL。查询进度使用下面的状态接口。
+
+### 查询函数测试用例生成状态
+
+```http
+GET /api/question/function/test-cases/generate/status?taskId=<taskId>
+Authorization: Bearer <token>
+```
+
+返回：`Result<FunctionTestCaseGenerationTaskVo>`。
+
+### 解析 LeetCode 题目并生成判题产物（异步任务）
+
+```http
+POST /api/question/function/leetcode/artifacts/generate?titleSlug=string-to-integer-atoi
+Authorization: Bearer <token>
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `titleSlug` | `String` | 是 | LeetCode 题目标识 |
+
+返回：`Result<LeetCodeArtifactTaskVo>`，`data` 为异步任务信息（`taskId`、`status`）。
+
+说明：产物（标准 Main、验收用例等）统一保存到 `data/function-artifacts`，验收一律经过 Docker 沙箱编译执行，不在宿主机直接运行 AI 生成代码。
+
+### 查询 LeetCode 产物生成状态
+
+```http
+GET /api/question/function/leetcode/artifacts/status?taskId=<taskId>
+Authorization: Bearer <token>
+```
+
+返回：`Result<LeetCodeArtifactTaskVo>`。
 
 ## service-question 判题与提交记录
 
@@ -325,11 +385,27 @@ Authorization: Bearer <token>
 ### 查询当前用户提交记录
 
 ```http
-GET /api/question/getsubmitrecordsbyuserid
+GET /api/question/getsubmitrecordsbyuserid?pageSize=20&lastId=100
 Authorization: Bearer <token>
 ```
 
-说明：不需要传 `userId`，服务从登录态读取当前用户。
+说明：不需要传 `userId`，服务从登录态读取当前用户。按提交记录 ID 游标分页，第一页不传 `lastId`。
+
+返回：`Result<CursorPageResult<SubmitRecord>>`（字段见游标分页查询题目一节）。
+
+### 批量查询提交记录
+
+```http
+POST /api/question/getsubmitrecordsbyids
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+请求体：
+
+```json
+[1, 2, 3]
+```
 
 返回：`Result<List<SubmitRecord>>`。
 

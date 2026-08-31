@@ -1,6 +1,6 @@
 package org.example.servicecommunity.controller;
 
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicecommunity.service.AppealService;

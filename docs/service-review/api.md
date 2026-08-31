@@ -353,8 +353,10 @@
 | `POST` | `/addquestiontoreview?questionId=...` | 将题目加入当前用户长期复习计划 | `Result<String>` |
 | `GET` | `/allrecord` | 查询当前用户全部每日复习快照 | `Result<List<ReviewRecord>>` |
 | `GET` | `/record/{reviewRecordId}` | 查询一条快照并聚合题目信息 | `Result<ReviewRecordVo>` |
+| `GET` | `/reviewrecord?day=2026-08-29` | 查询指定日期的复习快照并聚合题目信息 | `Result<ReviewRecordVo>` |
 | `PUT` | `/review/{reviewId}` | 修改权重或状态 | `Result<Review>` |
 | `GET` | `/allreview` | 查询长期复习项并聚合题目信息 | `Result<List<ReviewVo>>` |
+| `DELETE` | `/review/{reviewId}` | 删除当前用户自己的长期复习项 | `Result<Void>` |
 
 修改长期复习项请求体 `UpdateReviewDto`：
 
@@ -438,7 +440,7 @@
 | 方法 | 下游路径 | 说明 |
 | --- | --- | --- |
 | `getQuestionInfo(Long questionId)` | `GET /api/question/info/{questionId}` | 查询单个题目信息 |
-| `getFavorites(List<Long> questionIds)` | `GET /api/question/info/favoritequestions` | 批量查询收藏夹题目信息 |
+| `getFavorites(List<Long> questionIds)` | `POST /api/question/info/favoritequestions` | 批量查询收藏夹题目信息 |
 
 ## 错误场景
 

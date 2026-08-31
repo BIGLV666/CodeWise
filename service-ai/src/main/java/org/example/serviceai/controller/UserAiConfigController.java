@@ -1,6 +1,6 @@
 package org.example.serviceai.controller;
 
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceai.dto.AiModelQueryDto;
 import org.example.serviceai.dto.UserAiConfigDto;
 import org.example.serviceai.service.UserAiService;

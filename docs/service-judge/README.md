@@ -8,7 +8,7 @@
 
 ```text
 service-judge/src/main/java/org/example/servicejudge/
-|-- config/                         # Docker、Feign、Web 配置
+|-- config/                         # Docker、Web 配置（Feign 头透传由 service-common 自动配置提供）
 |-- controller/                     # 管理员 HTTP 接口
 |   |-- DockerController.java
 |   `-- FailureSubmitController.java
@@ -18,17 +18,23 @@ service-judge/src/main/java/org/example/servicejudge/
 |-- functionsService/               # 函数题 Java 包装代码生成；保留现有包名
 |-- interfaces/                     # 判题执行抽象
 |-- judge/                          # Docker 编译、执行、判定核心
-|   `-- JudgeService.java
+|   |-- JudgeService.java
+|   |-- JudgeResults.java
+|   |-- LanguageSpec.java
+|   `-- container/                  # ContainerPoolManager 容器池、DockerExecTemplate 沙箱执行
 |-- mapper/                         # MyBatis-Plus Mapper
-|-- Mq/                             # 判题 MQ 分发；按仓库约定保留 `Mq` 大小写
-|   |-- MessageHandler.java         # routing key 处理器契约
-|   |-- Mq.java                     # judge.queue 统一消费者和处理器分发器
+|-- Mq/                             # 判题 MQ 消费；按仓库约定保留 `Mq` 大小写
+|   |-- consumer/
+|   |   |-- JudgeSubmitConsumer.java      # judge.submit.queue 消费者
+|   |   |-- JudgeDebugConsumer.java       # judge.debug.queue 消费者
+|   |   `-- JudgeRetryConsumer.java       # judge.retry.queue 消费者
 |   `-- handler/
 |       |-- JudgeSubmitHandler.java       # 初次判题
 |       |-- JudgeDebugHandler.java        # 调试判题
 |       |-- JudgeRetryHandler.java        # 失败重试
 |       `-- JudgeDeadLetterHandler.java   # 死信登记
 |-- service/
+|   |-- JudgeTaskService.java             # 任务领取、Outbox 登记、事务编排
 |   `-- failure/
 |       `-- FailureSubmitService.java     # 管理员失败记录查询和人工重试
 |-- task/
@@ -39,21 +45,23 @@ service-judge/src/main/java/org/example/servicejudge/
 
 ### 分层规则
 
-- `Mq/handler` 只放 RabbitMQ 消息入口，不放普通 HTTP 业务服务。
+- `Mq/consumer` 只放 RabbitMQ 监听与 ACK/NACK 入口，`Mq/handler` 放对应业务处理器。
 - `service` 只放可复用业务编排；当前失败提交管理位于 `service/failure`。
 - `judge` 只负责容器池、编译、执行和判定，不处理 MQ ACK/NACK。
-- `mapper` 只负责 `codewise_judge` 数据库，不能跨库查询。
+- `mapper` 只访问判题服务使用的 `codewise_question` 库（与 service-question 共库，只读写判题相关表），不能跨其他业务库查询。
 - `task` 只放定时补偿任务。
 - `controller` 只负责参数接收和 `Result<T>` 包装。
-- 新增判题 routing key 时，在 `MqContexts`/`MqConfig` 声明，并新增 `MessageHandler` 实现；不要在业务类中硬编码队列名。
+- 新增判题场景时，在 `MqContexts`/`MqConfig` 声明队列与 routing key，并新增 `Judge<Scene>Consumer` + `Judge<Scene>Handler`；不要在业务类中硬编码队列名。
 
 ## 2. 核心类职责
 
 | 类 | 职责 |
 | --- | --- |
 | `JudgeService` | 管理 Docker 容器池；编译、批量执行测试点并生成 `JudgeRecord` |
-| `Mq` | 消费 `judge.queue`，根据 received routing key 分发到对应 `MessageHandler` |
-| `JudgeSubmitHandler` | 处理正常提交，写入判题结果，回调题目服务；按原业务规则可触发 AI 建议 |
+| `JudgeSubmitConsumer` | 监听 `judge.submit.queue`，领取任务（`pending -> judging` CAS）并交给 `JudgeSubmitHandler` |
+| `JudgeDebugConsumer` | 监听 `judge.debug.queue`，处理调试任务 |
+| `JudgeRetryConsumer` | 监听 `judge.retry.queue`，处理人工重试任务 |
+| `JudgeSubmitHandler` | 处理正常提交，写入判题结果，经 Outbox 回调题目服务；按原业务规则可触发 AI 建议 |
 | `JudgeDebugHandler` | 从 Redis 读取调试任务，执行样例/自定义用例并回写调试结果 |
 | `JudgeRetryHandler` | 原子抢占失败记录，复用已有结果或重新判题，记录错误并回调题目服务；不触发 AI 建议 |
 | `JudgeDeadLetterHandler` | 消费判题死信，将提交登记到 `failure_submit` 并标记本地提交为失败 |
@@ -62,28 +70,28 @@ service-judge/src/main/java/org/example/servicejudge/
 
 ## 3. 消息路由
 
-| 场景 | Exchange | Routing key | Consumer |
-| --- | --- | --- | --- |
-| 正常判题 | `judge.exchange` | `judge.routing` | `JudgeSubmitHandler` |
-| 调试判题 | `judge.exchange` | `judge.debug.routing` | `JudgeDebugHandler` |
-| 失败重试 | `judge.exchange` | `judge.retry.routing` | `JudgeRetryHandler` |
-| 判题死信 | `judge.dlx` | `judge.dead` | `JudgeDeadLetterHandler`（监听 `judge.dead.queue`） |
-| 结果回调 | `question.exchange` | `question.submit.record.routing` | `service-question` |
+| 场景 | Exchange | Routing key | 队列 | Consumer |
+| --- | --- | --- | --- | --- |
+| 正常判题 | `judge.exchange` | `judge.routing` | `judge.submit.queue` | `JudgeSubmitConsumer` |
+| 调试判题 | `judge.exchange` | `judge.debug.routing` | `judge.debug.queue` | `JudgeDebugConsumer` |
+| 失败重试 | `judge.exchange` | `judge.retry.routing` | `judge.retry.queue` | `JudgeRetryConsumer` |
+| 判题死信 | `judge.dlx` | `judge.dead` | `judge.dead.queue` | `JudgeDeadLetterHandler` |
 
-`Mq` 会把 `judge.queue` 中的消息按照 routing key 分发给实现 `MessageHandler` 的 Spring Bean。具体处理器自行负责 ACK/NACK。
+submit/debug/retry 队列均绑定 `judge.dlx`，消费失败 `basicNack(requeue=false)` 的消息进入死信队列。旧版 `judge.queue` 统一消费者（`Mq` + `MessageHandler` 分发）已被三个独立消费者替代并弃用；旧队列排空步骤见 `docs/maintenance/messaging-reliability.md`。结果回调经 Outbox（`event_outbox` 表 + Relay）投递到 `question.exchange / question.submit.record.routing`。
 
 ## 4. 正常判题流程
 
 ```text
 service-question
-  -> judge.exchange / judge.routing
-  -> judge.queue
-  -> Mq
+  -> 事务提交 submit_record + event_outbox 登记
+  -> Outbox Relay 投递 judge.exchange / judge.routing
+  -> judge.submit.queue
+  -> JudgeSubmitConsumer（pending -> judging CAS 领取）
   -> JudgeSubmitHandler
   -> JudgeService
   -> judge_record
-  -> question.exchange / question.submit.record.routing
-  -> service-question 更新提交记录
+  -> Outbox / question.exchange / question.submit.record.routing
+  -> service-question 更新提交记录（judging -> success CAS 幂等）
 ```
 
 正常判题结果为 `WA`、`RE` 或 `TLE` 时，`JudgeSubmitHandler` 保留原有 AI 建议投递逻辑。
@@ -214,11 +222,11 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ## 9. 开发约定
 
-1. MQ 处理器命名统一为 `Judge<Scene>Handler`，放在 `Mq/handler`。
+1. MQ 消费者命名统一为 `Judge<Scene>Consumer`（`Mq/consumer`），业务处理器命名为 `Judge<Scene>Handler`（`Mq/handler`）。
 2. 普通业务服务以领域分包，例如 `service/failure`。
 3. 定时任务命名为 `<Domain><Action>Task`，放在 `task`。
-4. 新增消息处理器必须实现 `MessageHandler` 并返回唯一 routing key。
-5. ACK/NACK 由消息处理器负责；同一 delivery tag 不得先 ACK 后 NACK。
+4. 新增判题场景必须新增独立 Consumer + Handler，并复用 `MqContexts` 中的队列常量；不再使用统一分发器。
+5. ACK/NACK 由消息消费者负责；同一 delivery tag 不得先 ACK 后 NACK。
 6. 重投场景必须先考虑数据库幂等，不能只依赖 RabbitMQ 消息不重复。
 7. 队列、交换机和 routing key 必须复用 `MqContexts`，不得硬编码。
 8. 判题服务只能访问自己的数据库；跨服务结果通过 RabbitMQ 回调。

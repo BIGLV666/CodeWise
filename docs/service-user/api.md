@@ -126,13 +126,12 @@ Content-Type: application/x-www-form-urlencoded
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `email` | `String` | 是 | 用户邮箱 |
-| `password` | `String` | 是 | 新密码 |
+| `password` | `String` | 否 | 已废弃，仅为兼容旧客户端保留，此步不再生效 |
 
 用法说明：
 
 - 会发送验证码到邮箱。
-- 新密码先暂存到 Redis。
-- 下一步调用 `/api/user/updatefromcode` 确认修改。
+- 下一步调用 `/api/user/updatefromcode` 时再提交新密码。
 
 返回：`Result<String>`。
 
@@ -149,13 +148,72 @@ Content-Type: application/x-www-form-urlencoded
 | --- | --- | --- | --- |
 | `number` | `String` | 是 | 邮箱或手机号 |
 | `code` | `String` | 是 | 验证码 |
+| `password` | `String` | 是 | 新密码 |
 
 返回：`Result<String>`。
 
-### 根据用户 ID 查询用户
+### 邮箱密码登录
 
 ```http
-GET /api/user/getuserbyid?id=1
+POST /api/user/emaillogin
+Content-Type: application/x-www-form-urlencoded
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `email` | `String` | 是 | 注册邮箱 |
+| `password` | `String` | 是 | 密码 |
+
+返回：`Result<Map<String,Object>>`，结构同 `/api/user/login`（`token` + `user`）。
+
+### 获取邮箱登录验证码
+
+```http
+POST /api/user/getemailcode
+Content-Type: application/x-www-form-urlencoded
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `email` | `String` | 是 | 注册邮箱 |
+
+返回：`Result<String>`。
+
+### 邮箱验证码登录
+
+```http
+POST /api/user/emailloginforcode
+Content-Type: application/x-www-form-urlencoded
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `email` | `String` | 是 | 注册邮箱 |
+| `code` | `String` | 是 | 通过 `/api/user/getemailcode` 获取的验证码 |
+
+返回：`Result<Map<String,Object>>`，结构同 `/api/user/login`（`token` + `user`）。
+
+### 查询当前用户信息
+
+```http
+GET /api/user/getuserbyid
+Authorization: Bearer <token>
+```
+
+说明：不需要传任何参数，服务端从登录态（`UserContext`）读取当前用户 ID 并返回其信息。
+
+返回：`Result<UserDto>`。
+
+### 管理员查询任意用户信息
+
+```http
+GET /api/user/admin/user?userId=1
 Authorization: Bearer <token>
 ```
 
@@ -163,7 +221,26 @@ Authorization: Bearer <token>
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `id` | `Long` | 是 | 用户 ID |
+| `userId` | `Long` | 是 | 目标用户 ID |
+
+说明：需要管理员身份（方法级 `@RequireAdmin` 校验）。
+
+返回：`Result<UserDto>`。
+
+### 管理员查询用户详情
+
+```http
+GET /api/user/admin/detail?userId=1
+Authorization: Bearer <token>
+```
+
+参数：
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `userId` | `Long` | 是 | 目标用户 ID |
+
+说明：需要管理员身份（类级 `@RequireAdmin` 校验，`AdminUserController` 下所有接口均要求管理员）。
 
 返回：`Result<UserDto>`。
 

@@ -8,7 +8,7 @@ import org.example.servicecommunity.service.HostPostService;
 import org.example.servicecommunity.vo.CursorPageResult;
 import org.example.servicecommunity.vo.HomePostVo;
 import org.example.servicecommunity.vo.PostVo;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

@@ -1,7 +1,7 @@
 package org.example.servicejudge.controller;
 
 import org.example.serviceapi.dto.Result;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.servicejudge.judge.JudgeService;
 import org.example.servicejudge.vo.DockersStatusVo;
 import org.springframework.web.bind.annotation.DeleteMapping;

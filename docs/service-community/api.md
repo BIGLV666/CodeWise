@@ -148,7 +148,14 @@ Authorization: Bearer <token>
 
 返回：`Result<Boolean>`。
 
-点赞记录会先写入 Redis 增量桶，再由定时任务批量更新帖子或评论的 `likeCount`，因此计数展示存在短暂延迟。
+```http
+PUT /api/community/likes/solution/{solutionId}
+Authorization: Bearer <token>
+```
+
+返回：`Result<Boolean>`。
+
+点赞记录会先写入 Redis 增量桶，再由定时任务批量更新帖子、评论或题解的 `likeCount`，因此计数展示存在短暂延迟。
 
 ## DTO 字段
 
@@ -1244,70 +1251,21 @@ createTime        DATETIME
 
 ---
 
-### 3. API 设计
+### 3. API 设计（已按实现落地）
 
-#### 审核 API（管理员专用）
-```http
-# 获取待审核列表
-GET /api/community/check/posts?cursor=&size=20
-GET /api/community/check/comments?cursor=&size=20
-GET /api/community/check/solutions?cursor=&size=20
+> 本节为早期设计稿，实际落地的接口路径与下述不同。**最终实现路径以本文档前文“内容审核与申诉 API”章节为准**，差异对照：
 
-# 获取审核详情（带作者信息）
-GET /api/community/check/detail?type=POST&id=123
+| 设计稿路径（已废弃） | 实际落地路径 |
+| --- | --- |
+| `GET /api/community/check/posts` | `GET /api/community/check/post/list` |
+| `POST /api/community/check/posts/{id}` | `POST /api/community/check/post`（query 传 `postId`、`status`） |
+| `POST /api/community/check/posts/{id}/takedown` / `/restore` | `POST /api/community/check/post/status` |
+| `GET /api/community/appeal` / `/appeal/my` / `/appeal/{appealId}` | `POST /api/community/appeal/submit` |
+| `GET /api/community/appeal/admin/pending` | `GET /api/community/appeal-admin/list` 或 `GET /api/community/check/appeal/list` |
+| `POST /api/community/appeal/admin/{appealId}/handle` | `POST /api/community/appeal-admin/handle` 或 `POST /api/community/check/appeal/handle` |
+| `GET /api/community/my-content` | `GET /api/community/mine?type=POST&lastId=&pageSize=20` |
 
-# 执行审核
-POST /api/community/check/posts/{id}
-Body: { "action": "PASS/REJECT", "reason": "..." }
-
-POST /api/community/check/comments/{id}
-POST /api/community/check/solutions/{id}
-
-# 下架/恢复内容
-POST /api/community/check/posts/{id}/takedown
-Body: { "reason": "违规原因" }
-
-POST /api/community/check/posts/{id}/restore
-```
-
-#### 申诉 API（用户）
-```http
-# 提交申诉
-POST /api/community/appeal
-Body: {
-  "rootType": "POST",
-  "rootId": 123,
-  "rootCommentId": null,
-  "questionId": null,
-  "reason": "我认为..."
-}
-
-# 查看我的申诉历史
-GET /api/community/appeal/my?rootType=POST&rootId=123&cursor=&size=20
-
-# 查看申诉详情
-GET /api/community/appeal/{appealId}
-```
-
-#### 申诉管理 API（管理员）
-```http
-# 获取待处理申诉列表
-GET /api/community/appeal/admin/pending?cursor=&size=20
-
-# 处理申诉
-POST /api/community/appeal/admin/{appealId}/handle
-Body: {
-  "pass": true,           // true=通过(恢复内容), false=拒绝
-  "adminReason": "..."    // 处理说明
-}
-```
-
-#### 我的内容 API（用户）
-```http
-# 查看我的所有内容
-GET /api/community/my-content?status=PENDING&cursor=&size=20
-# status可选: PENDING/APPROVED/REJECTED/TAKEN_DOWN
-```
+评论与题解的审核同理使用 `check/comment/*`、`check/solution/*` 系列路径。
 
 ---
 
@@ -1643,8 +1601,7 @@ service-common/src/main/java/org/example/servicecommon/
 ---
 
 **实施状态**: ✅ 后端核心功能已完成并编译通过  
-**待办事项**: 前端开发、权限配置、集成测试  
-**会话交接**: 后端实现已完成，前端开发待确认代码位置后继续
+**后续事项**: 前端联调、集成测试与生产化建设（见 `docs/maintenance/repair-plan.md`）  
 
-**最后更新**: 2026-08-18  
+**最后更新**: 2026-08-29  
 **维护者**: CodeWise 后端团队

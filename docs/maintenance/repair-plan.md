@@ -81,6 +81,8 @@
 - [-] 统一各服务 FeignRequestInterceptor，减少重复实现。
 - [-] 将 Judge 的 submit/debug/retry 处理器拆成清晰的独立消费者。
 - [-] 拆分过大的 `JudgeService.java`，按任务领取、容器执行、结果处理、补偿恢复拆分。
+- [ ] 社区点赞/审核通知生产端接入 Outbox 或 Publisher Confirm（当前为裸 `RabbitTemplate`，`service-community` `LikeRecordService`）。
+- [ ] 自研 `api-governance-spring-boot-starter` 已发布至 Maven（`io.github.biglv666:api-governance-spring-boot-starter:0.1.0`），全服务坐标迁移完成但尚未提交；提交后删除对本地快照的依赖。
 
 ### AI
 
@@ -114,7 +116,7 @@
 - [ ] 使用 Testcontainers 补充 MySQL、Redis、RabbitMQ 集成测试。
 - [ ] 增加恶意代码、资源耗尽、消息重复、MQ 重放、WebSocket 断连测试。
 - [ ] 做真实并发压测后再确定 QPS、P95 和性能提升数据。
-- [ ] Redis 热榜重建使用临时 Key + 原子切换。
+- [-] Redis 热榜重建使用临时 Key + 原子切换。
 - [ ] 复核社区申诉、下架历史等路径中的剩余 N+1 查询。
 
 ## 四、Go Judge 演进计划

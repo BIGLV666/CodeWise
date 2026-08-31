@@ -40,6 +40,7 @@
 
 - [`docs/maintenance-guide.md`](maintenance-guide.md)：部署前检查、判题容器池、消息队列、Redis 和常见故障。
 - [`docs/maintenance/repair-plan.md`](maintenance/repair-plan.md)：按优先级维护的修复与演进计划。
+- [`docs/maintenance/messaging-reliability.md`](maintenance/messaging-reliability.md)：MQ 可靠性改造说明（Outbox、信封、DLX、重放手册）。
 - [`docs/v1-release-notes.md`](v1-release-notes.md)：V1 发布基线和部署前提。
 
 ## 文档维护约定

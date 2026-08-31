@@ -39,8 +39,8 @@ CodeWise 是面向编程学习、在线判题、错题复习和题解社区的 S
 | 变量 | 作用范围 | 说明 |
 |------|----------|------|
 | `CODEWISE_INTERNAL_TOKEN` | 全部 8 个服务 | 网关/下游拦截器/Feign 三处同值的内部通信 Token |
-| `JWT_SECRET` | service-gateway、service-message、service-review | JWT 签名密钥，与 Python Agent `.env` 的 `JWT_SECRET` 同值（HS384） |
-| `API_KEY_MASTER_KEY` | service-ai | 自定义模型 API Key 的 AES-GCM 主密钥 |
+| `JWT_SECRET` | service-gateway、service-message、service-review | JWT 签名密钥，与 Python Agent `.env` 的 `JWT_SECRET` 同值（签名算法由密钥长度自动选择） |
+| `API_KEY_MASTER_KEY` | service-ai | 自定义模型 API Key 的 AES-GCM 主密钥；经属性 `security.api-key-master-key` 读取，仓库 yaml 不落盘，需通过环境变量或 Nacos 注入 |
 
 网关 IP 信任策略：默认 `codewise.gateway.trust-forwarded-for=false` 只信任 TCP remoteAddress 并剥离客户端 X-Forwarded-For；部署在可信 LB 之后才置 true。数据库增量：`codewise_review` 需执行 `event_outbox.sql` 与 `consumed_event` 建表（service-review resources）。
 
@@ -93,7 +93,7 @@ service-question/src/main/resources/sql/function_test_case_unique_hash.sql
 
 ```powershell
 .\mvnw.cmd -f service-question\pom.xml -Dtest=FunctionQuestionParseServiceTest test
-.\mvnw.cmd -f service-judge\pom.xml -Dtest=DebugServiceHandleTest test
+.\mvnw.cmd -f service-judge\pom.xml '-Dtest=JudgeDebugHandlerTest' test
 ```
 
 ## 6. 推荐启动顺序
@@ -244,6 +244,6 @@ DELETE /api/judge/containers/{language}/{containerId}
 - 根 Maven 工程尚未聚合所有模块。
 - 自动化测试覆盖仍偏少，Docker 判题缺少隔离环境集成测试（本机跑全上下文测试需先起 Nacos/Redis/RabbitMQ）。
 - 判题沙箱的 PID、CPU、文件系统和进程回收限制不完整。
-- RabbitMQ 死信队列、延迟重试与失败补偿已落地（见 `docs/maintenance/messaging-reliability.md`）；剩余：publisher confirm 未启用（当前至少一次 + 消费幂等）、`ai.queue` 尚未挂 DLX、消息/复习/社区链路未迁移统一信封、question 侧 `SubmitRecordHandel` 仍在事务内 ACK。
+- RabbitMQ 死信队列、延迟重试与失败补偿已落地（见 `docs/maintenance/messaging-reliability.md`）；剩余：publisher confirm 未启用（当前至少一次 + 消费幂等）、消息（邮件/通知）与社区生产端尚未接入 Outbox/统一信封（判题与复习链路已迁移）。
 - Feign 超时、熔断、降级和统一异常契约仍需收敛。
 - 需要补充 traceId、结构化日志和判题资源监控。

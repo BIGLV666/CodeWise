@@ -43,7 +43,7 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 
 - AMQP 头同步携带 `eventId/eventType/schemaVersion/producer/traceId/x-codewise-retry-count`，便于管理台检索与消费日志关联。
 - 消费端用 `service-common` `EnvelopeCodec.unwrap(body, X.class)` 做**信封/裸格式双读**，灰度期两种格式并存均可消费。
-- 约定：payload 只放 ID 引用；代码、日志、输入输出等 LONGTEXT 大字段一律落库（judge_record），需要方经 `QuestionFeignClient#getJudgeContext(judgeRecordId)` 按需拉取。WebSocket 推送的 JudgeResultDto 保留字段形状，但 code/log/expectedOutput/actual 截断至 16KB。
+- 约定：payload 只放 ID 引用；代码、日志、输入输出等 LONGTEXT 大字段一律落库（judge_record），需要方经 `QuestionFeignClient#getJudgeContext(judgeRecordId)` 按需拉取。WebSocket 推送的 JudgeResultDto 保留字段形状，但 code/log/expectedOutput/actual 按字符数截断至 16K（`error` 字段豁免截断）。
 
 ## 3. Transactional Outbox
 

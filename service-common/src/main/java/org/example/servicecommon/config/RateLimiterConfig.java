@@ -1,7 +1,8 @@
 package org.example.servicecommon.config;
 
+import io.github.biglv666.apigovernance.ratelimit.RateLimitKeyResolver;
 import jakarta.servlet.http.HttpServletRequest;
-import org.example.apigovernancespringbootstarter.ratelimit.RateLimitKeyResolver;
+
 import org.example.servicecommon.until.UserContext;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;

@@ -25,9 +25,11 @@ V1 是 CodeWise Java 微服务实现的首个稳定基线，覆盖在线判题�
 
 | 配置 | 使用服务 | 用途 |
 | --- | --- | --- |
-| `CODEWISE_INTERNAL_TOKEN` | `service-ai`、`service-question` | 内部函数产物生成接口鉴权，两端值必须一致 |
-| `API_KEY_MASTER_KEY` | `service-ai` | 加密用户自定义模型密钥 |
-| JWT 密钥 | `service-gateway` | 登录令牌签发与验证，正式环境不得使用仓库默认值 |
+| `CODEWISE_INTERNAL_TOKEN` | 全部 8 个服务 | 内部通信 Token（网关/拦截器/Feign 三处同值，缺失启动失败）；函数产物生成两端一致性也由它保证 |
+| `API_KEY_MASTER_KEY` | `service-ai` | 加密用户自定义模型密钥（经 `security.api-key-master-key` 属性读取） |
+| `JWT_SECRET` | `service-gateway`、`service-message`、`service-review` | 登录令牌签发与验证，正式环境不得使用仓库默认值 |
+
+> 基线日期后（2026-08）的安全加固收紧了配置要求：`CODEWISE_INTERNAL_TOKEN` 从两个服务扩展到全部服务且不再有默认值，上表已按当前实际要求更新。
 
 函数产物默认保存在 `data/function-artifacts`。该目录是运行数据，不属于源码和发布包内容。
 

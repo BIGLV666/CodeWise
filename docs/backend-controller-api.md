@@ -24,8 +24,8 @@
 | `service-gateway` | `8082` | - | 推荐前端统一访问网关 |
 | `service-user` | `8081` | `/api/user/**` | 用户、登录、头像接口 |
 | `service-question` | `8084` | `/api/question/**` | 题目、测试点、提交、调试接口 |
-| `service-review` | `8097` | 当前未配置 | 收藏夹/复习服务，当前需直连或补 gateway 路由 |
-| `service-community` | `8087` | 当前未配置 | 帖子、评论和点赞，当前需直连或补 gateway 路由 |
+| `service-review` | `8097` | `/api/review/**` | 收藏夹与复习服务 |
+| `service-community` | `8087` | `/api/community/**` | 帖子、题解、评论和点赞 |
 
 通过网关调用示例：
 
@@ -45,7 +45,8 @@ Authorization: Bearer <token>
 
 网关 `AuthGlobalFilter` 当前规则：
 
-- 路径包含 `login` 或 `register` 的请求放行。
+- 匿名放行使用精确路径白名单（`/api/user/login`、`/api/user/register`、邮箱登录/注册相关路径等），并去除结尾多余斜杠防止绕过；不做子串模糊匹配。
+- `/uploads/**` 静态资源前缀放行。
 - WebSocket 请求可通过 query 参数 `token` 或 `Authorization: Bearer <token>` 鉴权。
 - 其他请求必须带：
 
@@ -104,7 +105,7 @@ Authorization: Bearer <token>
 ### 批量查询题目信息
 
 ```http
-GET /api/question/info/favoritequestions
+POST /api/question/info/favoritequestions
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
@@ -117,7 +118,7 @@ Content-Type: application/json
 
 返回：`Result<List<QuestionDto>>`。
 
-注意：这是 `GET + RequestBody`，部分 HTTP 客户端和代理对 GET body 支持不一致；Feign 内部调用可用，前端直接调用时建议谨慎。
+注意：这是 `POST + JSON 数组请求体`，仅供 Feign 内部调用。
 
 ### 查询用户信息
 

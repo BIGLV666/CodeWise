@@ -10,7 +10,7 @@ import org.example.serviceai.dto.AiTaskDto;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.service.AiAdviceTaskService;
 import org.example.serviceapi.dto.Result;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;

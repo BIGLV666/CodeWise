@@ -1,12 +1,15 @@
 package org.example.serviceuser.controller;
 
-import org.example.apigovernancespringbootstarter.async.annotation.AsyncAction;
+
+import io.github.biglv666.apigovernance.annotation.RateLimit;
+
+import io.github.biglv666.apigovernance.async.annotation.AsyncAction;
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommon.aop.RequireAdmin;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.service.UserService;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;

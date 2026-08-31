@@ -15,7 +15,8 @@ CodeWise/
 |   |-- project-metrics.md              # 工程规模快照
 |   |-- maintenance-guide.md            # 运维维护
 |   |-- maintenance/                    # 修复与演进计划
-|   |   `-- repair-plan.md
+|   |   |-- repair-plan.md
+|   |   `-- messaging-reliability.md
 |   |-- v1-release-notes.md             # 发布基线
 |   |-- service-gateway/README.md
 |   |-- service-user/api.md
@@ -37,6 +38,8 @@ CodeWise/
 |-- service-common/
 |   `-- src/main/java/org.example.servicecommon/
 |       |-- config/                    # MQ、JWT、拦截器等公共配置
+|       |-- outbox/                    # 通用 Transactional Outbox（事件登记与 Relay）
+|       |-- event/                     # 统一事件信封与 EventPublisher
 |       |-- dto/                       # 公共消息对象
 |       |-- RedisDto/                  # Redis Key 与缓存对象
 |       |-- service/                   # 公共邮件等能力
@@ -73,12 +76,13 @@ CodeWise/
 |-- service-judge/
 |   `-- src/main/java/org/example/servicejudge/
 |       |-- judge/                     # Docker 容器池、编译、执行、判定核心
+|       |-- Mq/consumer/               # submit/debug/retry 独立消费者
 |       |-- Mq/handler/                # 正常判题、调试、重试、死信处理器
 |       |-- service/failure/           # 失败提交查询与人工重试业务
 |       |-- task/                      # 失败判题状态补偿任务
 |       |-- controller/                # 容器池与失败提交管理接口
 |       |-- mapper/                    # 判题库 MyBatis Mapper
-|       `-- config/                    # Docker、Feign、Web 配置
+|       `-- config/                    # Docker、Web 配置
 |
 |-- service-review/
 |   `-- src/main/
@@ -164,7 +168,7 @@ service-review    -> codewise_review
 service-community -> codewise_community
 service-message   -> codewise_message
 service-ai        -> codewise_ai
-service-judge     -> 独立判题相关存储或配置
+service-judge     -> codewise_question（与 service-question 共库，仅读写判题相关表）
 ```
 
 每个业务服务只直接访问自己的数据库。跨领域数据通过 Feign 或消息传递获取，避免多个服务共同修改同一张业务表。

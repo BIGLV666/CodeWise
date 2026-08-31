@@ -10,7 +10,7 @@ import org.example.servicequestion.service.JudgeService;
 import org.example.servicequestion.service.SubmitRecordService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 
 import java.util.List;
 

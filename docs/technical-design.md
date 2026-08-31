@@ -140,7 +140,7 @@ limit :pageSize + 1
 | 判题结果 | RabbitMQ 异步回写 |
 | 点赞/复习通知 | RabbitMQ 解耦生产者，数据库唯一消息 ID 幂等消费 |
 
-通知消费当前采用 Redis 短期标记和 `notification_center.uk_message_id` 双重幂等。站内通知先入库，再尝试 WebSocket 推送；实时推送失败不会造成数据库重复通知。后续仍需完善 publisher confirm、死信队列、Outbox 事件以及统一 Feign 降级策略。
+通知消费当前采用 Redis 短期标记和 `notification_center.uk_message_id` 双重幂等。站内通知先入库，再尝试 WebSocket 推送；实时推送失败不会造成数据库重复通知。判题与复习链路已接入 Transactional Outbox 与统一事件信封（judge/ai 队列具备 DLX 与延迟重试）；剩余收敛项：publisher confirm、消息（邮件/通知）与社区生产端接入 Outbox、统一 Feign 降级策略。
 
 ## 10. 通知中心设计
 

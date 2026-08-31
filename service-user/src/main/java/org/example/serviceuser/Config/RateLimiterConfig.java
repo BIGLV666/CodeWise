@@ -2,7 +2,7 @@ package org.example.serviceuser.Config;
 
 
 import org.example.servicecommon.until.UserContext;
-import org.example.apigovernancespringbootstarter.ratelimit.RateLimitKeyResolver;
+import io.github.biglv666.apigovernance.ratelimit.RateLimitKeyResolver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;

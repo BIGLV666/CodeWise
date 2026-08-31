@@ -1,10 +1,11 @@
 package org.example.serviceuser.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import io.github.biglv666.apigovernance.async.annotation.AsyncHandler;
+import io.github.biglv666.apigovernance.async.event.AsyncEvent;
+import io.github.biglv666.apigovernance.async.event.AsyncPhase;
 import lombok.extern.slf4j.Slf4j;
-import org.example.apigovernancespringbootstarter.async.annotation.AsyncHandler;
-import org.example.apigovernancespringbootstarter.async.event.AsyncEvent;
-import org.example.apigovernancespringbootstarter.async.event.AsyncPhase;
+
 import org.example.servicecommon.service.EmailService;
 import org.example.servicecommon.until.UserContext;
 import org.example.serviceuser.dto.UserDto;
@@ -382,7 +383,7 @@ public class UserService {
     }
 
     @AsyncHandler(value = "user-login",phase = AsyncPhase.AFTER_SUCCESS)
-    public void sendWelcomeMail( AsyncEvent  event){
+    public void sendWelcomeMail( AsyncEvent event){
         Long userId = (Long) event.data().get("userId");
         if(userId==null){
             log.warn("Skip login notification because userId is missing: eventId={}", event.id());

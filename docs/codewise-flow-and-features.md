@@ -55,9 +55,9 @@ CodeWise 的核心学习闭环可以概括为：
   ↓ POST /api/question/judge
 service-question / JudgeController
   ↓
-JudgeService 创建 submit_record
+JudgeService 创建 submit_record（事务内同步写入 event_outbox 表）
   ↓
-发送 MQ：judge.routing
+Outbox Relay 异步投递：judge.exchange / judge.routing（统一事件信封，payload 为 submitRecordId）
   ↓
 service-judge 消费判题任务
   ↓
@@ -98,19 +98,22 @@ WebSocket 推送判题结果给前端
 
 ### 4.1 判题任务来源
 
-题目服务创建提交记录后，会向 RabbitMQ 发送提交记录 ID：
+题目服务在创建提交记录的同一数据库事务内，把 `submitRecordId` 写入 `event_outbox` 表；后台 Relay 批量投递到 RabbitMQ：
 
 ```text
 exchange: judge.exchange
 routingKey: judge.routing
-message: submitRecordId
+message: 统一事件信封（eventId/eventType/schemaVersion/occurredAt/producer/traceId），payload 为 submitRecordId
 ```
+
+这样保证「提交记录落库成功 ⇒ 消息必然可投递」，不会出现业务提交成功但消息丢失的幽灵状态。
 
 ### 4.2 判题处理过程
 
 ```text
-JudgeServiceHandel 消费 submitRecordId
+JudgeSubmitConsumer 消费 judge.submit.queue（pending -> judging CAS 领取任务）
   ↓
+JudgeSubmitHandler 处理：
 查询 submit_record
   ↓
 查询该题所有 test_case
@@ -150,7 +153,7 @@ SubmitRecordHandel 接收 judgeRecordId
   ↓
 查询 submit_record
   ↓
-更新 submit_record：submitStatus、judgeStatus、timeUsed、memoryUsed
+更新 submit_record：submitStatus、judgeStatus、timeUsed、memoryUsed（judging -> success 条件更新 CAS，重复投递只会命中一次）
   ↓
 更新 question 统计：totalSubmit、totalAc
   ↓

@@ -1,7 +1,7 @@
 package org.example.servicemessage.notificationcenter.controller;
 
 import org.example.serviceapi.dto.Result;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.enums.NotificationCenterType;
 import org.example.servicemessage.notificationcenter.service.NotificationCenterService;
 import org.example.servicemessage.notificationcenter.vo.NotificationCursorPageVo;

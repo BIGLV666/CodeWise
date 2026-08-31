@@ -1,6 +1,6 @@
 package org.example.servicequestion.controller;
 
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.service.HtmlService;

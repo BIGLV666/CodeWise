@@ -6,7 +6,7 @@ import org.example.servicecommunity.service.SolutionService;
 import org.example.servicecommunity.vo.CursorPageResult;
 import org.example.servicecommunity.vo.HomeSolutionVo;
 import org.example.servicecommunity.vo.SolutionVo;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

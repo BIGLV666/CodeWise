@@ -15,7 +15,9 @@
 ```text
 service-ai/src/main/java/org/example/serviceai
 ├── controller
-│   └── AiAdviceController              会话查询、消息分页和 SSE 追问
+│   ├── AiAdviceController              会话查询、消息分页、SSE 追问与 AI 任务接口
+│   ├── UserAiConfigController          用户自定义模型配置 CRUD 与模型列表
+│   └── FunctionArtifactController      函数产物接收（内部接口，内部 Token 鉴权）
 ├── conversation
 │   ├── dto                              AskDto 与游标分页结果
 │   ├── enums                            USER / ASSISTANT / SYSTEM
@@ -25,10 +27,11 @@ service-ai/src/main/java/org/example/serviceai
 │   │   ├── AdvicePromptBuilder          首次建议和追问 Prompt
 │   │   └── AiConversationMemaryService  摘要更新、重建与锁
 │   └── vo                               题目会话索引
-├── entry                                Conversation / Message / MessageStatus / ConsumedEvent
+├── entry                                Conversation / Message / MessageStatus / ConsumedEvent / ConsumedEventStatus / AiConversationMemory / UserAiConfig
 ├── mapper                               MyBatis-Plus Mapper
 ├── MQ
 │   ├── Mq                              AI 双队列分发器（延迟重试 / 死信分派）
+│   ├── AiMessageHandler                 AI 消息处理
 │   └── handler/AiDeadLetterHandler      死信登记（consumed_event 置 FAILED）
 ├── handle/testcasehandle
 │   └── WAAiHandle                       自动判题建议消费者（事件状态机）
@@ -176,6 +179,10 @@ ASSISTANT 消息的生成状态（`ai_message.status`，USER/SYSTEM 行为 NULL�
 | `GET` | `/api/ai/advice` | 查询当前用户所有题目根会话 |
 | `POST` | `/api/ai/advice/ask` | SSE 流式追问 |
 | `GET` | `/api/ai/advice/{conversationId}/messages` | 按 `messageId` 游标分页 |
+| `POST` | `/api/ai/advice/task` | 记录一条 AI 异步任务 |
+| `GET` | `/api/ai/advice/task?questionId=` | 查询当前用户在某题下的 AI 任务建议列表 |
+
+用户自定义模型配置接口（`/api/ai/configs` 系列）与内部函数产物接收接口（`POST /api/ai/internal/function-artifacts`，内部 Token 鉴权）见下文和 `FunctionArtifactController`。
 
 消息分页从数据库倒序查询，返回前恢复为时间正序。根 `Conversation` 只提供题目与首次提交上下文，不作为消息返回。
 

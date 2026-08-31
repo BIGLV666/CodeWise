@@ -1,8 +1,8 @@
 package org.example.serviceuser.aspect;
 
 import lombok.extern.slf4j.Slf4j;
-import org.example.apigovernancespringbootstarter.async.event.AsyncPhase;
-import org.example.apigovernancespringbootstarter.async.spi.AsyncEventEnricher;
+import io.github.biglv666.apigovernance.async.event.AsyncPhase;
+import io.github.biglv666.apigovernance.async.spi.AsyncEventEnricher;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceuser.dto.UserDto;
 import org.springframework.context.annotation.Bean;

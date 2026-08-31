@@ -20,7 +20,7 @@
 │ ① JWT 校验（白名单精确匹配）                                          │
 │ ② 先剥离客户端伪造头 X-User-Id/Name/X-Internal-Token/X-Real-IP        │
 │ ③ 再注入可信值（内部 Token 来自 CODEWISE_INTERNAL_TOKEN 环境变量）     │
-│ ④ IP 信任策略：默认只信 TCP remoteAddress，LB 部署才开 trust-xff       │
+│ ④ IP 信任策略：默认只信 TCP remoteAddress，LB 部署才开 trust-forwarded-for │
 └──┬─────────┬──────────┬───────────┬───────────┬──────────┬─────────┘
    ▼         ▼          ▼           ▼           ▼          ▼
  user:8081 question:8084 message:8083 ai:8085 community:8087 review:8097
@@ -36,7 +36,7 @@ codewise_user codewise_question(判题服务共库) codewise_message codewise_ai
 ```
 
 **基础设施**：MySQL 8（每服务一库，judge 复用 codewise_question）、Redis（限流/幂等/
-分布式锁/热榜）、RabbitMQ（6 组交换机 + DLX 拓扑）、Nacos（注册+配置，连接信息不出仓库）、
+分布式锁/热榜）、RabbitMQ（7 组业务交换机 + judge.dlx/ai.dlx 死信拓扑）、Nacos（注册+配置，连接信息不出仓库）、
 Docker（`codewise-java-judge:17` 判题镜像，容器池 2 Java + 1 Python/C/C++）。
 
 **共享模块**：`service-api`（Feign 契约 + DTO + `Result<T>` + 事件信封/EventTypes）、
@@ -215,7 +215,7 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 |---|---|
 | 网关 | JWT 校验；**先剥离后注入**四个身份头；公共路径白名单精确匹配（拒绝 contains("login") 类宽匹配）；IP 默认只信 remoteAddress |
 | 服务间 | 内部 Token 三处同源（网关注入/拦截器校验/Feign 透传），环境变量注入**无默认值，缺失启动即失败**；WebSocket 握手同校验 |
-| 判题沙箱 | Docker：network none、--memory 256m、--cpus 1.0、--pids-limit 128、只读根文件系统、/tmp noexec tmpfs、非 root、cap-drop ALL、no-new-privileges、进程树清理防 fork 炸弹；容器池预热消除冷启动；AI 产物强制沙箱（宿主机执行路径已物理删除） |
+| 判题沙箱 | Docker：network none、--memory 256m、--cpus 1.0、--pids-limit 64、只读根文件系统、/workspace 与 /tmp 受限 tmpfs、非 root、cap-drop ALL、no-new-privileges、进程树清理防 fork 炸弹；容器池预热消除冷启动；AI 产物验收沙箱更强（pids 128、/tmp noexec），宿主机执行路径已物理删除 |
 | 密钥 | 仓库零密钥（datasource/redis/rabbitmq/mail 全在 Nacos；internal-token/JWT secret 走环境变量）；自定义模型 API Key AES-256-GCM 加密存储（主密钥 env 注入） |
 | AI 出口 | 自定义模型 URL：仅 HTTPS 公网、校验 DNS 全部解析 IP（防 rebinding）、拒绝私网/环回、禁止跟随重定向；模型列表/单 chunk/总回答限长 |
 | 应用层 | Redis 滑动窗口限流（api-governance starter，网关+服务两级）；SSE 错误脱敏；日志不落 Token/验证码/密钥 |
@@ -270,8 +270,8 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 
 - **异步事件驱动架构**：提交即返回，判题经 MQ 异步，WebSocket 推送 + DB 事实源
   （断线后查库补齐——"WebSocket 只是通知手段，不是存储"）。
-- **Docker 沙箱全家桶**（参数能背：network none / 256m / 1 cpu / 128 pids / 只读根 /
-  noexec tmpfs / 非 root / cap-drop ALL / 进程树清理防 fork bomb）。
+- **Docker 沙箱全家桶**（参数能背：network none / 256m / 1 cpu / 64 pids / 只读根 /
+  受限 tmpfs / 非 root / cap-drop ALL / 进程树清理防 fork bomb；AI 产物验收沙箱更严：128 pids + /tmp noexec）。
 - **容器池预热**：2 Java + 1 Python/C/C++ 常驻，消除冷启动；执行移出数据库事务，
   避免长事务占连接。
 - **执行纪律**：AI 生成的判题产物强制沙箱验收（"AI 只写、确定性执行说了算"）；
@@ -322,7 +322,7 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 | 为什么不用 Redis 做消费幂等？ | Redis 标记与 DB 事务无原子性（先写标记后回滚→重投被跳过=丢消息）；claim 行进业务事务，回滚即消失。Redis 仍用于限流/锁/热榜等无需与 DB 原子的场景 |
 | ACK 时机？ | 永远在事务提交之后；重试消息经 wait 队列 TTL 延迟弹回，避免立即 requeue 的热循环 |
 | 为什么要换队列名？ | RabbitMQ 队列参数（DLX/TTL）不可变，改参数=新队列+旧队列排空迁移，管理台 moveTo |
-| Docker 判题怎么防逃逸/资源耗尽？ | 无网络+全资源限制+只读根+noexec tmpfs+非root+cap-drop ALL+进程树清理；容器池限并发天然背压 |
+| Docker 判题怎么防逃逸/资源耗尽？ | 无网络+全资源限制+只读根+受限tmpfs+非root+cap-drop ALL+进程树清理；容器池限并发天然背压 |
 | AI 生成内容怎么保证正确？ | AI 只生成，验收用确定性编译+执行（沙箱内），50 组数据强校验；失败留状态不删题目 |
 | SSE 断线/超时？ | 占位行四态机；断开判 IOException→CANCELLED 保留部分内容；DB 是事实源，刷新可恢复 |
 | 事务里能发 MQ 吗？ | 直发不行（回滚=幽灵消息）；Outbox 同事务落表、Relay 异步投递，消费端幂等兜底 |

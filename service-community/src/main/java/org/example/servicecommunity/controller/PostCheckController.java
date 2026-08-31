@@ -2,7 +2,7 @@ package org.example.servicecommunity.controller;
 
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.aop.RequireAdmin;
-import org.example.apigovernancespringbootstarter.annotation.RateLimit;
+import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.servicecommunity.enums.PostType;
 import org.example.servicecommunity.service.AppealService;
 import org.example.servicecommunity.service.PostCheckService;
