@@ -32,6 +32,12 @@
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
+        <!-- Actuator：容器 healthcheck 探针（/actuator/health） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- ✅ OpenFeign 核心（用于统一 Feign 请求头拦截器；版本由 spring-cloud BOM 管理，
              optional 不传递给网关等无 Feign 的服务） -->
         <dependency>

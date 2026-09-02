@@ -138,6 +138,7 @@ CodeWise/
 |       `-- resources/sql/             # codewise_ai 建表与迁移脚本
 |
 |-- pom.xml                            # Maven 父工程与版本管理
+|-- deploy/                            # Docker 部署（compose、镜像模板、MySQL 初始化、Nginx）
 |-- mvnw
 |-- mvnw.cmd
 `-- README.md

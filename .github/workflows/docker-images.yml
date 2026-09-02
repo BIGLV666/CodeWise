@@ -1,0 +1,128 @@
+# CodeWise 服务镜像发布流水线（GHCR）
+#
+# 当前状态：仅支持手动触发（workflow_dispatch），不会自动构建发布。
+# 项目（含 CodeWise-Agent）仍在大幅迭代中，存在破坏性变更，因此
+# push/tag 自动发布已注释。待迭代稳定后：
+#   1. 取消下方 on: 块中 push.tags 的注释；
+#   2. 确认 FRONTEND_REPO 环境变量指向真实的前端仓库名；
+#   3. 在 .env.example 中取消 CODEWISE_IMAGE_PREFIX 注释并填入
+#      ghcr.io/<owner>/codewise-（compose 已预留该变量）。
+name: docker-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "镜像 tag（默认 latest）"
+        required: false
+        default: latest
+  # push:
+  #   tags:
+  #     - "v*"
+
+env:
+  # 前端仓库名（与 CodeWise 同 owner）。若实际名称不同请修改。
+  FRONTEND_REPO: ${{ github.repository_owner }}/CodeWise-frontend
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      owner_lc: ${{ steps.lower.outputs.owner_lc }}
+    steps:
+      - id: lower
+        run: echo "owner_lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+  judge-base:
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: deploy/judge-base
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lc }}/codewise-java-judge:17
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lc }}/codewise-java-judge:${{ inputs.tag || 'latest' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  services:
+    needs: meta
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { module: service-gateway }
+          - { module: service-user }
+          - { module: service-question, docker_cli: "true" }
+          - { module: service-judge }
+          - { module: service-review }
+          - { module: service-community }
+          - { module: service-message }
+          - { module: service-ai }
+    name: build ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.service
+          push: true
+          build-args: |
+            MODULE=${{ matrix.module }}
+            INSTALL_DOCKER_CLI=${{ matrix.docker_cli || 'false' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lc }}/codewise-${{ matrix.module }}:latest
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lc }}/codewise-${{ matrix.module }}:${{ inputs.tag || 'latest' }}
+          cache-from: type=gha,scope=${{ matrix.module }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.module }}
+
+  frontend:
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: codewise
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          path: fe
+      # 前端 Dockerfile 独立于前端仓库维护：复制进 context 后构建
+      - name: Copy frontend Dockerfile into build context
+        run: cp codewise/deploy/frontend/Dockerfile fe/Dockerfile
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: fe
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lc }}/codewise-frontend:latest
+            ${{ env.REGISTRY }}/${{ needs.meta.outputs.owner_lc }}/codewise-frontend:${{ inputs.tag || 'latest' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

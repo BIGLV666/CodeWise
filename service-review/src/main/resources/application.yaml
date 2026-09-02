@@ -6,10 +6,10 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: localhost:8848
-        ip: 127.0.0.1
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        # 容器部署时经环境变量 SPRING_CLOUD_NACOS_DISCOVERY_IP 指定注册 IP；本地开发自动选网卡
       config:
-        server-addr: localhost:8848
+        server-addr: ${NACOS_ADDR:localhost:8848}
         file-extension: yaml
 
 server:

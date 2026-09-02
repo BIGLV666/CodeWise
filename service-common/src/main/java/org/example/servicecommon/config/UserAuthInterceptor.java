@@ -39,7 +39,8 @@ public class UserAuthInterceptor implements HandlerInterceptor {
             "/api/user/emailregister",
             "/api/user/register",
             "/api/user/updatepasswordforemail",
-            "/api/user/updatefromcode"
+            "/api/user/updatefromcode",
+            "/api/user/appeal/submit"
     );
     private static final Set<String> PUBLIC_PATH_PATTERNS = Set.of(
             "/uploads/**",
@@ -47,6 +48,8 @@ public class UserAuthInterceptor implements HandlerInterceptor {
             "/ws/**",
             "/sockjs/**"
     );
+    /** 存活探针路径：容器健康检查无内部 Token，必须在 Token 校验前放行（仅暴露 UP/DOWN 状态） */
+    private static final Set<String> PROBE_PATHS = Set.of("/actuator/health", "/actuator/health/", "/actuator/info");
     AntPathMatcher antPathMatcher = new AntPathMatcher();
     @Lazy
     @Autowired(required = false)
@@ -58,6 +61,10 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         String ip = request.getHeader("X-Real-IP");
         if (ip != null) {
             UserContext.setCurrentIp(ip);
+        }
+        // 存活探针在内部 Token 校验之前放行，供容器编排 healthcheck 使用。
+        if (PROBE_PATHS.contains(path)) {
+            return true;
         }
         // 验证内部 Token 后，才允许进入任何匿名白名单。
         String headerToken = request.getHeader("X-Internal-Token");

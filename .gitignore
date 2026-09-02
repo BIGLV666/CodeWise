@@ -42,3 +42,6 @@ hs_err_pid*.log
 
 # Mimosa 安全扫描产物
 .mimosa/
+
+### CodeWise deploy secrets ###
+deploy/.env

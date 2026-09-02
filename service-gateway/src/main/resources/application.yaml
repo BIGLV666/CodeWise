@@ -2,21 +2,20 @@ spring:
   application:
     name: service-gateway
   config:
-    import: nacos:service-gateway.yaml   # Nacos 配置中心
+    import: optional:nacos:service-gateway.yaml   # Nacos 配置中心（可选：缺失时由本地 yaml + 环境变量兜底）
   cloud:
     nacos:
       discovery:
-        server-addr: localhost:8848
+        server-addr: ${NACOS_ADDR:localhost:8848}
       config:
-        server-addr: localhost:8848
+        server-addr: ${NACOS_ADDR:localhost:8848}
         file-extension: yaml
     gateway:
       globalcors:
         cors-configurations:
           '[/**]':
-            allowed-origins:
-              - "http://localhost:5173"
-              - "http://127.0.0.1:5173"
+            # 允许的来源经 CORS_ORIGINS 注入（逗号分隔），默认本地开发前端
+            allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
             allowed-methods:
               - GET
               - POST
