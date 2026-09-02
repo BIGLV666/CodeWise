@@ -15,6 +15,18 @@ server:
 
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
-  outbox:
-    enabled: true
+
+# OutboxPro（生产者）：与 question 共用 codewise_question 库的 outboxpro_* 表，
+# 双 Relay 由 FOR UPDATE SKIP LOCKED 保证并发安全。
+# poll-interval 显式配纯毫秒：默认 "1000ms" 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 不支持
+outboxpro:
+  enabled: true
+  producer:
+    poll-interval: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
 

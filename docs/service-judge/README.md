@@ -77,13 +77,13 @@ service-judge/src/main/java/org/example/servicejudge/
 | 失败重试 | `judge.exchange` | `judge.retry.routing` | `judge.retry.queue` | `JudgeRetryConsumer` |
 | 判题死信 | `judge.dlx` | `judge.dead` | `judge.dead.queue` | `JudgeDeadLetterHandler` |
 
-submit/debug/retry 队列均绑定 `judge.dlx`，消费失败 `basicNack(requeue=false)` 的消息进入死信队列。旧版 `judge.queue` 统一消费者（`Mq` + `MessageHandler` 分发）已被三个独立消费者替代并弃用；旧队列排空步骤见 `docs/maintenance/messaging-reliability.md`。结果回调经 Outbox（`event_outbox` 表 + Relay）投递到 `question.exchange / question.submit.record.routing`。
+submit/debug/retry 队列均绑定 `judge.dlx`，消费失败 `basicNack(requeue=false)` 的消息进入死信队列。旧版 `judge.queue` 统一消费者（`Mq` + `MessageHandler` 分发）已被三个独立消费者替代并弃用；旧队列排空步骤见 `docs/maintenance/messaging-reliability.md`。结果回调经 OutboxPro（`outboxpro_outbox` 表 + Relay，Publisher Confirm 确认投递）投递到 `question.exchange / question.submit.record.routing`。
 
 ## 4. 正常判题流程
 
 ```text
 service-question
-  -> 事务提交 submit_record + event_outbox 登记
+  -> 事务提交 submit_record + outboxpro_outbox 登记
   -> Outbox Relay 投递 judge.exchange / judge.routing
   -> judge.submit.queue
   -> JudgeSubmitConsumer（pending -> judging CAS 领取）

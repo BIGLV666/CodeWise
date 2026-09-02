@@ -55,7 +55,7 @@ CodeWise 的核心学习闭环可以概括为：
   ↓ POST /api/question/judge
 service-question / JudgeController
   ↓
-JudgeService 创建 submit_record（事务内同步写入 event_outbox 表）
+JudgeService 创建 submit_record（事务内同步写入 outboxpro_outbox 表，OutboxPro）
   ↓
 Outbox Relay 异步投递：judge.exchange / judge.routing（统一事件信封，payload 为 submitRecordId）
   ↓
@@ -98,7 +98,7 @@ WebSocket 推送判题结果给前端
 
 ### 4.1 判题任务来源
 
-题目服务在创建提交记录的同一数据库事务内，把 `submitRecordId` 写入 `event_outbox` 表；后台 Relay 批量投递到 RabbitMQ：
+题目服务在创建提交记录的同一数据库事务内，把 `submitRecordId` 写入 `outboxpro_outbox` 表（OutboxPro）；后台 Relay 批量投递到 RabbitMQ（Publisher Confirm 确认）：
 
 ```text
 exchange: judge.exchange

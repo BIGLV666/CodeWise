@@ -86,13 +86,18 @@ jwt:
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
 
+# 网关无数据源且不生产事件：显式关闭 OutboxPro（其自动配置默认 matchIfMissing=true）
+outboxpro:
+  enabled: false
+
 server:
   port: 8082
 
 logging:
   level:
-    org.springframework.cloud.gateway: DEBUG
-    org.springframework.web: DEBUG
+    # 生产默认 INFO；排障时可临时调 DEBUG（原样例为 DEBUG，会放大日志量并可能记录请求信息）
+    org.springframework.cloud.gateway: INFO
+    org.springframework.web: INFO
 
 
 

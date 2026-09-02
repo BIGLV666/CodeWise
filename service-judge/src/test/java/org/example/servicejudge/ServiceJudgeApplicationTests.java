@@ -2,6 +2,7 @@ package org.example.servicejudge;
 
 import com.github.dockerjava.api.DockerClient;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.redisson.api.RedissonClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -15,7 +16,11 @@ import org.springframework.boot.test.mock.mockito.MockBean;
  * Redisson 启动即建立真实连接。以 {@code @MockBean} 替换这两个基础客户端
  * 后，真实 Bean 定义（DockerConfig / RedissonAutoConfiguration 工厂）不会被
  * 调用，容器池预热的逐容器失败也会被 init 内部捕获记录。</p>
+ *
+ * <p>仍需 CODEWISE_INTERNAL_TOKEN 等密钥环境变量：默认跳过，
+ * 以 {@code CODEWISE_INFRA=true} 显式启用（见 ServiceQuestionApplicationTests 注释）。</p>
  */
+@EnabledIfEnvironmentVariable(named = "CODEWISE_INFRA", matches = "true")
 @SpringBootTest
 class ServiceJudgeApplicationTests {
 

@@ -3,8 +3,6 @@ package org.example.servicequestion.service;
 import org.example.serviceapi.dto.event.EventTypes;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.RedisContext;
-import org.example.servicecommon.config.MqContexts;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
 import org.example.servicequestion.entry.SubmitRecord;
@@ -17,6 +15,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.RedisTemplate;
 
@@ -28,8 +27,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * JudgeService 事务性 Outbox 改造单测：
- * 提交/调试不再直接发 MQ，改为在事务内登记 Outbox 事件。
+ * JudgeService 事务性 Outbox（OutboxPro）单测：
+ * 提交/调试不再直接发 MQ，改为在事务内 publish Outbox 事件（路由由 EventRegistry 解析）。
  */
 @ExtendWith(MockitoExtension.class)
 class JudgeServiceTest {
@@ -38,7 +37,7 @@ class JudgeServiceTest {
     private SubmitRecordMapper submitRecordMapper;
 
     @Mock
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
 
     @Mock
     private RedisTemplate<String, Object> redisTemplate;
@@ -60,7 +59,7 @@ class JudgeServiceTest {
     }
 
     @Test
-    void judgeAppendsSubmitRequestToOutboxAfterInsert() {
+    void judgePublishesSubmitRequestToOutboxAfterInsert() {
         when(submitRecordMapper.insert(any(SubmitRecord.class))).thenAnswer(invocation -> {
             // 模拟 MyBatis-Plus 回填自增主键
             invocation.getArgument(0, SubmitRecord.class).setSubmitRecordId(777L);
@@ -78,17 +77,13 @@ class JudgeServiceTest {
         assertEquals(777L, submitRecordId);
         verify(submitRecordMapper).insert(any(SubmitRecord.class));
 
-        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(outboxService).append(
+        verify(outboxPublisher).publish(
                 eq(EventTypes.JUDGE_SUBMIT_REQUEST),
-                eq(MqContexts.JUDGE_EXCHANGE),
-                eq(MqContexts.JUDGE_ROUTING_KEY),
-                payloadCaptor.capture());
-        assertEquals(777L, payloadCaptor.getValue());
+                eq(777L));
     }
 
     @Test
-    void debugAppendsDebugRequestToOutboxWithSameUuid() {
+    void debugPublishesDebugRequestToOutboxWithSameUuid() {
         when(redisTemplate.opsForHash()).thenReturn(hashOperations);
 
         DebugDto debugDto = new DebugDto();
@@ -101,12 +96,8 @@ class JudgeServiceTest {
         // Redis 任务写入先于 Outbox 登记
         verify(hashOperations).put(eq(RedisContext.JUDGE_DEBUG_KEY), eq(uuid), eq(debugDto));
 
-        ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(outboxService).append(
+        verify(outboxPublisher).publish(
                 eq(EventTypes.JUDGE_DEBUG_REQUEST),
-                eq(MqContexts.JUDGE_EXCHANGE),
-                eq(MqContexts.JUDGE_DEBUG_ROUTING_KEY),
-                payloadCaptor.capture());
-        assertEquals(uuid, payloadCaptor.getValue());
+                eq(uuid));
     }
 }

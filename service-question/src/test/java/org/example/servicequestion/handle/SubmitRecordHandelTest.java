@@ -8,7 +8,6 @@ import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicecommon.event.EnvelopeCodec;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.mapper.JudgeRecordMapper;
@@ -22,6 +21,7 @@ import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -62,7 +62,7 @@ class SubmitRecordHandelTest {
     private RabbitTemplate rabbitTemplate;
 
     @Mock
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
 
     @Mock
     private TransactionTemplate transactionTemplate;
@@ -140,7 +140,7 @@ class SubmitRecordHandelTest {
         verify(submitRecordMapper).updateJudgeSuccess(555L, "AC", 12, 2048);
         verify(questionMapper).updateTotal(9L);
         verify(questionMapper).updateTotalAc(9L);
-        verify(outboxService, never()).append(any(), any(), any(), any());
+        verify(outboxPublisher, never()).publish(anyString(), any());
 
         // ACK 严格在事务提交之后
         InOrder inOrder = inOrder(transactionTemplate, channel);
@@ -159,7 +159,7 @@ class SubmitRecordHandelTest {
 
         verify(questionMapper, never()).updateTotal(any());
         verify(questionMapper, never()).updateTotalAc(any());
-        verify(outboxService, never()).append(any(), any(), any(), any());
+        verify(outboxPublisher, never()).publish(anyString(), any());
         verify(channel).basicAck(1L, false);
         verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
         // 幂等跳过不推送 WS
@@ -202,10 +202,8 @@ class SubmitRecordHandelTest {
         handler.handle(String.valueOf(JUDGE_RECORD_ID), channel, amqpMessage());
 
         ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(outboxService).append(
+        verify(outboxPublisher).publish(
                 eq(EventTypes.REVIEW_JUDGE_RECORD),
-                eq(MqContexts.REVIEW_EXCHANGE),
-                eq(MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY),
                 payloadCaptor.capture());
         ReviewJudgeRecordDto payload = (ReviewJudgeRecordDto) payloadCaptor.getValue();
         assertEquals(JUDGE_RECORD_ID, payload.getJudgeRecordId());

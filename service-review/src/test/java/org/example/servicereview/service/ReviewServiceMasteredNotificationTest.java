@@ -7,7 +7,6 @@ import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicecommon.dto.ReviewMasteredDto;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicereview.entry.Review;
 import org.example.servicereview.entry.ReviewConfig;
 import org.example.servicereview.entry.ReviewRecord;
@@ -23,6 +22,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.outboxpro.core.OutboxProPublisher;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.amqp.core.Message;
@@ -90,7 +90,7 @@ class ReviewServiceMasteredNotificationTest {
     @Mock
     private ConsumedEventService consumedEventService;
     @Mock
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
 
     @InjectMocks
     private ReviewService reviewService;
@@ -137,10 +137,7 @@ class ReviewServiceMasteredNotificationTest {
                 MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY);
 
         ArgumentCaptor<ReviewMasteredDto> payloadCaptor = ArgumentCaptor.forClass(ReviewMasteredDto.class);
-        verify(outboxService).append(eq(EventTypes.REVIEW_MASTERED),
-                eq(MqContexts.NOTIFICATION_EXCHANGE),
-                eq(MqContexts.NOTIFICATION_REVIEW_MASTERED_ROUTING_KEY),
-                payloadCaptor.capture());
+        verify(outboxPublisher).publish(eq(EventTypes.REVIEW_MASTERED), payloadCaptor.capture());
         ReviewMasteredDto payload = payloadCaptor.getValue();
         assertEquals("review:mastered:" + USER_ID + ":" + QUESTION_ID, payload.getMessageId());
         assertEquals(USER_ID, payload.getUserId());
@@ -165,7 +162,7 @@ class ReviewServiceMasteredNotificationTest {
         reviewService.setReview(amqpMessage(bareBody()), channel,
                 MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY);
 
-        verify(outboxService, never()).append(anyString(), anyString(), anyString(), any());
+        verify(outboxPublisher, never()).publish(anyString(), any());
         verify(channel).basicAck(DELIVERY_TAG, false);
     }
 
@@ -177,7 +174,7 @@ class ReviewServiceMasteredNotificationTest {
         reviewService.setReview(amqpMessage(bareBody()), channel,
                 MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY);
 
-        verify(outboxService, never()).append(anyString(), anyString(), anyString(), any());
+        verify(outboxPublisher, never()).publish(anyString(), any());
     }
 
     private void stubReview(Review review) {

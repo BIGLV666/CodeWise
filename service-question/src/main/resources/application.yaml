@@ -3,6 +3,11 @@ spring:
     name: service-question
   config:
     import: optional:nacos:service-question.yaml   # ? Nacos ???
+  servlet:
+    multipart:
+      # 题目 HTML/Markdown 导入文件较大；与 nginx client_max_body_size 20m 对齐
+      max-file-size: 20MB
+      max-request-size: 20MB
   cloud:
     nacos:
       discovery:
@@ -14,13 +19,24 @@ server:
   port: 8084
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
-  outbox:
-    enabled: true
   function-artifact:
     root: ./data/function-artifacts
     docker-command: docker
     docker-image: ${JUDGE_IMAGE:codewise-java-judge:17}
     timeout-seconds: 30
+
+# OutboxPro（生产者）：事务内 append -> Relay 经 Publisher Confirm 投递；
+# poll-interval 显式配纯毫秒：默认 "1000ms" 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 不支持
+outboxpro:
+  enabled: true
+  producer:
+    poll-interval: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
 
 api:
   governance:

@@ -45,3 +45,6 @@ hs_err_pid*.log
 
 ### CodeWise deploy secrets ###
 deploy/.env
+
+### ZCode workspace settings ###
+.zcode/

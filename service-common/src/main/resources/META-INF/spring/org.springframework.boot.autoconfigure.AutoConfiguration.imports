@@ -5,4 +5,4 @@ org.example.servicecommon.service.EmailService
 org.example.servicecommon.config.RateLimiterConfig
 org.example.servicecommon.config.FeignHeaderAutoConfiguration
 org.example.servicecommon.event.EventAutoConfiguration
-org.example.servicecommon.outbox.OutboxAutoConfiguration
+org.example.servicecommon.outboxpro.CodewiseOutboxProAutoConfiguration

@@ -3,6 +3,11 @@ spring:
     name: service-user
   config:
     import: optional:nacos:service-user.yaml   # Nacos 不可用时环境变量兜底
+  servlet:
+    multipart:
+      # 业务代码 FileUploadService 上限 5MB，此处留余量；nginx 侧 client_max_body_size 20m
+      max-file-size: 6MB
+      max-request-size: 10MB
   cloud:
     nacos:
       discovery:
@@ -28,6 +33,10 @@ codewise:
 
 server:
   port: 8081   # ??????????????????
+
+# 本服务不生产事件：显式关闭 OutboxPro（其自动配置默认 matchIfMissing=true）
+outboxpro:
+  enabled: false
 
 api:
   governance:

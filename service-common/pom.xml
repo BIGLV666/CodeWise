@@ -16,6 +16,20 @@
     <name>service-common</name>
     <description>公共模块</description>
 
+    <dependencyManagement>
+        <dependencies>
+            <!-- 覆盖 Spring Boot 3.2.4 BOM 的 testcontainers 1.19.x：新版 Docker Desktop
+                 （Moby 28+）下 1.19.x 握手报 Status 400，需 1.20.6+ -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>1.21.4</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>io.github.biglv666</groupId>
@@ -57,6 +71,15 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
+        <!-- OutboxPro：事务性 Outbox + Relay + DLQ 告警/回放（自研 outbox 的替代实现）。
+             autoconfigure 由 outboxpro.enabled 显式开关：生产者服务（question/judge/review/community）
+             设 true，其余服务必须显式 false（该 starter 默认 matchIfMissing=true）。 -->
+        <dependency>
+            <groupId>io.github.biglv666</groupId>
+            <artifactId>outboxpro-spring-boot-starter</artifactId>
+            <version>1.1.0</version>
         </dependency>
 
         <!-- MyBatis-Plus：Outbox 事件表读写（optional，不传递给网关等无数据库服务；
@@ -108,6 +131,23 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers：OutboxPro 集成测试（真 MySQL/Rabbit，本地无 Docker 自动跳过；
+             版本由 Spring Boot 3.2.4 BOM 管理） -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>rabbitmq</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

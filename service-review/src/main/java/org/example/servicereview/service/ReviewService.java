@@ -12,7 +12,7 @@ import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicecommon.dto.ReviewMasteredDto;
 import org.example.servicecommon.event.EnvelopeCodec;
-import org.example.servicecommon.outbox.OutboxService;
+import org.outboxpro.core.OutboxProPublisher;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.ReviewConfigDto;
 import org.example.servicereview.dto.UpdateReviewDto;
@@ -66,7 +66,7 @@ public class ReviewService {
     @Autowired
     private ConsumedEventService consumedEventService;
     @Autowired
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
     private final BigDecimal EFLOW= BigDecimal.valueOf(1.3);
     private final BigDecimal DEFAULT_EASINESS_FACTOR = BigDecimal.valueOf(2.5);
     /** 复习掌握事件时间字段格式（MQ 转换器无 Java 时间模块，统一走字符串） */
@@ -521,10 +521,7 @@ public class ReviewService {
                         ? null : calculated.getCreateTime().format(MASTERED_TIME_FORMATTER))
                 .totalReviewCount(calculated.getReviewCount() == null ? 0 : calculated.getReviewCount())
                 .build();
-        outboxService.append(EventTypes.REVIEW_MASTERED,
-                MqContexts.NOTIFICATION_EXCHANGE,
-                MqContexts.NOTIFICATION_REVIEW_MASTERED_ROUTING_KEY,
-                masteredDto);
+        outboxPublisher.publish(EventTypes.REVIEW_MASTERED, masteredDto);
     }
 
     /**

@@ -20,7 +20,8 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 首次启动会自动完成：
 
-- MySQL 建库 + 全部建表/迁移 SQL（[`mysql-init/01-init-databases.sh`](mysql-init/01-init-databases.sh)）；
+- MySQL 建库 + 全部建库授权与建表/迁移 SQL（[`mysql-init/01-init-databases.sh`](mysql-init/01-init-databases.sh)）；
+- OutboxPro 事件表（`outboxpro_*`）由生产者服务首次启动时自动创建；
 - root 管理员创建（`ROOT_USERNAME`，默认 `admin`；密码取 `ROOT_PASSWORD`，`sys_init` 表幂等）；
 - RabbitMQ 拓扑与判题容器池预热。
 

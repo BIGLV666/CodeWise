@@ -34,11 +34,36 @@ x-app-base: &app-base
       condition: service_healthy
     nacos:
       condition: service_healthy
+  # 容器 stdout 日志轮转：防止磁盘被写满（各服务日志只落 stdout）
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+x-infra-logging: &infra-logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
 
 services:
+  # ================= 判题基础镜像 =================
+  # `up -d --build` 时自动构建 codewise-java-judge:17（判题沙箱依赖）。
+  # 一次性空任务容器：立即退出（restart: "no"），不参与日常运行。
+  judge-base:
+    image: ${JUDGE_IMAGE:-codewise-java-judge:17}
+    build:
+      context: ./judge-base
+    entrypoint: ["true"]
+    restart: "no"
+    <<: *infra-logging
+
   # ================= 基础设施 =================
   mysql:
     image: mysql:8.4
+    <<: *infra-logging
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: codewise_user
@@ -68,6 +93,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    <<: *infra-logging
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis-data:/data
@@ -79,11 +105,15 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management
+    <<: *infra-logging
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS}
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+    # 管理台仅映射宿主回环，便于排障且不对公网暴露
+    ports:
+      - "127.0.0.1:15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 15s
@@ -93,6 +123,7 @@ services:
 
   nacos:
     image: nacos/nacos-server:v2.3.2
+    <<: *infra-logging
     environment:
       MODE: standalone
       NACOS_AUTH_ENABLE: "false"
@@ -100,6 +131,9 @@ services:
       JVM_XMX: 512m
     volumes:
       - nacos-data:/home/nacos/data
+    # 控制台仅映射宿主回环：SMTP/AI Provider 等功能配置与排障入口（不对公网暴露）
+    ports:
+      - "127.0.0.1:8848:8848"
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8848/nacos/v1/console/health/readiness || exit 1"]
       interval: 15s

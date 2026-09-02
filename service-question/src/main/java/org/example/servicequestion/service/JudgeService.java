@@ -5,13 +5,12 @@ import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.question.TestMessage;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.RedisContext;
-import org.example.servicecommon.config.MqContexts;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.entry.TestCase;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
+import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -28,7 +27,7 @@ public class JudgeService {
     private SubmitRecordMapper submitRecordMapper;
 
     @Autowired
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
 
     @Autowired
     private RedisTemplate<String,Object> redisTemplate;
@@ -60,13 +59,9 @@ public class JudgeService {
         submitRecord.setSubmitScene(submitScene);
         submitRecordMapper.insert(submitRecord);
 
-        // 判题请求改走事务性 Outbox：payload 只放 submitRecordId（小字段引用）
-        outboxService.append(
-                EventTypes.JUDGE_SUBMIT_REQUEST,
-                MqContexts.JUDGE_EXCHANGE,
-                MqContexts.JUDGE_ROUTING_KEY,
-                submitRecord.getSubmitRecordId()
-        );
+        // 判题请求改走事务性 Outbox：payload 只放 submitRecordId（小字段引用），
+        // 路由（judge.exchange/judge.routing）在 OutboxEventRouteConfig 登记
+        outboxPublisher.publish(EventTypes.JUDGE_SUBMIT_REQUEST, submitRecord.getSubmitRecordId());
 
         return submitRecord.getSubmitRecordId();
     }
@@ -81,12 +76,7 @@ public class JudgeService {
         String uuid = UUID.randomUUID().toString();
         debugDto.setUserId(UserContext.getUserId());
         redisTemplate.opsForHash().put(RedisContext.JUDGE_DEBUG_KEY,uuid,debugDto);
-        outboxService.append(
-                EventTypes.JUDGE_DEBUG_REQUEST,
-                MqContexts.JUDGE_EXCHANGE,
-                MqContexts.JUDGE_DEBUG_ROUTING_KEY,
-                uuid
-        );
+        outboxPublisher.publish(EventTypes.JUDGE_DEBUG_REQUEST, uuid);
         return uuid;
     }
 

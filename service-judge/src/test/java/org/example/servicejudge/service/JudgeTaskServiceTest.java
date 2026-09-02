@@ -1,8 +1,6 @@
 package org.example.servicejudge.service;
 
 import org.example.serviceapi.dto.event.EventTypes;
-import org.example.servicecommon.config.MqContexts;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicejudge.entry.*;
 import org.example.servicejudge.enums.QuestionType;
 import org.example.servicejudge.interfaces.JudgeInterface;
@@ -13,6 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
@@ -25,7 +24,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * 判题任务服务单元测试：领取 CAS 短路、ACM/FUNCTION 分派、
- * judge_record 插入与 Outbox 事件参数、WA/RE/TLE 才发 AI 建议事件。
+ * judge_record 插入与 OutboxPro 事件参数、WA/RE/TLE 才发 AI 建议事件。
  */
 @ExtendWith(MockitoExtension.class)
 class JudgeTaskServiceTest {
@@ -45,7 +44,7 @@ class JudgeTaskServiceTest {
     @Mock
     private FunctionTestCaseMapper functionTestCaseMapper;
     @Mock
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
 
     private JudgeTaskService judgeTaskService;
 
@@ -59,7 +58,7 @@ class JudgeTaskServiceTest {
                 questionMapper,
                 functionConfigMapper,
                 functionTestCaseMapper,
-                outboxService);
+                outboxPublisher);
         // 单测中自注入指向自身：事务语义不生效，但调用链与参数可验证
         ReflectionTestUtils.setField(judgeTaskService, "self", judgeTaskService);
     }
@@ -72,7 +71,7 @@ class JudgeTaskServiceTest {
 
         assertNull(judgeTaskService.handleSubmit(10L));
 
-        verifyNoInteractions(judge, judgeRecordMapper, outboxService);
+        verifyNoInteractions(judge, judgeRecordMapper, outboxPublisher);
     }
 
     @Test
@@ -82,7 +81,7 @@ class JudgeTaskServiceTest {
         assertNull(judgeTaskService.handleSubmit(10L));
 
         verify(submitRecordMapper, never()).updateRecordToJudge(10L);
-        verifyNoInteractions(judge, judgeRecordMapper, outboxService);
+        verifyNoInteractions(judge, judgeRecordMapper, outboxPublisher);
     }
 
     @Test
@@ -104,10 +103,8 @@ class JudgeTaskServiceTest {
         assertEquals(10L, acResult.getSubmitRecordId());
         assertEquals(1, acResult.getTestTotal());
         // AC 结果只发结果回调，不发 AI 建议
-        verify(outboxService, times(1)).append(
+        verify(outboxPublisher, times(1)).publish(
                 EventTypes.JUDGE_RESULT_CALLBACK,
-                MqContexts.Question_EXCHANGE,
-                MqContexts.QUESTION_SUBMIT_RECORD_ROUTING_KEY,
                 20L);
         verifyNoInteractions(functionConfigMapper, functionTestCaseMapper);
     }
@@ -137,10 +134,8 @@ class JudgeTaskServiceTest {
 
         assertEquals(acResult, finalResult);
         verify(judgeRecordMapper).insert(acResult);
-        verify(outboxService, times(1)).append(
+        verify(outboxPublisher, times(1)).publish(
                 EventTypes.JUDGE_RESULT_CALLBACK,
-                MqContexts.Question_EXCHANGE,
-                MqContexts.QUESTION_SUBMIT_RECORD_ROUTING_KEY,
                 21L);
     }
 
@@ -158,15 +153,11 @@ class JudgeTaskServiceTest {
         judgeTaskService.handleSubmit(10L);
 
         ArgumentCaptor<Object> payloadCaptor = ArgumentCaptor.forClass(Object.class);
-        verify(outboxService, times(2)).append(
-                anyString(),
-                anyString(),
+        verify(outboxPublisher, times(2)).publish(
                 anyString(),
                 payloadCaptor.capture());
-        verify(outboxService).append(
+        verify(outboxPublisher).publish(
                 EventTypes.JUDGE_RESULT_CALLBACK,
-                MqContexts.Question_EXCHANGE,
-                MqContexts.QUESTION_SUBMIT_RECORD_ROUTING_KEY,
                 30L);
 
         Object aiPayload = payloadCaptor.getAllValues().get(1);
@@ -179,10 +170,8 @@ class JudgeTaskServiceTest {
         assertEquals("python", aiAdvice.getLanguage());
         assertEquals("WA", aiAdvice.getJudgeStatus());
         assertEquals("ai_advice1:5:30", aiAdvice.getMessageId());
-        verify(outboxService).append(
+        verify(outboxPublisher).publish(
                 EventTypes.AI_ADVICE_REQUEST,
-                MqContexts.Ai_EXCHANGE,
-                MqContexts.AI_WA_ADVICE_ROUTING_KEY,
                 aiAdvice);
     }
 
@@ -198,15 +187,11 @@ class JudgeTaskServiceTest {
         judgeTaskService.judgeAndPersist(record, false);
 
         // Retry 流程只发结果回调，不发 AI 建议（sendAiAdvice=false）
-        verify(outboxService, times(1)).append(
+        verify(outboxPublisher, times(1)).publish(
                 EventTypes.JUDGE_RESULT_CALLBACK,
-                MqContexts.Question_EXCHANGE,
-                MqContexts.QUESTION_SUBMIT_RECORD_ROUTING_KEY,
                 40L);
-        verify(outboxService, never()).append(
+        verify(outboxPublisher, never()).publish(
                 eq(EventTypes.AI_ADVICE_REQUEST),
-                anyString(),
-                anyString(),
                 any());
     }
 
@@ -221,7 +206,7 @@ class JudgeTaskServiceTest {
                 IllegalStateException.class,
                 () -> judgeTaskService.judgeAndPersist(record, true));
 
-        verifyNoInteractions(judge, outboxService);
+        verifyNoInteractions(judge, outboxPublisher);
     }
 
     private SubmitRecord pendingRecord() {

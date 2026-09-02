@@ -28,6 +28,19 @@ codewise:
       queue-capacity: 100
       await-termination-seconds: 30
 
+# OutboxPro（生产者）：申诉通知与业务同事务登记，Relay 经 Publisher Confirm 投递；
+# poll-interval 显式配纯毫秒：默认 "1000ms" 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 不支持
+outboxpro:
+  enabled: true
+  producer:
+    poll-interval: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
 server:
   port: 8087
 

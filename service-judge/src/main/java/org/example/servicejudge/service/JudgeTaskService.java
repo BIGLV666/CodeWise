@@ -4,8 +4,6 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.ai.AiAdviceWADto;
 import org.example.serviceapi.dto.event.EventTypes;
-import org.example.servicecommon.config.MqContexts;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicejudge.Dto.TestDto;
 import org.example.servicejudge.Util.CodeBuild;
 import org.example.servicejudge.entry.*;
@@ -13,6 +11,7 @@ import org.example.servicejudge.enums.QuestionType;
 import org.example.servicejudge.functionsService.Java;
 import org.example.servicejudge.interfaces.JudgeInterface;
 import org.example.servicejudge.mapper.*;
+import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -33,8 +32,9 @@ import java.util.List;
  * Outbox 事件}。事务方法 {@link #persistResultWithEvents} 通过 {@code self}
  * 代理调用，禁止同类直接调用绕过代理。</p>
  *
- * <p>事件发布统一走 {@link OutboxService#append}：与 judge_record 插入同事务提交，
- * 由 OutboxRelay 异步投递，保证「库里有结果则必有回调」。</p>
+ * <p>事件发布统一走 OutboxPro（{@link OutboxProPublisher#publish}）：与 judge_record
+ * 插入同事务提交，由 Relay 经 Publisher Confirm 投递，保证「库里有结果则必有回调」。
+ * 路由在 {@code OutboxEventRouteConfig} 登记。</p>
  */
 @Service
 @Slf4j
@@ -47,7 +47,7 @@ public class JudgeTaskService {
     private final QuestionMapper questionMapper;
     private final FunctionConfigMapper functionConfigMapper;
     private final FunctionTestCaseMapper functionTestCaseMapper;
-    private final OutboxService outboxService;
+    private final OutboxProPublisher outboxPublisher;
 
     /** 代理自注入：保证 {@link #persistResultWithEvents} 的事务经代理生效。 */
     @Autowired
@@ -62,7 +62,7 @@ public class JudgeTaskService {
             QuestionMapper questionMapper,
             FunctionConfigMapper functionConfigMapper,
             FunctionTestCaseMapper functionTestCaseMapper,
-            OutboxService outboxService
+            OutboxProPublisher outboxPublisher
     ) {
         this.judge = judge;
         this.submitRecordMapper = submitRecordMapper;
@@ -71,7 +71,7 @@ public class JudgeTaskService {
         this.questionMapper = questionMapper;
         this.functionConfigMapper = functionConfigMapper;
         this.functionTestCaseMapper = functionTestCaseMapper;
-        this.outboxService = outboxService;
+        this.outboxPublisher = outboxPublisher;
     }
 
     /**
@@ -184,10 +184,8 @@ public class JudgeTaskService {
      * @param sendAiAdvice 是否登记 AI 建议事件
      */
     public void publishResultEvents(SubmitRecord submitRecord, JudgeRecord finalResult, boolean sendAiAdvice) {
-        outboxService.append(
+        outboxPublisher.publish(
                 EventTypes.JUDGE_RESULT_CALLBACK,
-                MqContexts.Question_EXCHANGE,
-                MqContexts.QUESTION_SUBMIT_RECORD_ROUTING_KEY,
                 finalResult.getJudgeRecordId());
 
         String submitStatus = finalResult.getSubmitStatus();
@@ -205,10 +203,8 @@ public class JudgeTaskService {
                     .language(submitRecord.getLanguage())
                     .judgeStatus(submitStatus)
                     .build();
-            outboxService.append(
+            outboxPublisher.publish(
                     EventTypes.AI_ADVICE_REQUEST,
-                    MqContexts.Ai_EXCHANGE,
-                    MqContexts.AI_WA_ADVICE_ROUTING_KEY,
                     aiAdviceWADto);
         }
     }

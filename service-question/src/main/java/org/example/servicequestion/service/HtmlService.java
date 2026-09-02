@@ -1,15 +1,15 @@
 package org.example.servicequestion.service;
 
 import lombok.extern.slf4j.Slf4j;
-import org.example.servicecommon.config.MqContexts;
+import org.example.serviceapi.dto.event.EventTypes;
 import org.example.servicecommon.dto.QuestionMessage;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.script.LuoGuHtml;
+import org.outboxpro.core.OutboxProPublisher;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,7 +26,7 @@ public class HtmlService {
     @Autowired
     private QuestionMapper questionMapper;
     @Autowired
-    private RabbitTemplate rabbitTemplate;
+    private OutboxProPublisher outboxPublisher;
     private final String LOCK_LUGO_KEY="lock_lugo_key";
 
 
@@ -53,18 +53,8 @@ public class HtmlService {
                 log.info("题目添加失败{}", question.toString());
                 throw new RuntimeException("添加失败");
             }
-            if (r != 1) {
-                log.info(question.toString());
-                throw new RuntimeException("题目添加失败");
-
-            }
-            System.out.println(question.toString());
-            rabbitTemplate.convertAndSend(
-                    MqContexts.Ai_EXCHANGE,
-                    MqContexts.Ai_TESTCASE_ROUTING_KEY,
-                    ToQuestionMessage(question)
-            );
-            System.out.println("2222222222222");
+            // AI 用例生成请求与题目插入同事务走 Outbox（原为事务内裸发，存在「DB 提交但消息丢失」隐患）
+            outboxPublisher.publish(EventTypes.AI_TESTCASE_REQUEST, ToQuestionMessage(question));
             return question;
 
 

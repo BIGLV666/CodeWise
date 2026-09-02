@@ -15,8 +15,9 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
  * 消息体为信封 JSON。消费端配合 {@link EnvelopeCodec#unwrap} 双读。</p>
  *
  * <p>注意：需要「数据库写入与消息发送原子一致」的场景（如 Question -> Judge
- * 主链路）必须改用 {@code OutboxService#append}，由 Outbox 中转投递，
- * 不得直接调用本类。</p>
+ * 主链路）必须改用 OutboxPro（{@code OutboxProPublisher#publish}，在业务事务内
+ * 追加 {@code outboxpro_outbox}，由 Relay 经 Publisher Confirm 投递），
+ * 不得直接调用本类。本类仅用于事务外的尽力而为发送（如 WebSocket 推送）。</p>
  */
 public class EventPublisher {
 
@@ -66,33 +67,5 @@ public class EventPublisher {
         rabbitTemplate.convertAndSend(exchange, routingKey, envelope, headerDecorator);
         log.info("事件已发布: eventId={}, eventType={}, exchange={}, routingKey={}",
                 envelope.getEventId(), eventType, exchange, routingKey);
-    }
-
-    /**
-     * 发布原始 JSON 消息体并附带信封头部（Outbox 中转投递专用）。
-     *
-     * <p>绕过消息转换器直接发送存储的 JSON 字节，避免 String 被
-     * Jackson2JsonMessageConverter 二次引号转义。</p>
-     *
-     * @param exchange   目标交换机
-     * @param routingKey 目标路由键
-     * @param envelope   已构造的信封（payload 为 JSON 字符串形态时的原始信封）
-     * @param bodyJson   信封 JSON 字符串
-     * @param retryCount 消费重试次数透传
-     */
-    public void publishRawEnvelope(String exchange, String routingKey, EventEnvelope envelope,
-                                   String bodyJson, int retryCount) {
-        MessagePostProcessor headerDecorator = message -> {
-            var properties = message.getMessageProperties();
-            properties.setContentType("application/json");
-            properties.setHeader(HEADER_EVENT_ID, envelope.getEventId());
-            properties.setHeader(HEADER_EVENT_TYPE, envelope.getEventType());
-            properties.setHeader(HEADER_SCHEMA_VERSION, envelope.getSchemaVersion());
-            properties.setHeader(HEADER_PRODUCER, envelope.getProducer());
-            properties.setHeader(HEADER_TRACE_ID, envelope.getTraceId());
-            properties.setHeader(HEADER_RETRY_COUNT, retryCount);
-            return message;
-        };
-        rabbitTemplate.convertAndSend(exchange, routingKey, bodyJson, headerDecorator);
     }
 }

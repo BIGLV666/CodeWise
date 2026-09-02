@@ -3,8 +3,6 @@ package org.example.servicereview.task;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.notification.NotificationDto;
-import org.example.servicecommon.config.MqContexts;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicereview.dto.ReviewReminderDto;
 import org.example.servicereview.mapper.ReviewMapper;
 import org.example.servicereview.mapper.ReviewRecordMapper;
@@ -18,6 +16,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.outboxpro.core.OutboxProPublisher;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -43,7 +42,7 @@ class ReviewMessageTaskTest {
     private static final Long USER_ID = 7L;
 
     @Mock
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
     @Mock
     private TransactionTemplate transactionTemplate;
     @Mock
@@ -99,14 +98,13 @@ class ReviewMessageTaskTest {
 
     private String captureAppendEventType() {
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
-        verify(outboxService).append(captor.capture(), anyString(), anyString(), any());
+        verify(outboxPublisher).publish(captor.capture(), any());
         return captor.getValue();
     }
 
     private NotificationDto captureAppendPayload() {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        verify(outboxService).append(anyString(), eq(MqContexts.NOTIFICATION_EXCHANGE),
-                eq(MqContexts.NOTIFICATION_REVIEW_ROUTING_KEY), captor.capture());
+        verify(outboxPublisher).publish(eq(EventTypes.REVIEW_REMINDER), captor.capture());
         return (NotificationDto) captor.getValue();
     }
 

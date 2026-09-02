@@ -17,8 +17,19 @@ server:
 
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
-  outbox:
-    enabled: true
+
+# OutboxPro（生产者）：事务内 append -> Relay 经 Publisher Confirm 投递；
+# poll-interval 显式配纯毫秒：默认 "1000ms" 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 不支持
+outboxpro:
+  enabled: true
+  producer:
+    poll-interval: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
 
 jwt:
   secret: ${JWT_SECRET}

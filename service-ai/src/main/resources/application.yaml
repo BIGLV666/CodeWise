@@ -16,6 +16,10 @@ server:
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
 
+# 本服务不生产事件：显式关闭 OutboxPro（其自动配置默认 matchIfMissing=true）
+outboxpro:
+  enabled: false
+
 api:
   governance:
     enabled: true

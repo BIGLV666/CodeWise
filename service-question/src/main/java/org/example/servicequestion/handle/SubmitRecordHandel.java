@@ -9,13 +9,13 @@ import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicecommon.event.EnvelopeCodec;
-import org.example.servicecommon.outbox.OutboxService;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.mapper.JudgeRecordMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
+import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,7 +80,7 @@ public class SubmitRecordHandel implements MessageHandler {
     private RabbitTemplate rabbitTemplate;
 
     @Autowired
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
 
     @Autowired
     private TransactionTemplate transactionTemplate;
@@ -186,10 +186,8 @@ public class SubmitRecordHandel implements MessageHandler {
 
         // REVIEW 场景改走事务性 Outbox：与 CAS/计数同事务提交，由 Relay 至少一次投递
         if ("REVIEW".equals(submitRecord.getSubmitScene())) {
-            outboxService.append(
+            outboxPublisher.publish(
                     EventTypes.REVIEW_JUDGE_RECORD,
-                    MqContexts.REVIEW_EXCHANGE,
-                    MqContexts.REVIEW_JUDGE_RECORD_ROUTING_KEY,
                     buildReviewJudgeRecordDto(submitRecord, judgeRecord));
         }
         return true;

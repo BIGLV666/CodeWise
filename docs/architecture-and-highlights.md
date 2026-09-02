@@ -56,9 +56,9 @@ Docker（`codewise-java-judge:17` 判题镜像，容器池 2 Java + 1 Python/C/C
   ▼ gateway JWT 校验 + 头清洗
   ▼
 question:8084 ── 事务①：submit_record 落库(pending)
-  │               + OutboxService.append(JUDGE_SUBMIT_REQUEST)   ← 同事务，杜绝"库里有没有消息"的撕裂
+  │               + OutboxPro.publish(JUDGE_SUBMIT_REQUEST)   ← 同事务，杜绝"库里有没有消息"的撕裂
   │
-  ▼ OutboxRelay（每秒批量 · FOR UPDATE SKIP LOCKED · 多实例安全 · 10s*2^n 退避 · 8 次转 DEAD 可重放）
+  ▼ OutboxPro Relay（每秒批量 · FOR UPDATE SKIP LOCKED · 多实例安全 · Publisher Confirm · 指数退避 · DEAD 台账可告警）
   │
   ▼ RabbitMQ judge.submit.queue（挂 judge.dlx）
   │
@@ -229,9 +229,10 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 
 **A1. Transactional Outbox 消除双写**
 - 问题：DB 提交了但 MQ 没发出去（或反之），判题任务凭空丢失或幽灵消息污染数据。
-- 方案：业务事务内 append 事件行（`event_outbox`，judge/question/review 三库同构），
-  Relay 每秒 `FOR UPDATE SKIP LOCKED` 批量认领投递——多实例并发安全；失败 10s*2^n
-  退避，8 次转 DEAD，管理端接口可查可重放。
+- 方案：业务事务内 publish 事件行（OutboxPro 库 `outboxpro_outbox`，judge/question/review/community
+  各自生产者库同构），Relay 每秒 `FOR UPDATE SKIP LOCKED` 批量认领投递——多实例并发安全，
+  **Publisher Confirm 确认后才标 SENT**；失败指数退避，5 次转 DEAD 并入台账，
+  高水位自动告警（`OUTBOXPRO_ALERT`），运维端点可查。
 - 讲法："我没有引入 Seata/Kafka 事务，只用一张表+一个定时器把 XA 问题降维成了
   本地事务+至少一次投递+消费幂等，这在面试里是标准的 Outbox 模式落地。"
 

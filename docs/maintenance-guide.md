@@ -42,7 +42,7 @@ CodeWise 是面向编程学习、在线判题、错题复习和题解社区的 S
 | `JWT_SECRET` | service-gateway、service-message、service-review | JWT 签名密钥，与 Python Agent `.env` 的 `JWT_SECRET` 同值（签名算法由密钥长度自动选择） |
 | `API_KEY_MASTER_KEY` | service-ai | 自定义模型 API Key 的 AES-GCM 主密钥；经属性 `security.api-key-master-key` 读取，仓库 yaml 不落盘，需通过环境变量或 Nacos 注入 |
 
-网关 IP 信任策略：默认 `codewise.gateway.trust-forwarded-for=false` 只信任 TCP remoteAddress 并剥离客户端 X-Forwarded-For；部署在可信 LB 之后才置 true。数据库增量：`codewise_review` 需执行 `event_outbox.sql` 与 `consumed_event` 建表（service-review resources）。
+网关 IP 信任策略：默认 `codewise.gateway.trust-forwarded-for=false` 只信任 TCP remoteAddress 并剥离客户端 X-Forwarded-For；部署在可信 LB 之后才置 true。数据库增量：`consumed_event` 建表见 service-review resources；Outbox 表（`outboxpro_*`）由生产者服务启动时自动创建（需业务账号有 CREATE 权限，部署初始化脚本已授权）
 
 ## 4. 数据库约定
 
@@ -191,7 +191,7 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ## 10. Redis 与 RabbitMQ 维护
 
-- 判题主链路已改为事务性 Outbox + 统一消息信封：提交经 `event_outbox` 中转投递，判题队列为 `judge.submit.queue` / `judge.debug.queue` / `judge.retry.queue`（均挂 DLX），延迟重试经 `judge.wait.queue` TTL 弹回，死信入 `judge.dead.queue` 并登记 `failure_submit`。架构说明、迭代手册与重放操作见 `docs/maintenance/messaging-reliability.md`。
+- 判题主链路已改为事务性 Outbox（OutboxPro，Publisher Confirm 确认投递）+ 统一消息信封：提交经 `outboxpro_outbox` 中转投递，判题队列为 `judge.submit.queue` / `judge.debug.queue` / `judge.retry.queue`（均挂 DLX），延迟重试经 `judge.wait.queue` TTL 弹回，死信入 `judge.dead.queue` 并登记 `failure_submit`。架构说明、迭代手册与重放操作见 `docs/maintenance/messaging-reliability.md`。
 - 新增队列必须挂 DLX；改队列参数必须换新队列名（RabbitMQ 队列参数不可变）。
 - 修改 routing key 时同时检查生产者、队列绑定和消费者。
 - 消费者必须考虑重复投递，优先使用业务唯一 ID 或数据库唯一键实现幂等；消费入口统一用 `EnvelopeCodec.unwrap` 双读（信封/裸格式）。
@@ -208,7 +208,7 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ### 提交一直 pending
 
-1. 查 `codewise_question.event_outbox`：`status='DEAD'`（投递超限，走 `/api/question/outbox/replay/{id}` 重放）或 PENDING 积压（Relay 未运行 / broker 断连，`last_error` 有原因）。
+1. 查 `codewise_question.outboxpro_outbox`：`status='DEAD'`（投递超限，经 `/actuator/outboxpro-ops/outbox` 查台账）或 PENDING 积压（Relay 未运行 / broker 断连，`last_error_message` 有原因）。
 2. 检查判题消息是否进入 RabbitMQ（`judge.submit.queue` 深度）。
 3. 检查 `service-judge` 消费日志（eventId / retryCount / 最终结果）与死信队列 `judge.dead.queue`。
 4. 检查 Docker 容器池是否初始化成功。

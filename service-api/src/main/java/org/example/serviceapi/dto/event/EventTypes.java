@@ -26,6 +26,12 @@ public final class EventTypes {
     /** AI 判题建议请求：judge -> ai，payload 为瘦身后的事件引用 DTO */
     public static final String AI_ADVICE_REQUEST = "AI_ADVICE_REQUEST";
 
+    /** AI 函数题用例生成请求：question -> ai，payload 为 QuestionMessage（原为事务内裸发，已收编 Outbox） */
+    public static final String AI_TESTCASE_REQUEST = "AI_TESTCASE_REQUEST";
+
+    /** 申诉处理结果通知：community -> message，payload 为 NotificationDto（原为事务内裸发，已收编 Outbox） */
+    public static final String NOTIFICATION_APPEAL = "NOTIFICATION_APPEAL";
+
     /** 复习场景判题结果：question -> review，payload 为 ReviewJudgeRecordDto */
     public static final String REVIEW_JUDGE_RECORD = "REVIEW_JUDGE_RECORD";
 

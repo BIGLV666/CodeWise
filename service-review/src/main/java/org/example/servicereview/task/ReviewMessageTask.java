@@ -8,9 +8,8 @@ import org.example.serviceapi.enums.NotificationCenterType;
 import org.example.serviceapi.enums.ReminderType;
 import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.notification.NotificationDto;
-import org.example.servicecommon.config.MqContexts;
 import org.example.serviceapi.dto.notification.NotificationReviewMqDto;
-import org.example.servicecommon.outbox.OutboxService;
+import org.outboxpro.core.OutboxProPublisher;
 import org.example.servicereview.dto.ReviewReminderDto;
 import org.example.servicereview.mapper.ReviewMapper;
 import org.example.servicereview.mapper.ReviewRecordMapper;
@@ -29,7 +28,7 @@ import java.util.List;
  * 复习提醒定时任务：早 10 点提醒未生成今日复习计划的用户，晚 21 点提醒今日计划未完成的用户。
  * <p>
  * 提醒消息不再裸直发 RabbitMQ（异常只记日志会导致提醒静默丢失），而是经事务性 Outbox
- * （{@code event_outbox} 表）登记后由 OutboxRelay 异步投递，达到至少一次语义；
+ * （OutboxPro，{@code outboxpro_outbox} 表）登记后由 Relay 异步投递，达到至少一次语义；
  * messageId 形如 {@code review-reminder:{type}:{userId}:{yyyy-MM-dd}} 按天幂等，
  * 消费端（通知中心）以 messageId 幂等去重。每个用户一次小事务提交，避免整批单事务。
  * </p>
@@ -39,7 +38,7 @@ import java.util.List;
 @Slf4j
 public class ReviewMessageTask {
     @Autowired
-    private OutboxService outboxService;
+    private OutboxProPublisher outboxPublisher;
     @Autowired
     private TransactionTemplate transactionTemplate;
     @Autowired
@@ -122,15 +121,14 @@ public class ReviewMessageTask {
     }
 
     /**
-     * 将单条提醒经事务性 Outbox 登记（每个用户一次小事务），由 OutboxRelay 异步投递。
-     * <p>Outbox 写入要求事务上下文：登记行提交后至少会被投递一次，投递失败按指数退避重试、
-     * 超限转 DEAD 留待人工核查，不再出现裸直发异常即静默丢失的情况。</p>
+     * 将单条提醒经事务性 Outbox（OutboxPro）登记（每个用户一次小事务），
+     * 由 Relay 异步投递。
+     * <p>Outbox 写入要求事务上下文：登记行提交后至少会被投递一次，
+     * 投递经 Publisher Confirm 确认，失败按指数退避重试、超限转 DEAD 留待人工核查，
+     * 不再出现裸直发异常即静默丢失的情况。</p>
      */
     private void publishReminder(NotificationDto notificationDto) {
-        transactionTemplate.executeWithoutResult(status -> outboxService.append(
-                EventTypes.REVIEW_REMINDER,
-                MqContexts.NOTIFICATION_EXCHANGE,
-                MqContexts.NOTIFICATION_REVIEW_ROUTING_KEY,
-                notificationDto));
+        transactionTemplate.executeWithoutResult(status ->
+                outboxPublisher.publish(EventTypes.REVIEW_REMINDER, notificationDto));
     }
 }

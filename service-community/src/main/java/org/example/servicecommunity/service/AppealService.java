@@ -5,13 +5,13 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.notification.NotificationAppealDto;
 import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.enums.NotificationCenterType;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
-import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.AppealDto;
 import org.example.servicecommunity.entry.Appeal;
@@ -25,7 +25,7 @@ import org.example.servicecommunity.mapper.PostMapper;
 import org.example.servicecommunity.mapper.SolutionMapper;
 import org.example.servicecommunity.vo.AppealVo;
 import org.example.servicecommunity.vo.CursorPageResult;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -34,8 +34,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @Slf4j
@@ -52,7 +50,7 @@ public class AppealService {
     @Autowired
     private UserFeignClient userFeignClient;
     @Autowired
-    private RabbitTemplate rabbitTemplate;
+    private OutboxProPublisher outboxPublisher;
     @Autowired
     private ObjectMapper objectMapper;
     @Autowired
@@ -321,45 +319,41 @@ public class AppealService {
     }
 
     /**
-     * 管理员处理申诉后，发送通知给用户
+     * 管理员处理申诉后，发送通知给用户。
+     *
+     * <p>通知改为经事务性 Outbox（OutboxPro）与申诉状态更新同事务登记，
+     * 由 Relay 经 Publisher Confirm 至少一次投递。原实现为事务外异步裸发 +
+     * Redis 预检占位：占位成功但 MQ 发送失败时通知静默丢失且 7 天内无法重发。
+     * 现在通知行与业务原子提交（不会丢），重复投递由消费端按 messageId 幂等去重。</p>
      */
     private void sendAppealHandleNotification(Appeal appeal, Object post, boolean passed, String adminReason) {
-        CompletableFuture.runAsync(() -> {
-            try {
-                String title = getTitle(appeal.getPostType(), post);
-                String contentType = appeal.getPostType().name();
+        try {
+            String title = getTitle(appeal.getPostType(), post);
+            String contentType = appeal.getPostType().name();
 
-                NotificationAppealDto appealDto = new NotificationAppealDto();
-                appealDto.setAppealId(appeal.getAppealId());
-                appealDto.setPostId(appeal.getPostId());
-                appealDto.setPostType(contentType);
-                appealDto.setTitle(title);
-                appealDto.setReason(appeal.getReason());
-                appealDto.setAdminReason(adminReason);
-                appealDto.setPassed(passed);
+            NotificationAppealDto appealDto = new NotificationAppealDto();
+            appealDto.setAppealId(appeal.getAppealId());
+            appealDto.setPostId(appeal.getPostId());
+            appealDto.setPostType(contentType);
+            appealDto.setTitle(title);
+            appealDto.setReason(appeal.getReason());
+            appealDto.setAdminReason(adminReason);
+            appealDto.setPassed(passed);
 
-                NotificationDto notification = new NotificationDto();
-                notification.setType(NotificationCenterType.APPEAL);
-                notification.setUserId(appeal.getUserId());
-                notification.setExtraData(objectMapper.writeValueAsString(appealDto));
+            NotificationDto notification = new NotificationDto();
+            notification.setType(NotificationCenterType.APPEAL);
+            notification.setUserId(appeal.getUserId());
+            notification.setExtraData(objectMapper.writeValueAsString(appealDto));
 
-                String messageId = APPEAL_HANDLE + ":" + appeal.getAppealId() + ":" + (passed ? "pass" : "reject");
-                notification.setMessageId(messageId);
+            String messageId = APPEAL_HANDLE + ":" + appeal.getAppealId() + ":" + (passed ? "pass" : "reject");
+            notification.setMessageId(messageId);
 
-                String redisKey = RedisContext.NOTIFICATION_IDEMPOTENT_KEY + messageId;
-                Boolean set = redisTemplate.opsForValue().setIfAbsent(redisKey, "1", 7, TimeUnit.DAYS);
-                if (Boolean.TRUE.equals(set)) {
-                    rabbitTemplate.convertAndSend(
-                            MqContexts.NOTIFICATION_EXCHANGE,
-                            MqContexts.NOTIFICATION_APPEAL_ROUTING_KEY,
-                            notification
-                    );
-                    log.info("申诉处理通知已发送: appealId={}, passed={}", appeal.getAppealId(), passed);
-                }
-            } catch (Exception e) {
-                log.error("发送申诉处理通知失败: appealId={}", appeal.getAppealId(), e);
-            }
-        });
+            outboxPublisher.publish(EventTypes.NOTIFICATION_APPEAL, notification);
+            log.info("申诉处理通知已登记 Outbox: appealId={}, passed={}", appeal.getAppealId(), passed);
+        } catch (Exception e) {
+            log.error("申诉处理通知登记失败（事务回滚）: appealId={}", appeal.getAppealId(), e);
+            throw new RuntimeException("申诉处理通知登记失败", e);
+        }
     }
 
 }
