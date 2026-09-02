@@ -6,8 +6,10 @@ set -euo pipefail
 
 # mysql 官方镜像在 initdb 阶段 root 已带 MYSQL_ROOT_PASSWORD，裸 `mysql -uroot` 会
 # Access denied；经 MYSQL_PWD 传密码（不走命令行参数，避免 ps 泄漏与告警）。
+# 显式 utf8mb4 客户端字符集：容器 LANG 未设置时 mysql 客户端默认 latin1，
+# 会把 UTF-8 建表/种子 SQL 双重编码（页面中文全部乱码）。
 export MYSQL_PWD="${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}"
-mysql() { command mysql -uroot "$@"; }
+mysql() { command mysql --default-character-set=utf8mb4 -uroot "$@"; }
 
 echo "[codewise-init] creating databases..."
 mysql <<-EOSQL
@@ -65,5 +67,7 @@ apply codewise_message /sql/message/sql.sql
 # 6. AI 库（codewise_ai.sql 已含 ai_message.status；consumed_event 单独建）
 apply codewise_ai /sql/ai/codewise_ai.sql
 apply codewise_ai /sql/ai/consumed_event.sql
+# 7. Agent 库表（codewise-agent 的会话/消息/记忆）
+apply codewise_ai /sql/agent/agent_tables.sql
 
 echo "[codewise-init] done."

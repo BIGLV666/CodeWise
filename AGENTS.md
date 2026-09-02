@@ -4,12 +4,12 @@ Guidance for AI coding agents working in the CodeWise monorepo.
 
 ## Big picture
 
-CodeWise is an online-judge + review + community learning platform. It is **8 independently runnable Spring Boot apps + 2 shared Maven modules**, plus a sidecar Python FastAPI/LangGraph agent (`CodeWise-Agent/`, a sibling folder to this repo, not a submodule here).
+CodeWise is an online-judge + review + community learning platform. It is **8 independently runnable Spring Boot apps + 2 shared Maven modules + 1 Python agent** (`codewise-agent/`, FastAPI + a Node dsh runtime under `codewise-agent/agent-runtime/`, tests via `pytest tests/`).
 
 - **Requests flow through `service-gateway` (8082)**, which validates JWT and injects identity headers, then routes to `service-user` (8081), `service-question` (8084), `service-review` (8097), `service-community` (8087), `service-message` (8083), `service-ai` (8085). `service-judge` (8086) is reached via RabbitMQ, not HTTP.
 - **Each service owns exactly one database** (`codewise_user`, `codewise_question`, etc.). Never query across databases. Cross-service data goes through OpenFeign (`service-api/.../feign/`) or RabbitMQ messages.
 - **Judging is async and event-driven**: `service-question` writes a submit record and publishes to RabbitMQ → `service-judge` compiles/runs in Docker → result message updates the record and notifies via `service-message`. The DB submit record is the source of truth (WebSocket push is best-effort). See `service-question/.../service/JudgeService.java` and `service-judge/.../Mq/Mq.java`.
-- **Two independent AI paths**: `service-ai` consumes judge-failure events to generate suggestions + in-question SSE follow-ups; `CodeWise-Agent` is a separate LangGraph agent that calls back through the Gateway using the user's original Bearer token.
+- **Two independent AI paths**: `service-ai` consumes judge-failure events to generate suggestions + in-question SSE follow-ups; `codewise-agent` is a separate FastAPI/LangGraph agent that calls back through the Gateway using the user's original Bearer token (self-validates JWT with the shared `JWT_SECRET`; DB tables `agent_*` in `codewise_ai`). In Docker it is exposed via nginx `/agentapi/` (frontend builds with `VITE_AGENT_BASE_URL=/agentapi`).
 
 ## Shared modules — where things belong
 
@@ -41,7 +41,7 @@ These are intentional/legacy and inconsistent across services. Follow the casing
 
 - **Controllers** return `Result<T>` and read identity from `UserContext`. Example: `service-user/.../controller/UserController.java`.
 - **Mappers** are `@Mapper` interfaces extending MyBatis-Plus `BaseMapper<T>`; custom queries are backed by XML under the service's `resources/[Mm]apper/`.
-- **Exceptions**: each service has its own `GlobalExceptionHandler` annotated `@RestControllerAdvice(basePackages = "...controller")` returning `Result.error(...)`.
+- **Exceptions**: each service has its own `GlobalExceptionHandler` annotated `@RestControllerAdvice(basePackages = "...controller")` returning `Result.error(...)`. Business messages stay in `IllegalArgumentException`/`RuntimeException` handlers; `DataAccessException` and unknown `Exception` must return generic text only (SQL and internals must never reach the frontend).
 - **RabbitMQ**: all queue/exchange/routing-key constants and bean definitions are centralized in `service-common` `MqContexts` + `MqConfig` (includes judge DLX/DLQ, `Jackson2JsonMessageConverter`). Reuse these constants, don't hard-code names.
 - **Transactional Outbox is OutboxPro** (`io.github.biglv666:outboxpro-spring-boot-starter`, since 2026-09): publishes that must be atomic with a DB transaction call `OutboxProPublisher.publish(eventType, payload)` **inside the transaction**; routes are declared as `EventDefinition` beans in each producer service's `OutboxEventRouteConfig`. Producers: question/judge/review/community (`outboxpro.enabled: true`); other services must keep `outboxpro.enabled: false` (the lib defaults to ON when missing). `outboxpro.producer.poll-interval: 1000` (plain millis) is mandatory — the library default `"1000ms"` needs Spring Framework 6.2 and fails startup on Boot 3.2.4. Best-effort sends outside transactions (WebSocket pushes) still use `EventPublisher`/`RabbitTemplate`. Consumers parse bodies with `EnvelopeCodec.unwrap` (envelope/bare dual-read) and are wire-compatible with OutboxPro messages.
 - **Lists** use ID-based cursor pagination; associated users/tags/likes use batch queries to avoid N+1.

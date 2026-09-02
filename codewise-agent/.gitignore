@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# 运行期产物（dsh 会话日志、token 文件）
+data/
+
+# 冒烟脚本临时产物
+tests/.smoke-tmp/
+
+# Node 运行时闭包
+agent-runtime/node_modules/
+agent-runtime/plugins/codewise-tools/dist/
+agent-runtime/package-lock.json
+
+# 环境配置（含密钥）
+.env

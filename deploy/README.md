@@ -1,6 +1,6 @@
 # CodeWise Docker 快速开始（Quickstart）
 
-目标：**一台 Linux 主机 + Docker，十分钟内跑起 CodeWise 全栈**（前端、网关、7 个业务服务、MySQL/Redis/RabbitMQ/Nacos、判题沙箱）。生产部署与运维要求见 [`OPERATIONS.md`](OPERATIONS.md)。
+目标：**一台 Linux 主机 + Docker，十分钟内跑起 CodeWise 全栈**（前端、网关、7 个业务服务、Python Agent、MySQL/Redis/RabbitMQ/Nacos、判题沙箱、Mailpit 邮件捕获）。生产部署与运维要求见 [`OPERATIONS.md`](OPERATIONS.md)。
 
 ## 前置条件
 
@@ -38,16 +38,17 @@ curl http://localhost:8082/actuator/health        # {"status":"UP"}
 
 | 功能 | 需要的配置 | 缺失时的表现 |
 | --- | --- | --- |
-| 注册/找回密码的验证码邮件 | Nacos `service-email.yaml` 配置 SMTP | 邮箱注册不可用，用户名+密码登录正常 |
-| 平台内置 AI 模型 | Nacos 配置 Provider 列表 | 建议生成失败；可改用页面上的**用户自定义模型** |
+| 注册/找回密码的验证码邮件 | 默认发往容器内 Mailpit（Web 界面 `127.0.0.1:8025` 查看）；接真实 SMTP 在 `.env` 配 `SPRING_MAIL_*` | 邮件进 Mailpit，不丢失 |
+| 平台内置 AI 模型 | Nacos 配置 Provider 列表 | 建议生成失败进死信留痕；可改用页面上的**用户自定义模型** |
 | 用户自定义模型 | `.env` 的 `API_KEY_MASTER_KEY`（32 字节 Base64，`openssl rand -base64 32`） | 保存自定义模型配置时报错 |
 | Java 判题 | 镜像 `codewise-java-judge:17`（`up --build` 已自动构建） | Java 题判题一直 PENDING |
 
 ## 构建了什么
 
 - 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；
-- 判题基础镜像：[`judge-base/Dockerfile`](judge-base/Dockerfile)（JDK17 + uid 1000 judge 用户）；
-- 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend/CodeWise-frontend` 并挂载 [`nginx.conf`](nginx.conf)。
+- 判题基础镜像：[`judge-base/Dockerfile`](judge-base/Dockerfile)（JDK17 + uid 1000 judge 用户 + jackson 函数题依赖）；
+- Python Agent 镜像：`codewise-agent/Dockerfile`（Node 22 + Python 3.11 双运行时），nginx 以 `/agentapi/` 反代；
+- 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend/CodeWise-frontend`（pnpm + `VITE_AGENT_BASE_URL=/agentapi`）并挂载 [`nginx.conf`](nginx.conf)。
 
 ## 遇到问题
 

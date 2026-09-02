@@ -1,0 +1,36 @@
+{
+  "name": "codewise-agent-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "CodeWise Agent 的 dsh 运行时部署闭包：cordis 组合 + codewise-tools 插件。node >= 22.19。",
+  "scripts": {
+    "build:plugin": "tsc -p plugins/codewise-tools/tsconfig.json && tsc -p plugins/codewise-web/tsconfig.json",
+    "test:web-guard": "cd plugins/codewise-web && node --test test/guard.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-agent-spine-demo": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-code-runtime-worker-thread": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-compaction-basic": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-deepseek": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-sdk-jsonrpc-demo": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-sdk-jsonrpc-server": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-checkpoint-policy": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-token-meter": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-tool-call-timeout-policy": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-tool-web": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web-fetch-http": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web-search-exa": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web-search-perplexity": "0.1.0-rc.8",
+    "codewise-tools": "file:plugins/codewise-tools",
+    "codewise-web": "file:plugins/codewise-web"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

@@ -9,7 +9,9 @@
 | MySQL | mysql:8.4 | `mysql-data` | 6 库初始化脚本挂载只读 |
 | Redis | redis:7 | `redis-data` | AOF 开启 |
 | RabbitMQ | rabbitmq:3.13 | `rabbitmq-data` | 管理台 15672 仅映射宿主回环（`127.0.0.1:15672`），不对公网暴露 |
-| Nacos | nacos:2.3.2 standalone | `nacos-data` | 服务发现 + 可选配置中心 |
+| Nacos | nacos:2.3.2 standalone | `nacos-data` | 服务发现 + 可选配置中心，控制台仅映射宿主回环（`127.0.0.1:8848`） |
+| Mailpit | axllent/mailpit | 无（内存） | 开发/演示 SMTP 捕获，Web `127.0.0.1:8025`；真实 SMTP 经 `.env` 的 `SPRING_MAIL_*` 切换 |
+| Python Agent | codewise/codewise-agent | 无（状态在 codewise_ai 库） | FastAPI + Node dsh 运行时，nginx `/agentapi/` 反代，JWT 与网关同 `JWT_SECRET` |
 | 函数产物 | service-question | `question-artifacts` | 容器内 `/app/data/function-artifacts` |
 | 用户上传 | service-user | `user-uploads` | 容器内 `/app/data/uploads`，经 Nginx `/uploads/` 反代 |
 | Docker daemon | judge + question | `/var/run/docker.sock` | **DooD**：判题沙箱运行在宿主 Docker 上 |
@@ -72,7 +74,9 @@ community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF 
 - 密钥类：`CODEWISE_INTERNAL_TOKEN`（全服务）、`JWT_SECRET`（gateway/user/message/review）、`API_KEY_MASTER_KEY`（经 `SPRING_APPLICATION_JSON` 映射到 `security.api-key-master-key`）；
 - 网关：`CORS_ORIGINS`（逗号分隔）；上传：`FILE_UPLOAD_ROOT=/app/data/uploads`；
 - 判题：`JUDGE_IMAGE`（判题基础镜像名，默认 `codewise-java-judge:17`）；
-- 引导：`ROOT_PASSWORD`/`ROOT_EMAIL` 等（root 管理员一次性创建）。
+- 引导：`ROOT_PASSWORD`/`ROOT_EMAIL` 等（root 管理员一次性创建）；
+- 邮件：`SPRING_MAIL_HOST/PORT/USERNAME/PASSWORD`（默认容器内 mailpit:1025）+ `CODEWISE_MAIL_FROM`；
+- Agent：`DSH_PROVIDER`/`DSH_DEFAULT_CONTEXT_WINDOW`/`DSH_IDLE_TIMEOUT_SECONDS`（LLM 路由与上下文窗口）。
 
 仍需 Nacos 下发（可选，缺失即功能降级而非启动失败）：SMTP 发信账号（`service-email.yaml`）、AI Provider 列表、Ollama 摘要模型地址。
 
@@ -108,7 +112,8 @@ docker compose -f deploy/docker-compose.yml exec mysql \
 | 判题一直 PENDING | judge 是否 healthy；宿主是否有判题镜像（`docker images \| grep codewise`）；`logs -f service-judge` |
 | AI 产物验收失败 | question 容器内 `docker ps` 是否可用（sock 挂载 + docker CLI） |
 | 登录跨域报错 | `CORS_ORIGINS` 未包含实际来源 |
-| 注册收不到邮件 | SMTP 未配置（Quickstart 降级表） |
+| 注册收不到邮件 | 看 Mailpit Web（127.0.0.1:8025）是否有信；真实 SMTP 检查 `.env` 的 `SPRING_MAIL_*` |
+| Agent 不可用 | `docker compose logs codewise-agent`；dsh 运行时需 node>=22.19（镜像已内置）|
 | 容器反复重启 | `docker compose logs <svc>`；多为密钥缺失启动失败（属预期：无 `CODEWISE_INTERNAL_TOKEN` 不允许起服务） |
 
 健康探针：每个服务 `GET /actuator/health`（内网直连端口，`UserAuthInterceptor` 对探针路径免 Token）。

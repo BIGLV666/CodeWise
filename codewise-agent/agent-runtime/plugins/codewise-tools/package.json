@@ -1,0 +1,24 @@
+{
+  "name": "codewise-tools",
+  "version": "0.1.0",
+  "description": "CodeWise 项目工具插件：在 dsh 工具注册表上挂载 CodeWise 内网网关工具",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.8"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4",
+    "@deepseek-ai/schemastery": ">=3"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/schemastery": "3.18.2",
+    "@types/node": "^22.20.1",
+    "typescript": "^5.5.0"
+  }
+}

@@ -54,9 +54,14 @@ public class QuestionService {
 
 
     public Long getTotalQuestionCount() {
-        Long total= 0L;
-        total =(Long) redisTemplate.opsForValue().get(RedisContext.QUESTION_TOTAL_KEY);
-        if (total == null) {
+        Long total = 0L;
+        // Redis 经 Jackson 序列化：无类型信息时小数值会反序列化成 Integer，
+        // 不能硬转 Long，统一按 Number 读取
+        Object cached = redisTemplate.opsForValue().get(RedisContext.QUESTION_TOTAL_KEY);
+        if (cached instanceof Number number) {
+            total = number.longValue();
+        }
+        if (cached == null) {
             boolean tryLock = redissonClient.getLock(LOCK_ADD_QUESTION).tryLock();
             RLock lock = redissonClient.getLock(LOCK_ADD_QUESTION);
             if (tryLock) {

@@ -1,0 +1,23 @@
+{
+  "name": "codewise-web",
+  "version": "0.1.0",
+  "description": "CodeWise web 抓取守卫插件：注册带 SSRF host 校验的受控 HTTP fetch provider 到 ctx.web",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4",
+    "@deepseek-ai/dsh-web": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-web-fetch-http": "0.1.0-rc.8",
+    "@deepseek-ai/schemastery": ">=3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.5.0"
+  }
+}

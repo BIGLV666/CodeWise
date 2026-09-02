@@ -5,6 +5,9 @@
 # 前端仓库使用 pnpm（pnpm-lock.yaml），corepack 随 node:20 自带。
 FROM node:22-alpine AS build
 WORKDIR /fe
+# Agent 接口基址：compose 构建注入 /agentapi（nginx 反代 codewise-agent:8000）
+ARG VITE_AGENT_BASE_URL=/agentapi
+ENV VITE_AGENT_BASE_URL=$$VITE_AGENT_BASE_URL
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 ENV CI=true \

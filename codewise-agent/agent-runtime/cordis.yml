@@ -1,0 +1,144 @@
+# CodeWise Agent 的 dsh cordis 组合（由 Python 门面经 JSON-RPC stdio 驱动）。
+# stdout 归 JSON-RPC 协议所有：不要加终端 UI 或 console logger。
+#
+# 与上游 examples/jsonrpc-agent 的差异：
+# - 不挂载 bash / subprocess / fs / subagent / todo：工具面只有 codewise-tools，
+#   同时规避 Windows PTY 限制；
+# - llm-deepseek 关闭思考模式（thinking: disabled），上下文窗口经
+#   DSH_CONTEXT_WINDOW 按用户模型注入；
+# - 增加工具超时策略（tool-call-timeout-policy）、web 抓取（web_search /
+#   web_fetch，fetch 走 codewise-web 的 SSRF 守卫）、代码执行（code-runtime，
+#   tools.mode: both）与 codewise-tools 插件。
+
+- id: sdk-jsonrpc-server
+  name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
+  config:
+    maxTokensAsSuccess: true
+
+# 双 LLM 适配器并存（dsh 孪生适配器设计），由门面 initialize 时的 provider 选择：
+# - 默认 codewise（llm-pi-ai 手工声明路由）：纯净 OpenAI 协议，不携带任何
+#   DeepSeek 方言字段（reasoningEfforts.off = 什么都不发），兼容性最好；
+# - deepseek-official（llm-deepseek）：官方 DeepSeek wire 格式，需要思考模式
+#   或缓存计费等 DeepSeek 特性时，把门面 DSH_PROVIDER 改回 deepseek-official 即可。
+# 模型目录按进程注入（DSH_MODEL_ID / DSH_CONTEXT_WINDOW）：每个会话运行时
+# 只服务一个模型，目录 = 该模型的窗口与输出上限。
+
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      codewise:
+        apiKeyEnv: DEEPSEEK_API_KEY
+        api: openai-completions
+        baseURL: !!js process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com'
+        reasoning: off
+        models:
+          - id: !!js process.env.DSH_MODEL_ID || 'test-model'
+            contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW) || 65536
+            maxTokens: 8192
+            # 非思考模型：完全不声明思考档位，wire 上不发任何 reasoning 字段
+            reasoningEfforts: false
+
+# DeepSeek 官方直连适配器（备选路由 deepseek-official）。凭据仍从
+# DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL 解析，模型 id 逐请求透传。
+- id: llm-deepseek
+  name: '@deepseek-ai/dsh-llm-deepseek'
+  config:
+    thinking: disabled
+    maxTokens: 8192
+    models: []
+    defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW) || 65536
+
+- id: token-meter
+  name: '@deepseek-ai/dsh-token-meter'
+
+- id: sessions
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
+    # 压缩关闭：会话按会话粒度分目录，规模小；需要时再启用 zstd。
+    compression: 'none'
+
+- id: session-checkpoints
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'
+
+# 自动上下文压缩：用量达窗口 80% 触发，保留 16% 近期消息 + 摘要。
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  config:
+    thresholdRatio: 0.8
+    retainRatio: 0.16
+    maxTokens: 8192
+    compactionRetries: 1
+
+# 工具超时策略：按每个 ToolDefinition 的 timeoutMs 强制执行。
+- id: tool-call-timeout-policy
+  name: '@deepseek-ai/dsh-tool-call-timeout-policy'
+
+# 代码执行（Code Mode）：模型可用 run_code 写 TypeScript 程序调用工具绑定。
+# 信任等级等价 bash（worker 线程隔离但非安全边界），仅建议在可信部署暴露；
+# 预算收紧以限制单次运行占用。tools.mode: both 让原生工具与 run_code 并存。
+- id: code-runtime
+  name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+  config:
+    computeMs: 10000
+    maxWallMs: 60000
+    maxOutputBytes: 1048576
+    maxOldGenerationSizeMb: 256
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a helpful assistant.'
+    workspaceContext: false
+    skills:
+      enabled: false
+    toolBash: false
+    toolJobs: false
+    tools:
+      # both：原生 11 个网关工具照常直调，同时开放 run_code（程序化组合工具）。
+      mode: both
+
+# ── web 能力缝隙：模型可见 web_search / web_fetch 的宿主服务与 provider ──
+# 搜索 provider 由 key 驱动：key 缺失时 available()=false，web_search 不注册；
+# 两个 key 都在时由 Python 门面计算的 DSH_WEB_SEARCH_PROVIDER 决定路由（优先 exa）。
+- id: web
+  name: '@deepseek-ai/dsh-web'
+
+- id: web-search-exa
+  name: '@deepseek-ai/dsh-web-search-exa'
+  config:
+    apiKey: !!js process.env.EXA_API_KEY ?? ''
+
+- id: web-search-perplexity
+  name: '@deepseek-ai/dsh-web-search-perplexity'
+  config:
+    apiKey: !!js process.env.PERPLEXITY_API_KEY ?? ''
+
+# CodeWise 受控 fetch provider（SSRF 守卫）。不挂官方 web-fetch-http 插件：
+# 其 provider 不做内网防护。守卫：仅 http/https，发请求前解析 host 并拒绝
+# 环回/私有/保留地址。
+- id: web-fetch-guard
+  name: 'codewise-web'
+  config:
+    timeoutMs: 30000
+    maxBodyChars: 100000
+    maxResponseBytes: 5000000
+
+# 模型可见的 web_search / web_fetch 工具。无搜索 key 时只注册 web_fetch。
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    search: !!js Boolean(process.env.EXA_API_KEY || process.env.PERPLEXITY_API_KEY)
+    fetch: true
+    searchMaxResults: 8
+    # 输出上限收小：用户模型窗口有限，抓取正文进上下文前先截断到 ~2 万字符。
+    fetchMaxOutputChars: 20000
+    fetchTimeoutMs: 30000
+    searchTimeoutMs: 30000
+
+# CodeWise 项目工具：11 个网关工具（查询提交/题目/复习计划/更新复习配置等）。
+# 插件从本闭包的 node_modules 解析；CODEWISE_GATEWAY_URL / CODEWISE_TOKEN_FILE
+# 由 Python 门面按会话注入。
+- id: codewise-tools
+  name: 'codewise-tools'
