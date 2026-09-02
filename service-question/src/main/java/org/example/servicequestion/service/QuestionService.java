@@ -53,7 +53,7 @@ public class QuestionService {
     private FunctionConfigMapper  functionConfigMapper;
 
 
-    public Long getTotalQuestionCount() throws InterruptedException {
+    public Long getTotalQuestionCount() {
         Long total= 0L;
         total =(Long) redisTemplate.opsForValue().get(RedisContext.QUESTION_TOTAL_KEY);
         if (total == null) {
