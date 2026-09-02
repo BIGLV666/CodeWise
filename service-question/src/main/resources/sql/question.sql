@@ -87,7 +87,7 @@ create table `submit_record` (
     -- ========== 提交内容 ==========
     `submit_content` LONGTEXT NOT NULL COMMENT '提交内容',
     -- ========== 提交状态 ==========
-    `submit_status` VARCHAR(20)  COMMENT '提交状态'
+    `submit_status` VARCHAR(20)  COMMENT '提交状态',
     -- AC/WA/TLE/RE/CE/OLE/MLE/PE
     -- AC	Accepted	通过	代码完全正确，所有测试点都过了 ✅
     -- WA	Wrong Answer	答案错误	程序跑完了，但输出结果不对 ❌
@@ -100,7 +100,7 @@ create table `submit_record` (
 
     -- ========== 提交结果 ==========
 
-    `time_used`   COMMENT '时间使用(ms)',
+    `time_used`   INT COMMENT '时间使用(ms)',
     `memory_used` INT  COMMENT '内存使用(MB)',
     `submit_scene` VARCHAR(10) not null default 'NORMAL' comment '判题来源，复习或者题目页',
     `judge_status` VARCHAR(20) NOT NULL COMMENT '判题状态',

@@ -36,11 +36,16 @@
 | 库 | 脚本（按序） |
 | --- | --- |
 | codewise_user | `service-user/src/main/resources/Sql/user.sql` |
-| codewise_question | `question.sql` → `function_question.sql` → `function_question_seed.sql` → `function_test_case_unique_hash.sql` |
-| codewise_review | `sql/sql.sql` → `migration/V2__review_schedule_index.sql` |
-| codewise_community | `sql.sql` → `migration/V2__solution_and_post_type.sql` |
+| codewise_question | `question.sql` → `function_question.sql` → `function_question_seed.sql` |
+| codewise_review | `sql/sql.sql` |
+| codewise_community | `sql.sql` |
 | codewise_message | `sql.sql`（含 notification_center、consumed_event） |
-| codewise_ai | `codewise_ai.sql` → `migration_20260823_ai_message_status.sql` → `consumed_event.sql` |
+| codewise_ai | `codewise_ai.sql` → `consumed_event.sql` |
+
+> 各服务的增量脚本（question 的 `function_test_case_unique_hash.sql`、review/community 的
+> `migration/`、ai 的 `migration_*.sql`）**已全部合入上述基础脚本**，init 不再执行；
+> 它们仅用于存量老库的手工升级。该初始化链路已用 mysql:8.4 全新卷冒烟验证
+> （建库、授权、建表、业务账号可建表）。
 
 **OutboxPro 表（outboxpro_outbox / outboxpro_inbox / outboxpro_message_log /
 outboxpro_dead_letter / outboxpro_dead_letter_counter）由各生产者服务
