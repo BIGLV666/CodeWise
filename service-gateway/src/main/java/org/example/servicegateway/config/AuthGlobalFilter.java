@@ -48,7 +48,8 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             "/api/user/emailregister",
             "/api/user/register",
             "/api/user/updatepasswordforemail",
-            "/api/user/updatefromcode"
+            "/api/user/updatefromcode",
+            "/api/user/appeal/submit"
     );
 
     /** 静态资源前缀，无需登录即可访问。 */

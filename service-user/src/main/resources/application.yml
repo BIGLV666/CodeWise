@@ -6,16 +6,25 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: localhost:8848
-        ip: 127.0.0.1
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        # 容器部署时经环境变量 SPRING_CLOUD_NACOS_DISCOVERY_IP 指定注册 IP；本地开发自动选网卡
       config:
-        server-addr: localhost:8848
+        server-addr: ${NACOS_ADDR:localhost:8848}
         file-extension: yaml
 
 codewise:
   mq:
     enabled: true
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
+  bootstrap:
+    root:
+      # Docker 一次性初始化 root 管理员（全局唯一）。
+      enabled: true
+      username: ${ROOT_USERNAME:admin}
+      password: ${ROOT_PASSWORD:}
+      nickname: ${ROOT_NICKNAME:}
+      email: ${ROOT_EMAIL:}
+      phone: ${ROOT_PHONE:}
 
 server:
   port: 8081   # ??????????????????

@@ -4,23 +4,23 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import io.github.biglv666.apigovernance.async.annotation.AsyncHandler;
 import io.github.biglv666.apigovernance.async.event.AsyncEvent;
 import io.github.biglv666.apigovernance.async.event.AsyncPhase;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
-import org.example.servicecommon.service.EmailService;
+import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicecommon.until.UserContext;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.entry.User;
 import org.example.serviceuser.mapper.UserMapper;
 import org.example.serviceuser.until.JwtUntil;
 import org.example.serviceuser.until.PasswordEncoding;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
-import java.nio.charset.StandardCharsets;
 
 import java.time.LocalDateTime;
 import java.util.*;
@@ -30,13 +30,15 @@ import java.util.concurrent.TimeUnit;
 @Service
 
 public class UserService {
-   @Autowired
-    private EmailService  emailService;
+    @Autowired
+    private UserMailService userMailService;
 
     @Autowired
     private UserMapper userMapper;
     @Autowired
     private JwtUntil jwtUntil;
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
     @Autowired
     private RedisTemplate<String,Object> redisTemplate;
     private final static String USER_CODE_KEY = "user_code";
@@ -124,13 +126,6 @@ public class UserService {
         redisTemplate.delete(key);
         redisTemplate.delete(attemptKey(scene, account));
         return payload;
-    }
-
-    /** 统一的验证码邮件正文。 */
-    private String buildCodeMail(String code) {
-        return String.format(
-                "【CodeWise】验证码:%s 用于邮箱身份验证，%d分钟内有效，请勿泄露和转发。如非本人操作，请忽略此邮件。",
-                code, CODE_TTL_MINUTES);
     }
 
     /** 账号是否处于封禁状态，status 可能为 null，不能直接拆箱比较。 */
@@ -224,7 +219,7 @@ public class UserService {
         payload.put("code",code);
         payload.put("userId",user.getUserId());
         saveCode(CodeScene.LOGIN, email, payload);
-        emailService.sendEmail(email,"CodeWise 安全验证",buildCodeMail(code));
+        userMailService.sendCodeMail(email, code, CODE_TTL_MINUTES);
         return "success";
     }
 
@@ -271,7 +266,7 @@ public class UserService {
         payload.put("userName",username);
         payload.put("password",PasswordEncoding.encode(password));
         saveCode(CodeScene.REGISTER, email, payload);
-        emailService.sendEmail(email,"欢迎注册CodeWise",buildCodeMail(code));
+        userMailService.sendCodeMail(email, code, CODE_TTL_MINUTES);
     }
 
     //激活
@@ -322,7 +317,7 @@ public class UserService {
         payload.put("code",code);
         payload.put("userId",user.getUserId());
         saveCode(CodeScene.RESET, email, payload);
-        emailService.sendEmail(email,"CodeWise 安全验证",buildCodeMail(code));
+        userMailService.sendCodeMail(email, code, CODE_TTL_MINUTES);
     }
 
     /**
@@ -394,53 +389,144 @@ public class UserService {
             log.warn("Skip login notification because user does not exist: userId={}", userId);
             return;
         }
-        String html = buildLoginNotification(event, user);
-        emailService.sendEmail(
-                user.getEmail(),
-                "登录提醒",
-                html
-        );
+        userMailService.sendLoginNotification(event, user);
 
     }
 
-    private String buildLoginNotification(AsyncEvent event, User user) {
-        try {
-            ClassPathResource resource = new ClassPathResource(
-                    "templates/login-notification-email.html");
-            String template = resource.getContentAsString(StandardCharsets.UTF_8);
-            String userAgent = stringData(event, "userAgent", "未知设备");
-            return template
-                    .replace("{{username}}", escapeHtml(stringData(
-                            event, "username", user.getUserName())))
-                    .replace("{{loginTime}}", escapeHtml(stringData(
-                            event, "loginTime", LocalDateTime.now().toString())))
-                    .replace("{{location}}", "未知")
-                    .replace("{{ipAddress}}", escapeHtml(stringData(
-                            event, "ipAddress", "未知")))
-                    .replace("{{device}}", escapeHtml(userAgent))
-                    .replace("{{browser}}", escapeHtml(userAgent))
-                    .replace("{{securityCenterUrl}}", "#")
-                    .replace("{{changePasswordUrl}}", "#")
-                    .replace("{{supportUrl}}", "#")
-                    .replace("{{privacyPolicyUrl}}", "#")
-                    .replace("{{termsUrl}}", "#")
-                    .replace("{{unsubscribeUrl}}", "#");
-        } catch (Exception ex) {
-            throw new IllegalStateException("Failed to load login notification email template", ex);
+    /**
+     * 管理员冻结用户账号，设置 status 为 0，表示封禁状态。
+     * 仅允许管理员操作，用户无法直接冻结其他用户。
+     * 该操作可逆，管理员可以通过解封操作恢复用户账号。
+     * @param userId 冻结用户id
+     * @param banTime 冻结时间，单位为天
+     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
+     */
+    public void banUser(Long userId,Integer banTime){
+        LocalDateTime banUntil = LocalDateTime.now().plusDays(banTime);
+        int userStatus = 0; // 0 表示封禁状态
+        User user = userMapper.selectById(userId);
+        if(user==null){
+            throw new IllegalArgumentException("未找到该用户");
+        }
+        if(user.getStatus()==2){
+            throw new IllegalArgumentException("该用户已注销");
+        }
+        user.setStatus(userStatus);
+        user.setUpdateTime(LocalDateTime.now());
+        user.setBanTime(banUntil);
+        int r=userMapper.updateById(user);
+        if(r==0){
+            throw new IllegalArgumentException("修改状态失败");
+        }
+        userMailService.sendBanMail(user);
+
+    }
+
+    /**
+     * 用户注销账号,将 status 设置为 2，表示已注销。
+     * 仅允许用户本人操作，管理员无法直接注销其他用户。
+     * 该操作可逆。但是不支持恢复已注销的用户数据，用户需要重新注册。
+     */
+    public void deleteUser(){
+        Long userId = UserContext.getUserId();
+        if(userId==null){
+            throw new IllegalArgumentException("用户ID不能为空");
+        }
+        User user = userMapper.selectById(userId);
+        if(user==null){
+            throw new IllegalArgumentException("未找到该用户");
+        }
+        if(user.getStatus()==2){
+            throw new IllegalArgumentException("该用户已注销");
+        }
+        user.setStatus(2);
+        user.setUpdateTime(LocalDateTime.now());
+        int r=userMapper.updateById(user);
+        if(r==0){
+            throw new IllegalArgumentException("删除用户失败");
         }
     }
 
-    private String stringData(AsyncEvent event, String key, String defaultValue) {
-        Object value = event.data().get(key);
-        return value == null ? defaultValue : String.valueOf(value);
+    /**
+     * 用户主动冻结账号，需要密码验证，设置 status 为 1，表示冻结状态。
+     * 仅允许用户本人操作，管理员无法直接冻结其他用户。
+     * 冻结账号后，用户无法登录，直到解冻。
+     * 该操作可逆，用户可以通过找回密码或联系管理员解冻
+     * @param banReason 冻结原因
+     * @param password 用户密码，用于验证身份
+     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
+     */
+    public void freezeUser(String banReason,String password){
+        if(banReason==null||banReason.isBlank()){
+            throw new IllegalArgumentException("冻结原因不能为空");
+        }
+        if(password==null||password.isBlank()){
+            throw new IllegalArgumentException("密码不能为空");
+        }
+        Long userId = UserContext.getUserId();
+        User user=userMapper.selectById(userId);
+        if(user==null){
+            throw new IllegalArgumentException("未找到该用户");
+        }
+        if(!PasswordEncoding.matches(password,user.getPassword())){
+            throw new IllegalArgumentException("密码错误");
+        }
+        user.setStatus(0);
+
+        user.setUpdateTime(LocalDateTime.now());
+        user.setBanTime(LocalDateTime.now().plusDays(3600));
+        user.setBanReason(banReason);
+        int r=userMapper.updateById(user);
+        if(r==0){
+            throw new IllegalArgumentException("冻结用户失败");
+        }
+        userMailService.sendFreezeMail(user);
     }
 
-    private String escapeHtml(String value) {
-        return value.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
+
+    /**
+     * 用户冻结解除，需要管理员操作，设置 status 为 1，表示正常状态。
+     * 仅允许管理员操作，用户无法直接解冻其他用户。
+     * 该操作可逆，管理员可以通过冻结操作再次冻结用户账号。
+     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
+     * @param userId 操作对象
+     */
+    public void unBanUser(Long userId){
+        User user = userMapper.selectById(userId);
+        if(user==null){
+            throw new IllegalArgumentException("未找到该用户");
+        }
+        if(user.getStatus()!=0){
+            throw new IllegalArgumentException("该用户未被冻结");
+        }
+        user.setStatus(1);
+        user.setUpdateTime(LocalDateTime.now());
+        user.setBanTime(null);
+        user.setBanReason(null);
+        int r=userMapper.updateById(user);
+        if(r==0){
+            throw new IllegalArgumentException("解封用户失败");
+        }
+        userMailService.sendUnbanMail(user);
     }
+
+    /**
+     * 获取被封禁的用户信息，返回 UserDto 对象。
+     * 仅允许管理员操作，用户无法直接查询其他用户的封禁信息。
+     * 不包含敏感信息，如密码、邮箱等。
+     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
+     * @param userId 查询对象
+     */
+    public UserDto getBanUser(Long userId) {
+        User user = userMapper.selectById(userId);
+        if(user==null){
+            throw new RuntimeException("未找到该用户");
+        }
+        UserDto userDto = new UserDto(user);
+        userDto.setEmail(null);
+        userDto.setPhone(null);
+        return userDto;
+    }
+
 
 }

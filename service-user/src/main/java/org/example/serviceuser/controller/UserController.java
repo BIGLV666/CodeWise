@@ -105,4 +105,20 @@ public class UserController {
         return Result.success(userService.getUserById(userId));
     }
 
+    /** 用户注销账号（仅本人可操作）。 */
+    @PostMapping("/delete")
+    @RateLimit(limit = 10, window = 60)
+    public Result<String> deleteUser(){
+        userService.deleteUser();
+        return Result.success("success");
+    }
+
+    /** 用户主动冻结账号，需密码验证。 */
+    @PostMapping("/freeze")
+    @RateLimit(limit = 10, window = 60)
+    public Result<String> freeze(@RequestParam String banReason, @RequestParam String password){
+        userService.freezeUser(banReason, password);
+        return Result.success("success");
+    }
+
 }

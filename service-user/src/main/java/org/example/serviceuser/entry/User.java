@@ -29,7 +29,7 @@ public class User {
     private String nickName;
     private String avatarUrl;//头像
     private LocalDate birthday;
-    private Integer roleId;//1-普通用户 2-管理员
+    private Integer roleId;//1-普通用户 2-管理员 0-root 全局一个，不允许删除
     private Integer status;//0-禁用 1-启用  2-已注销',
 
     //第三方登录
@@ -47,5 +47,6 @@ public class User {
     private String lastLoginIp;
     private LocalDateTime lastLoginTime;
     private LocalDateTime banTime;
+    private String banReason;//冻结原因
 
 }
