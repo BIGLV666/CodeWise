@@ -1,4 +1,12 @@
 spring:
+  rabbitmq:
+    listener:
+      simple:
+        # 消费者代码使用手动 ACK/NACK（延迟重试、毒消息死信、事务提交后确认），
+        # 必须显式声明 manual——Spring 默认 AUTO 会在方法返回后自动确认，
+        # 与手动 ACK 叠加触发 406 双重确认，channel 崩溃循环。此前该配置依赖
+        # 本地 Nacos 下发，容器部署（Nacos 空跑）时必须由本地 yaml 兜底。
+        acknowledge-mode: manual
   application:
     name: service-user
   config:
@@ -37,6 +45,12 @@ server:
 # 本服务不生产事件：显式关闭 OutboxPro（其自动配置默认 matchIfMissing=true）
 outboxpro:
   enabled: false
+
+# JWT 签发密钥（登录 token 由本服务签发）；容器部署经 JWT_SECRET 注入，
+# 与网关校验、message/review 同值
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION_MS:86400000}
 
 api:
   governance:

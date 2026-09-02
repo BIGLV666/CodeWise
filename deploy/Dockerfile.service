@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # CodeWise 业务服务通用镜像模板（service-judge-go 不在部署范围）。
 # 用法（在仓库根目录执行）：
 #   docker build -f deploy/Dockerfile.service \
@@ -17,8 +16,13 @@ COPY pom.xml ./
 COPY service-common service-common
 COPY service-api service-api
 COPY ${MODULE} ${MODULE}
-RUN mvn -q -f service-common/pom.xml -DskipTests install \
+# Maven 仓库走 BuildKit 缓存挂载：跨镜像构建复用依赖下载，重复构建显著提速。
+# 顺序：先 -N install 根 POM（模块 pom 的 parent 指向它），再 api（common 依赖它），
+# 最后目标模块——冷缓存下才能解析通过
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -q -f pom.xml -N install \
  && mvn -q -f service-api/pom.xml -DskipTests install \
+ && mvn -q -f service-common/pom.xml -DskipTests install \
  && mvn -q -f ${MODULE}/pom.xml -DskipTests package
 
 # ---------- 运行阶段 ----------
@@ -32,7 +36,10 @@ RUN if [ "$INSTALL_DOCKER_CLI" = "true" ]; then \
     else \
         apt-get update && apt-get install -y --no-install-recommends curl \
         && rm -rf /var/lib/apt/lists/* ; \
-    fi \
+    fi
+
+# 新版基础镜像（Ubuntu 24.04 系）自带 uid 1000 的 ubuntu 用户，先删除再建 codewise
+RUN (getent passwd 1000 >/dev/null && userdel -r "$(id -nu 1000)") || true \
  && useradd -r -u 1000 -m codewise
 WORKDIR /app
 COPY --from=build /repo/${MODULE}/target/*.jar /app/app.jar

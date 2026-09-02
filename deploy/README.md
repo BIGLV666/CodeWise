@@ -47,7 +47,7 @@ curl http://localhost:8082/actuator/health        # {"status":"UP"}
 
 - 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；
 - 判题基础镜像：[`judge-base/Dockerfile`](judge-base/Dockerfile)（JDK17 + uid 1000 judge 用户）；
-- 前端镜像：compose 内联构建 `../CodeWise-frontend/CodeWise-frontend` 并挂载 [`nginx.conf`](nginx.conf)。
+- 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend/CodeWise-frontend` 并挂载 [`nginx.conf`](nginx.conf)。
 
 ## 遇到问题
 

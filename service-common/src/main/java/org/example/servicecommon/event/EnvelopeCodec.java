@@ -1,5 +1,6 @@
 package org.example.servicecommon.event;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.serviceapi.dto.event.EventEnvelope;
@@ -20,7 +21,9 @@ import java.util.UUID;
  */
 public final class EnvelopeCodec {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** 对未知字段宽容：OutboxPro 信封额外携带 correlationId/causationId/extensions 等字段。 */
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
@@ -68,8 +71,11 @@ public final class EnvelopeCodec {
     /**
      * 将消息体解析为信封（不校验业务载荷类型）。
      *
+     * <p>兼容 OutboxPro 信封：schemaVersion 为 "v1" 风格字符串（CodeWise 为整数，
+     * 解析时置 null，消费端不读该字段）、多出的字段由 {@link #MAPPER} 忽略。</p>
+     *
      * @param body UTF-8 消息体字符串
-     * @return 信封对象
+     * @return 信封对象（payload 为 Map/List 等原生 Jackson 结构）
      * @throws IllegalArgumentException 消息体不是信封格式或 JSON 非法
      */
     public static EventEnvelope readEnvelope(String body) {
@@ -78,12 +84,28 @@ public final class EnvelopeCodec {
             if (!root.isObject() || !root.has("eventId") || !root.has("eventType")) {
                 throw new IllegalArgumentException("消息体不是统一信封格式");
             }
-            return MAPPER.treeToValue(root, EventEnvelope.class);
+            EventEnvelope envelope = new EventEnvelope();
+            envelope.setEventId(textOrNull(root, "eventId"));
+            envelope.setEventType(textOrNull(root, "eventType"));
+            JsonNode schemaVersion = root.get("schemaVersion");
+            envelope.setSchemaVersion(schemaVersion != null && schemaVersion.isInt()
+                    ? schemaVersion.asInt() : null);
+            envelope.setOccurredAt(textOrNull(root, "occurredAt"));
+            envelope.setProducer(textOrNull(root, "producer"));
+            envelope.setTraceId(textOrNull(root, "traceId"));
+            envelope.setPayload(MAPPER.treeToValue(root.get("payload"), Object.class));
+            return envelope;
         } catch (IllegalArgumentException exception) {
             throw exception;
         } catch (Exception exception) {
             throw new IllegalArgumentException("信封解析失败: " + exception.getMessage(), exception);
         }
+    }
+
+    /** 取字段的文本值，缺失或 null 返回 null。 */
+    private static String textOrNull(JsonNode root, String field) {
+        JsonNode node = root.get(field);
+        return node == null || node.isNull() ? null : node.asText();
     }
 
     /**

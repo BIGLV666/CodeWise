@@ -23,10 +23,11 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Install service-common & service-api
+      - name: Install parent POM & shared modules (api before common)
         run: |
-          ./mvnw -f service-common/pom.xml -B -DskipTests install
+          ./mvnw -N -B install
           ./mvnw -f service-api/pom.xml -B -DskipTests install
+          ./mvnw -f service-common/pom.xml -B -DskipTests install
 
   tests:
     needs: shared-modules
@@ -51,9 +52,10 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Install shared modules (per-job, isolated)
+      - name: Install parent POM & shared modules (per-job, isolated)
         run: |
-          ./mvnw -f service-common/pom.xml -B -DskipTests install
+          ./mvnw -N -B install
           ./mvnw -f service-api/pom.xml -B -DskipTests install
+          ./mvnw -f service-common/pom.xml -B -DskipTests install
       - name: Test ${{ matrix.module }}
         run: ./mvnw -f ${{ matrix.module }}/pom.xml -B test

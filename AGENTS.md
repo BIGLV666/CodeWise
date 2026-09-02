@@ -48,11 +48,14 @@ These are intentional/legacy and inconsistent across services. Follow the casing
 
 ## Build & run (Windows PowerShell, no aggregator POM)
 
-The root `pom.xml` does not aggregate modules. Install shared modules first after changing them:
+The root `pom.xml` does not aggregate modules. Install shared modules first after changing them —
+**api before common** (common depends on api), plus the root POM on a cold machine
+(`-N` installs just the parent; every module's pom declares it as `<parent>`):
 
 ```powershell
-.\mvnw.cmd -f service-common\pom.xml -DskipTests install
+.\mvnw.cmd -N install
 .\mvnw.cmd -f service-api\pom.xml -DskipTests install
+.\mvnw.cmd -f service-common\pom.xml -DskipTests install
 ```
 
 Then build/test individual services:

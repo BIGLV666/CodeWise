@@ -45,10 +45,12 @@ apply() {
 # 1. 用户库（含 root 启动引导所依赖的 user 表）
 apply codewise_user /sql/user/user.sql
 
-# 2. 题目库（judge 与 question 共库；基础脚本已含 case_hash 唯一键等全部增量）
+# 2. 题目库（judge 与 question 共库；基础脚本已含 case_hash 唯一键等全部增量；
+#    failure_submit 为 judge 死信登记表；Outbox 表 outboxpro_* 由服务启动时自动创建）
 apply codewise_question /sql/question/question.sql
 apply codewise_question /sql/question/function_question.sql
 apply codewise_question /sql/question/function_question_seed.sql
+apply codewise_question /sql/judge/failure_submit.sql
 
 # 3. 复习库（基础脚本已含 idx_review_schedule 等增量；
 #    存量老库的增量脚本见各服务 resources，仅供手工升级使用）

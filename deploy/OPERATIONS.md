@@ -69,7 +69,7 @@ community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF 
 优先级：环境变量 > Nacos 配置 > 本地 yaml。compose 已注入：
 
 - 连接类：`SPRING_DATASOURCE_*`（各库 URL）、`SPRING_DATA_REDIS_*`、`SPRING_RABBITMQ_*`、`NACOS_ADDR`；
-- 密钥类：`CODEWISE_INTERNAL_TOKEN`（全服务）、`JWT_SECRET`（gateway/message/review）、`API_KEY_MASTER_KEY`（经 `SPRING_APPLICATION_JSON` 映射到 `security.api-key-master-key`）；
+- 密钥类：`CODEWISE_INTERNAL_TOKEN`（全服务）、`JWT_SECRET`（gateway/user/message/review）、`API_KEY_MASTER_KEY`（经 `SPRING_APPLICATION_JSON` 映射到 `security.api-key-master-key`）；
 - 网关：`CORS_ORIGINS`（逗号分隔）；上传：`FILE_UPLOAD_ROOT=/app/data/uploads`；
 - 判题：`JUDGE_IMAGE`（判题基础镜像名，默认 `codewise-java-judge:17`）；
 - 引导：`ROOT_PASSWORD`/`ROOT_EMAIL` 等（root 管理员一次性创建）。

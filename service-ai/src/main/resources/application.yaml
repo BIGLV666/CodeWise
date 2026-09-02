@@ -1,4 +1,12 @@
 spring:
+  rabbitmq:
+    listener:
+      simple:
+        # 消费者代码使用手动 ACK/NACK（延迟重试、毒消息死信、事务提交后确认），
+        # 必须显式声明 manual——Spring 默认 AUTO 会在方法返回后自动确认，
+        # 与手动 ACK 叠加触发 406 双重确认，channel 崩溃循环。此前该配置依赖
+        # 本地 Nacos 下发，容器部署（Nacos 空跑）时必须由本地 yaml 兜底。
+        acknowledge-mode: manual
   application:
     name: service-ai
   config:

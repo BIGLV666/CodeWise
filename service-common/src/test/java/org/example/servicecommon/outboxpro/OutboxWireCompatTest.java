@@ -44,6 +44,17 @@ class OutboxWireCompatTest {
     }
 
     @Test
+    void readEnvelopeToleratesOutboxProEnvelopeShape() {
+        // 消费分发路径（如 service-ai Mq）经 readEnvelope 取 eventType/eventId：
+        // OutboxPro 的 schemaVersion 是 "v1" 字符串、多出 correlationId 等字段，必须可解析
+        var envelope = EnvelopeCodec.readEnvelope(OUTBOXPRO_BODY);
+        assertThat(envelope.getEventId()).isEqualTo("3f6d2c9e-8a1b-4c3d-9e2f-5a6b7c8d9e0f");
+        assertThat(envelope.getEventType()).isEqualTo("judge.submit.request");
+        assertThat(envelope.getProducer()).isEqualTo("service-question");
+        assertThat(envelope.getPayload()).isNotNull();
+    }
+
+    @Test
     void unwrapStillReadsBareLegacyBody() {
         // 灰度双读语义不被破坏：裸 JSON（无信封）按目标类型直接反序列化
         String bare = "{\"submitRecordId\":2048}";

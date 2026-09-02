@@ -62,6 +62,7 @@ services:
 
   # ================= 基础设施 =================
   mysql:
+    mem_limit: 1g
     image: mysql:8.4
     <<: *infra-logging
     environment:
@@ -78,6 +79,7 @@ services:
       - ./mysql-init:/docker-entrypoint-initdb.d:ro
       - ../service-user/src/main/resources/Sql:/sql/user:ro
       - ../service-question/src/main/resources/sql:/sql/question:ro
+      - ../service-judge/src/main/resources/sql:/sql/judge:ro
       - ../service-review/src/main/resources/sql:/sql/review:ro
       - ../service-review/src/main/resources/migration:/sql/migration-review:ro
       - ../service-community/src/main/resources/sql.sql:/sql/community/sql.sql:ro
@@ -92,6 +94,7 @@ services:
       start_period: 30s
 
   redis:
+    mem_limit: 192m
     image: redis:7-alpine
     <<: *infra-logging
     command: ["redis-server", "--appendonly", "yes"]
@@ -104,6 +107,7 @@ services:
       retries: 12
 
   rabbitmq:
+    mem_limit: 512m
     image: rabbitmq:3.13-management
     <<: *infra-logging
     environment:
@@ -122,6 +126,7 @@ services:
       start_period: 30s
 
   nacos:
+    mem_limit: 640m
     image: nacos/nacos-server:v2.3.2
     <<: *infra-logging
     environment:
@@ -143,6 +148,7 @@ services:
 
   # ================= 业务服务 =================
   service-gateway:
+    mem_limit: 384m
     <<: *app-base
     build:
       context: ..
@@ -163,6 +169,7 @@ services:
       start_period: 60s
 
   service-user:
+    mem_limit: 512m
     <<: *app-base
     build:
       context: ..
@@ -172,6 +179,7 @@ services:
     environment:
       <<: [*common-env, *db-env]
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_user?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+      JWT_SECRET: ${JWT_SECRET}
       FILE_UPLOAD_ROOT: /app/data/uploads
       ROOT_PASSWORD: ${ROOT_PASSWORD}
       ROOT_EMAIL: ${ROOT_EMAIL:-}
@@ -187,6 +195,10 @@ services:
       start_period: 60s
 
   service-question:
+    mem_limit: 768m
+    depends_on:
+      judge-base:
+        condition: service_completed_successfully
     <<: *app-base
     build:
       context: ..
@@ -213,6 +225,10 @@ services:
       start_period: 60s
 
   service-judge:
+    mem_limit: 768m
+    depends_on:
+      judge-base:
+        condition: service_completed_successfully
     <<: *app-base
     build:
       context: ..
@@ -237,6 +253,7 @@ services:
       start_period: 60s
 
   service-review:
+    mem_limit: 512m
     <<: *app-base
     build:
       context: ..
@@ -257,6 +274,7 @@ services:
       start_period: 60s
 
   service-community:
+    mem_limit: 512m
     <<: *app-base
     build:
       context: ..
@@ -276,6 +294,7 @@ services:
       start_period: 60s
 
   service-message:
+    mem_limit: 512m
     <<: *app-base
     build:
       context: ..
@@ -296,6 +315,7 @@ services:
       start_period: 60s
 
   service-ai:
+    mem_limit: 640m
     <<: *app-base
     build:
       context: ..
@@ -318,18 +338,22 @@ services:
 
   # ================= 前端 =================
   frontend:
+    mem_limit: 64m
     image: ${CODEWISE_IMAGE_PREFIX:-codewise/}frontend:latest
     # 前端源码在兄弟仓库 CodeWise-frontend/CodeWise-frontend，用 dockerfile_inline 构建，
     # 与 deploy/frontend/Dockerfile 内容一致（后者作为独立构建参考）
     build:
-      context: ../CodeWise-frontend/CodeWise-frontend
+      context: ../../CodeWise-frontend/CodeWise-frontend
       dockerfile_inline: |
-        FROM node:20-alpine AS build
+        FROM node:22-alpine AS build
         WORKDIR /fe
-        COPY package.json package-lock.json ./
-        RUN npm ci
+        RUN corepack enable
+        COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+        ENV CI=true \
+            npm_config_ignore_scripts=true
+        RUN pnpm install --frozen-lockfile --ignore-scripts
         COPY . .
-        RUN npm run build
+        RUN pnpm run build
         FROM nginx:1.27-alpine
         COPY --from=build /fe/dist /usr/share/nginx/html
         EXPOSE 80

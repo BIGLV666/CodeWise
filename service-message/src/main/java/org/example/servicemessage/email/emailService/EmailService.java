@@ -36,7 +36,9 @@ public class EmailService implements MessageHandler {
     /** 最大立即重试次数，达到后失败留存并丢弃。 */
     private static final int MAX_RETRY_COUNT = 3;
 
-    @Autowired
+    /** 可选依赖：SMTP 未配置（spring.mail.host 缺失）时 JavaMailSender 不存在，
+     *  服务照常启动，邮件消费降级为记日志留存，不阻塞其他通知功能。 */
+    @Autowired(required = false)
     private JavaMailSender mailSender;
     @Autowired
     private ConsumedEventService consumedEventService;
@@ -96,6 +98,10 @@ public class EmailService implements MessageHandler {
      * 组装并发送邮件，异常交由调用方统一按业务失败处置。
      */
     private void sendMail(EmailMessage message) throws MessagingException {
+        if (mailSender == null) {
+            // SMTP 未配置：按文档承诺降级为不可用，而非启动失败；异常走调用方的失败留存链路
+            throw new IllegalStateException("SMTP 未配置（spring.mail.host 缺失），邮件发送不可用");
+        }
         log.info("收到邮件任务，收件人: {}", message.getTo());
         MimeMessage mail = mailSender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(mail, true, "UTF-8");

@@ -50,9 +50,16 @@ public class DockerExecTemplate {
      * 创建并启动一个受安全约束的判题容器。
      *
      * <p>资源限制和权限限制必须在容器创建时设置，不能依赖用户提交的
-     * 脚本自觉遵守：内存/CPU/进程数上限、只读根文件系统、禁网络、
-     * 丢弃全部 Linux capabilities、禁提权，/workspace 与 /tmp 落在
-     * 受限大小的 tmpfs 上。</p>
+     * 脚本自觉遵守：内存/CPU/进程数上限、禁网络、丢弃全部 Linux capabilities、
+     * 禁提权，/tmp 落在受限 tmpfs 上，判题进程以 uid 1000 非 root 运行
+     * （系统目录 root 属主，不可写）。</p>
+     *
+     * <p>不启用 HostConfig.readonlyRootfs、/workspace 不用 tmpfs：新版 Moby（29+，
+     * containerd 存储）下 docker cp 对只读容器直接拒绝（400 rootfs read-only），
+     * 对 tmpfs 挂载点则静默写进被遮挡的 rootfs 路径（exec 不可见）。
+     * /workspace 由 judge-base 镜像预建为 judge 用户属主目录，判题文件经
+     * docker cp 写入容器层，exec 可见；非 root 用户对系统路径无写权限，
+     * 隔离由「非 root + capabilities 全清 + no-new-privileges + tmpfs /tmp」保证。</p>
      *
      * @param spec 语言规格（提供镜像名）
      * @return 已启动容器的 ID
@@ -64,12 +71,10 @@ public class DockerExecTemplate {
                 .withCpuPeriod(CPU_PERIOD_MICROS)
                 .withCpuQuota(CPU_QUOTA_MICROS)
                 .withPidsLimit(PID_LIMIT)
-                .withReadonlyRootfs(true)
                 .withNetworkMode("none")
                 .withCapDrop(Capability.ALL)
                 .withSecurityOpts(java.util.List.of("no-new-privileges:true"))
                 .withTmpFs(Map.of(
-                        "/workspace", "rw,uid=1000,gid=1000,size=64m",
                         "/tmp", "rw,uid=1000,gid=1000,size=16m"
                 ));
 
