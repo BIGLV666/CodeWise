@@ -28,8 +28,9 @@ import java.lang.reflect.Method;
 @Component
 public class AdminAuthAspect implements PreFilter {
 
-    /** 管理员角色标识：1-普通用户 2-管理员 */
+    /** 管理员角色标识：1-普通用户 2-管理员 0-root */
     private static final int ROLE_ADMIN = 2;
+    private static final int ROLE_ROOT = 0;
 
     @Autowired(required = false)
     private UserFeignClient userFeignClient;
@@ -56,7 +57,7 @@ public class AdminAuthAspect implements PreFilter {
             throw new IllegalArgumentException("用户不存在");
         }
         UserDto user=userBody.getData();
-        if(user.getRoleId()!=ROLE_ADMIN){
+        if(user.getRoleId()!=ROLE_ADMIN && user.getRoleId()!=ROLE_ROOT){
             log.warn("非管理员用户尝试访问管理接口, userId={}", userId);
             throw new IllegalArgumentException("无权访问");
         }
