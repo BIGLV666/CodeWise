@@ -120,6 +120,32 @@ Content-Type: application/json
 
 注意：这是 `POST + JSON 数组请求体`，仅供 Feign 内部调用。
 
+### 批量查询题目瘦身信息
+
+```http
+POST /api/question/info/briefquestions
+Content-Type: application/json
+```
+
+请求体：
+
+```json
+[1, 2, 3]
+```
+
+返回：`Result<List<QuestionBriefDto>>`（不含题干/样例等大字段，`status`/`createUserId` 供调用方做可见性过滤）。
+
+注意：仅供 Feign 内部调用（`service-review` 收藏夹条目列表使用）。
+
+### Agent 专用接口
+
+面向 codewise-agent 的接口与网页端控制器分离成类，经网关以用户 JWT 调用：
+
+- `service-review`：`AgentFavoritesController`，基础路径 `/api/review/agent/favorites`，提供收藏夹瘦身 VO、批量增删题目、行锁跨夹移动、题目定位（详见 `docs/service-review/api.md`）。
+- `service-question`：`AgentQuestionController`，`POST /api/question/agent/detail`，按 ID 批量返回完整题目详情，逐题做可见性判定（`ok`/`not_found`/`invisible`，私密题仅创建者与管理员可见，单次 ≤10 题）。
+- `service-community`：`AgentCommunityController`，基础路径 `/api/community/agent`，提供帖子 latest 降序信息流/搜索/热榜/详情、发帖/编辑/删除、评论增删、显式终态点赞（幂等）、「我的内容」瘦身（详见 `docs/service-community/api.md`）。
+- `service-review`：`AgentProgressTrackerController`，基础路径 `/api/review/agent/progress`，提供学习计划（进度计划追踪）的今日计划/active 列表/详情/日历概览，以及批量创建（幂等）/更新/删除；周报走网页端 `GET /api/review/progress/report/week`（前端与 agent 共用，读时聚合不落统计表）。状态机单向：未开始 → 进行中 →（已过期 或 已完成），已过期只能删除或新建。
+
 ### 查询用户信息
 
 ```http

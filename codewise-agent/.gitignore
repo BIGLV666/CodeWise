@@ -9,10 +9,13 @@ data/
 
 # 冒烟脚本临时产物
 tests/.smoke-tmp/
+tests/.smoke-web-tmp/
 
 # Node 运行时闭包
 agent-runtime/node_modules/
+agent-runtime/plugins/*/node_modules/
 agent-runtime/plugins/codewise-tools/dist/
+agent-runtime/plugins/codewise-web/dist/
 agent-runtime/package-lock.json
 
 # 环境配置（含密钥）

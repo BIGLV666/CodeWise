@@ -11,7 +11,7 @@ agent-runtime/
 ├── package.json            # 依赖清单：@deepseek-ai/dsh-*（全系列同版本 pin）+ codewise-tools + codewise-web
 ├── cordis.yml              # cordis 组合：运行时启动时加载的全部插件行
 └── plugins/
-    ├── codewise-tools/     # CodeWise 项目工具插件（TypeScript，11 个网关工具）
+    ├── codewise-tools/     # CodeWise 项目工具插件（TypeScript，51 个网关工具）
     │   └── src/…           # index.ts 注册工具 / gateway.ts 内网客户端 / tools/ 分领域定义
     └── codewise-web/       # web 抓取守卫插件（SSRF host 校验 + 受控 fetch provider）
         ├── src/guard.ts    # 纯函数：URL 形态校验 + IPv4/IPv6 黑名单 + DNS 解析比对
@@ -77,7 +77,7 @@ agent-runtime/
 ## 代码执行（run_code / Code Mode）
 
 `cordis.yml` 挂载 `dsh-code-runtime-worker-thread`，并把 agent-spine 的
-`tools.mode` 设为 `both`：11 个网关工具照常原生直调，同时模型可用 `run_code`
+`tools.mode` 设为 `both`：51 个网关工具照常原生直调，同时模型可用 `run_code`
 写 TypeScript 程序、以 SDK 绑定调用任意已注册工具（适合多步计算/组合查询）。
 
 > ⚠️ **信任边界**：worker 线程的隔离是「containment，不是 security boundary」，

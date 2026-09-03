@@ -96,7 +96,7 @@
     toolBash: false
     toolJobs: false
     tools:
-      # both：原生 11 个网关工具照常直调，同时开放 run_code（程序化组合工具）。
+      # both：原生 51 个网关工具照常直调，同时开放 run_code（程序化组合工具）。
       mode: both
 
 # ── web 能力缝隙：模型可见 web_search / web_fetch 的宿主服务与 provider ──
@@ -137,7 +137,7 @@
     fetchTimeoutMs: 30000
     searchTimeoutMs: 30000
 
-# CodeWise 项目工具：11 个网关工具（查询提交/题目/复习计划/更新复习配置等）。
+# CodeWise 项目工具：51 个网关工具（提交/题目/复习/收藏夹/社区/学习计划/笔记等）。
 # 插件从本闭包的 node_modules 解析；CODEWISE_GATEWAY_URL / CODEWISE_TOKEN_FILE
 # 由 Python 门面按会话注入。
 - id: codewise-tools

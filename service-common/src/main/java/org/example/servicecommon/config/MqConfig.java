@@ -279,6 +279,20 @@ public class MqConfig {
                 .to(reviewExchange())
                 .with(REVIEW_JUDGE_RECORD_ROUTING_KEY);
     }
+
+    /** 进度计划判题结果队列：绑定 PLAN 路由键，未绑定前该消息在交换机上不可路由直接丢弃 */
+    @Bean
+    public Queue reviewPlanQueue() {
+        return QueueBuilder.durable(REVIEW_PLAN_QUEUE_NAME).build();
+    }
+
+    @Bean
+    public Binding reviewPlanBinding() {
+        return BindingBuilder
+                .bind(reviewPlanQueue())
+                .to(reviewExchange())
+                .with(PLAN_JUDGE_RECORD_ROUTING_KEY);
+    }
     //===============用户队列================
     @Bean
     public Queue userQueue() {

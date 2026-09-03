@@ -19,6 +19,7 @@ import org.example.servicequestion.enums.QuestionType;
 import org.example.servicequestion.mapper.FunctionConfigMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
+import org.example.servicequestion.vo.AgentQuestionDetailVo;
 import org.example.servicequestion.vo.QuestionVo;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -156,6 +158,81 @@ public class QuestionService {
         }
         return new QuestionVo(question,null);
 
+    }
+
+    /** agent 批量题目详情单次上限：完整题干 payload 较大，控制单请求规模。 */
+    private static final int AGENT_DETAIL_BATCH_MAX = 10;
+
+    /**
+     * agent 批量题目详情：按 ID 批量返回完整题目，逐题做可见性判定，
+     * 不因个别题目不可见而整体报错。
+     *
+     * <p>可见性规则与 {@link #getQuestionById(Long)} 保持一致：
+     * status==1 正常可见；status==3 私密题仅创建者与管理员（roleId=2）可见；
+     * status==0 下架、status==2 审核中一律不可见（管理员亦同）。
+     * 角色查询按批次去重：仅当批次中出现「他人私密题」时才调用一次用户服务，
+     * 避免逐题 Feign 调用。</p>
+     *
+     * @param inputIds 题目 ID 列表（自动去重，≤10）
+     * @return 逐题结果，顺序与入参一致；仅 state=ok 的条目携带完整题目
+     */
+    public List<AgentQuestionDetailVo> getQuestionDetailsBatch(List<Long> inputIds) {
+        if(UserContext.getUserId()==null){
+            throw new IllegalArgumentException("请登录后操作");
+        }
+        List<Long> distinct = inputIds == null ? Collections.emptyList()
+                : inputIds.stream().filter(Objects::nonNull).distinct().toList();
+        if(distinct.isEmpty()){
+            throw new IllegalArgumentException("题目 ID 列表不能为空");
+        }
+        if(distinct.size() > AGENT_DETAIL_BATCH_MAX){
+            throw new IllegalArgumentException("单次最多查询 " + AGENT_DETAIL_BATCH_MAX + " 道题目详情");
+        }
+        Map<Long, Question> questions = new HashMap<>();
+        for(Question question : questionMapper.selectList(new LambdaQueryWrapper<Question>()
+                .in(Question::getQuestionId, distinct))){
+            questions.put(question.getQuestionId(), question);
+        }
+        Long userId = UserContext.getUserId();
+        boolean needRoleCheck = distinct.stream().anyMatch(id -> {
+            Question question = questions.get(id);
+            return question != null && Integer.valueOf(3).equals(question.getStatus())
+                    && !userId.equals(question.getCreateUserId());
+        });
+        boolean isAdmin = false;
+        if(needRoleCheck){
+            Result<UserDto> userDtoResult = userFeignClient.getUserInfo(userId);
+            if(userDtoResult.getCode()!=200 || userDtoResult.getData()==null){
+                throw new RuntimeException(userDtoResult.getCode()!=200 ? userDtoResult.getMessage() : "未找到用户");
+            }
+            isAdmin = Integer.valueOf(2).equals(userDtoResult.getData().getRoleId());
+        }
+        List<AgentQuestionDetailVo> results = new ArrayList<>();
+        for(Long id : distinct){
+            Question question = questions.get(id);
+            if(question == null){
+                results.add(AgentQuestionDetailVo.notFound(id));
+                continue;
+            }
+            if(Integer.valueOf(3).equals(question.getStatus())
+                    && !userId.equals(question.getCreateUserId()) && !isAdmin){
+                results.add(AgentQuestionDetailVo.invisible(id, "无权查看该题目"));
+                continue;
+            }
+            if(Integer.valueOf(0).equals(question.getStatus())){
+                results.add(AgentQuestionDetailVo.invisible(id, "题目已下架"));
+                continue;
+            }
+            if(Integer.valueOf(2).equals(question.getStatus())){
+                results.add(AgentQuestionDetailVo.invisible(id, "题目审核中"));
+                continue;
+            }
+            FunctionConfig functionConfig = question.getQuestionType().equals(QuestionType.FUNCTION)
+                    ? functionConfigMapper.selectOne(new QueryWrapper<FunctionConfig>().eq("question_id", id))
+                    : null;
+            results.add(AgentQuestionDetailVo.ok(id, new QuestionVo(question, functionConfig)));
+        }
+        return results;
     }
 
     @Transactional

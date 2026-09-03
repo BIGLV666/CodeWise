@@ -2,6 +2,7 @@ package org.example.serviceapi.feign;
 
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.judge.JudgeContextDto;
+import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +18,14 @@ public interface QuestionFeignClient {
     Result<QuestionDto> getQuestionInfo(@PathVariable Long questionId);
     @PostMapping("/api/question/info/favoritequestions")
     Result<List<QuestionDto>> getFavorites(@RequestBody List<Long> questionIds);
+
+    /**
+     * 按 ID 批量拉取题目瘦身信息（不含题干/样例等大字段）。
+     *
+     * <p>返回的 status/createUserId 供调用方做可见性过滤，适合收藏夹条目列表等场景。</p>
+     */
+    @PostMapping("/api/question/info/briefquestions")
+    Result<List<QuestionBriefDto>> getFavoritesBrief(@RequestBody List<Long> questionIds);
 
     /**
      * 按判题记录拉取判题上下文（代码、日志、输入输出、题目描述等大字段）。

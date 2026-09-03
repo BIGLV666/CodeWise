@@ -190,6 +190,15 @@ public class SubmitRecordHandel implements MessageHandler {
                     EventTypes.REVIEW_JUDGE_RECORD,
                     buildReviewJudgeRecordDto(submitRecord, judgeRecord));
         }
+        if("PLAN".equals(submitRecord.getSubmitScene())){
+            // 计划绑定需要定位到「谁在哪题的当天计划」：载荷必须携带 userId/questionId，
+            // 仅发 submitId 无法在 review 侧反查（跨库禁查），故复用 REVIEW 载荷结构。
+            outboxPublisher.publish(
+                    EventTypes.PLAN_JUDGE_RECORD,
+                    buildReviewJudgeRecordDto(submitRecord, judgeRecord));
+        }
+
+
         return true;
     }
 

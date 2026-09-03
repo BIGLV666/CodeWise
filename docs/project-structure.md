@@ -87,14 +87,17 @@ CodeWise/
 |-- service-review/
 |   `-- src/main/
 |       |-- java/org/example/servicereview/
-|       |   |-- controller/            # 复习与收藏接口
-|       |   |-- service/               # 复习计划业务
+|       |   |-- controller/            # 复习、收藏、笔记与学习计划接口（含 Agent 专用接口）
+|       |   |-- service/               # 复习计划、笔记与学习计划业务
+|       |   |-- handler/               # 判题结果等消息处理器
 |       |   |-- mapper/                # 复习数据访问
 |       |   |-- task/                  # 上午/晚间复习提醒定时任务
-|       |   `-- vo/                    # 复习计划与记录响应模型
+|       |   |-- enums/                 # 事件消费与计划状态枚举
+|       |   |-- entry/ + dto/ + vo/    # 实体、请求与响应模型
+|       |   `-- config/                # Outbox 路由与 OutboxPro 配置
 |       `-- resources/
 |           |-- mapper/                # MyBatis XML
-|           |-- migration/             # 复习表增量索引
+|           |-- migration/             # 增量迁移（V3 学习计划、V4 笔记）
 |           `-- sql.sql                # 复习库结构
 |
 |-- service-community/
@@ -137,6 +140,17 @@ CodeWise/
 |       |   `-- service/               # 多模型调用与流式适配
 |       `-- resources/sql/             # codewise_ai 建表与迁移脚本
 |
+|-- service-judge-go/                  # Java 判题的 Go 重构原型（调试/提交判题子集）
+|
+|-- codewise-agent/                     # Python Agent（FastAPI 门面 + dsh Node 工具运行时）
+|   |-- api/                            # FastAPI 会话、普通调用和 SSE 接口
+|   |-- dsh_bridge/                     # dsh 桥接：会话进程管理、Token 刷新、事件透传
+|   |-- agent-runtime/                  # dsh Node 部署闭包（cordis 配置与工具插件）
+|   |   `-- plugins/codewise-tools/     # 51 个网关工具插件（TypeScript）
+|   |-- entry/ + mapper/                # SQLAlchemy 模型和数据访问
+|   |-- sql/agent_tables.sql
+|   `-- main.py
+|
 |-- pom.xml                            # Maven 父工程与版本管理
 |-- deploy/                            # Docker 部署（compose、镜像模板、MySQL 初始化、Nginx）
 |-- mvnw
@@ -170,6 +184,7 @@ service-community -> codewise_community
 service-message   -> codewise_message
 service-ai        -> codewise_ai
 service-judge     -> codewise_question（与 service-question 共库，仅读写判题相关表）
+codewise-agent    -> codewise_ai（agent_* 会话与消息表，与 service-ai 同库不同表）
 ```
 
 每个业务服务只直接访问自己的数据库。跨领域数据通过 Feign 或消息传递获取，避免多个服务共同修改同一张业务表。

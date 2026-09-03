@@ -1,0 +1,12 @@
+# 本地开发/测试产物，禁止进入镜像（否则会覆盖容器内 npm ci 产出的 Linux 依赖）
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/
+.env
+tests/.smoke-tmp/
+tests/.smoke-web-tmp/
+agent-runtime/node_modules/
+agent-runtime/plugins/*/node_modules/
+# 注意：不排除 dist —— Dockerfile 不执行 build:plugin，dist 是镜像运行所需的编译产物

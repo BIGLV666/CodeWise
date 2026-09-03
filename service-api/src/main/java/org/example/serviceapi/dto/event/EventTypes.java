@@ -40,4 +40,6 @@ public final class EventTypes {
 
     /** 复习掌握祝贺：review -> message，payload 为 ReviewMasteredDto（题目名由消费端 Feign 补齐） */
     public static final String REVIEW_MASTERED = "REVIEW_MASTERED";
+    /** 计划场景判题结果：question -> plan，payload 为 PlanJudgeRecordDto */
+    public static final String PLAN_JUDGE_RECORD = "PLAN_JUDGE_RECORD";
 }

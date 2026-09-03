@@ -1,6 +1,7 @@
 package org.example.servicequestion.config;
 
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.dto.judge.JudgeResultDto;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.dto.QuestionMessage;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
@@ -57,6 +58,16 @@ public class OutboxEventRouteConfig {
                 .eventType(EventTypes.AI_TESTCASE_REQUEST)
                 .payloadType(QuestionMessage.class)
                 .route(MqContexts.Ai_EXCHANGE, MqContexts.Ai_TESTCASE_ROUTING_KEY)
+                .build();
+    }
+    /** 计划场景判题结果：question -> review，与 submit_record CAS 收尾/题目计数同事务 */
+    @Bean
+    public EventDefinition<ReviewJudgeRecordDto> planJudgeRecord() {
+        return EventDefinition.<ReviewJudgeRecordDto>builder()
+                .eventType(EventTypes.PLAN_JUDGE_RECORD)
+                .payloadType(ReviewJudgeRecordDto.class)
+                // 交换机应为 REVIEW_EXCHANGE（reviews.exchange），此前误写成队列名 reviews.plan.queue
+                .route(MqContexts.REVIEW_EXCHANGE, MqContexts.PLAN_JUDGE_RECORD_ROUTING_KEY)
                 .build();
     }
 }

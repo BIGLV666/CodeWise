@@ -47,7 +47,7 @@ public class JudgeService {
             throw new IllegalArgumentException("题目不存在");
         }
 
-        String submitScene = "REVIEW".equals(getCodeDto.getSubmitScene()) ? "REVIEW" : "NORMAL";
+        String submitScene = getType(getCodeDto.getSubmitScene());
         SubmitRecord submitRecord = new SubmitRecord();
         submitRecord.setSubmitContent(code);
         submitRecord.setLanguage(language);
@@ -64,6 +64,16 @@ public class JudgeService {
         outboxPublisher.publish(EventTypes.JUDGE_SUBMIT_REQUEST, submitRecord.getSubmitRecordId());
 
         return submitRecord.getSubmitRecordId();
+    }
+
+
+    private String getType(String type){
+         return switch (type){
+             case "REVIEW" -> "REVIEW";
+             case "NORMAL" -> "NORMAL";
+             case  "PLAN" -> "PLAN";
+             default -> throw new IllegalArgumentException("不支持的提交类型");
+         };
     }
 
 

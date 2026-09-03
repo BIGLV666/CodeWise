@@ -157,6 +157,47 @@ Authorization: Bearer <token>
 
 点赞记录会先写入 Redis 增量桶，再由定时任务批量更新帖子、评论或题解的 `likeCount`，因此计数展示存在短暂延迟。
 
+## Agent 专用社区接口
+
+基础路径：`/api/community/agent`，供 codewise-agent（`AgentCommunityController`）调用，与网页端控制器分离成类。与网页端的差异：
+
+- **公开信息流支持 latest 降序游标**（网页端只有升序），从最新帖子往回翻页；
+- **点赞为显式终态（幂等）**：请求声明 `action=like/unlike`，服务端先查当前状态，已处于期望态直接短路返回 `changed=false`，避免网络重试导致赞状态震荡（网页端是「切换」语义）；
+- **发帖/发评论重复 requestId 显式返回 `duplicate=true`**（网页端重复请求返回 `data=null`）；
+- **「我的内容」正文截断**到 200 字符（完整正文经帖子详情接口获取）；
+- 路径参数统一用 query 表达，适配 agent 工具的静态路径白名单。
+
+### 帖子信息流（latest/oldest）
+
+- `GET /api/community/agent/posts?lastId=&pageSize=&order=latest|oldest`（默认 latest，pageSize 1-100）
+- 返回 `Result<CursorPageResult<HomePostVo>>`（仅 status=1 的帖子）
+
+### 热榜 / 搜索 / 详情
+
+- `GET /api/community/agent/posts/hot` → 热榜（≤10 条）
+- `GET /api/community/agent/posts/search?keyword=&tag=&limit=` → 标题关键词或完整标签（二者必须且只能提供一个）
+- `GET /api/community/agent/post?postId=` → 详情（正文/标签/点赞状态/相关推荐；待审核/已下架仅作者可见）
+
+### 发帖 / 编辑 / 删除
+
+- `POST /api/community/agent/post` body `AgentPostCreateDto{postTitle, postContent, tags, requestId}` → `AgentCreatedVo{duplicate, postId, status}`（新帖 status=0 待审核）
+- `PUT /api/community/agent/post?postId=` body `AgentPostUpdateDto{postTitle, postContent, tags}` → `AgentContentStatusVo{id, status=0, note}`（编辑后重新进入待审核）
+- `DELETE /api/community/agent/post?postId=` → `Result<String>`（硬删除，仅作者；评论/点赞异步级联清理）
+
+### 评论
+
+- `GET /api/community/agent/comments?postId=&lastId=&pageSize=&rootCommentId=` → `CursorPageResult<CommentVo>`（仅 POST 类型）
+- `POST /api/community/agent/comments` body `AgentCommentCreateDto{comment, postId, rootCommentId?, replyUserId?, replyUserName?, requestId}` → `AgentCreatedVo{duplicate, commentId, postId, status=1}`（评论即时可见）
+- `DELETE /api/community/agent/comments?commentId=` → `Result<String>`（根评论级联删回复）
+
+### 点赞（显式终态）
+
+- `POST /api/community/agent/likes` body `AgentLikeRequestDto{targetType: POST|COMMENT, targetId, action: like|unlike}` → `AgentLikeResultVo{liked, changed}`
+
+### 我的内容（瘦身）
+
+- `GET /api/community/agent/mine?type=POST|COMMENT|SOLUTION&lastId=&pageSize=` → `CursorPageResult<MyContentVo>`（正文截断，附 status/rejectReason）
+
 ## DTO 字段
 
 ### PostDto

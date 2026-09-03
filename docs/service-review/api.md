@@ -5,7 +5,7 @@
 - 服务名：`service-review`
 - 默认端口：`8097`
 - 主要模块：收藏夹、复习计划
-- 当前已开放 HTTP 接口：收藏夹接口、复习计划接口、复习配置接口
+- 当前已开放 HTTP 接口：收藏夹接口、复习计划接口、复习配置接口、Agent 专用收藏夹接口
 - 统一响应结构：`Result<T>`
 - 用户身份：接口通过网关/拦截器写入 `UserContext.getUserId()` 获取当前用户，不需要前端显式传 `userId`
 
@@ -171,6 +171,129 @@
 - 其余字段为空时不更新。
 - 至少更新一个字段时返回“更新成功”；无可更新字段时返回“未更新任何字段”。
 
+## Agent 专用收藏夹接口
+
+基础路径：`/api/review/agent/favorites`
+
+供 codewise-agent（`AgentFavoritesController`）调用，与网页端接口分离成类。与网页端的差异：
+
+- **瘦身返回**：收藏夹列表不返回 `userId` 与 `questionIds` 明细（只含题目数量）；夹内题目列表经 service-question 批量瘦身接口取数，不含题干，完整题目详情由 service-question 的 `/api/question/agent/detail` 批量提供；
+- **批量语义**：批量增删一次请求完成去重、存在性与可见性校验，返回分项明细；跨夹移动在事务内按主键升序对源/目标两行 `FOR UPDATE` 加行锁；
+- **创建即回显 ID**：创建直接返回含 `favoritesId` 的收藏夹 VO，幂等键 `requestId` 由 agent 客户端生成（复用网页端 Redis 幂等键，3 分钟窗口）；
+- **元信息更新不收 `questionIds`**：收藏夹题目列表只能通过批量增删/移动接口变更，避免整体覆盖。
+
+### Agent：收藏夹瘦身列表
+
+- 方法：`GET`
+- 路径：`/api/review/agent/favorites`
+- 请求参数：无
+- 限流：100 次/60 秒
+- 返回：`Result<List<FavoriteFolderVo>>`（`favoritesId`/`favoritesName`/`favoritesType`/`favoritesContent`/`questionCount`/`createTime`/`updateTime`）
+
+### Agent：收藏夹题目瘦身列表
+
+- 方法：`GET`
+- 路径：`/api/review/agent/favorites/questions?favoriteId=`
+- 限流：100 次/60 秒
+- 返回：`Result<List<FavoriteQuestionBriefVo>>`（`questionId`/`title`/`difficulty`/`tags`/`totalSubmit`/`totalAc`/`passRate`）
+
+保留网页端懒删除语义：他人私密/下架/审核中的题目从收藏夹剔除并回写。
+
+### Agent：定位题目所在收藏夹
+
+- 方法：`GET`
+- 路径：`/api/review/agent/favorites/locate?questionIds=1,2`
+- 限流：100 次/60 秒
+- 返回：`Result<List<FavoriteLocationVo>>`，每项含 `questionId` 与包含它的 `folders`（`favoriteId`/`favoritesName`）
+
+### Agent：创建收藏夹
+
+- 方法：`POST`
+- 路径：`/api/review/agent/favorites`
+- Content-Type：`application/json`
+- 限流：20 次/60 秒
+- 请求体：`AgentFavoriteCreateDto`（`favoritesName` 必填 1-255 字符；`favoritesType`/`favoritesContent` 可选 ≤255；`requestId` 必填幂等键）
+- 返回：`Result<FavoriteFolderVo>`，`data.favoritesId` 为新收藏夹 ID
+
+重复 `requestId` 返回“该收藏已创建”（`code=400`）。
+
+### Agent：更新收藏夹元信息
+
+- 方法：`PUT`
+- 路径：`/api/review/agent/favorites`
+- Content-Type：`application/json`
+- 限流：30 次/60 秒
+- 请求体：`AgentFavoriteUpdateDto`（`favoritesId` 必填；`favoritesName`/`favoritesType`/`favoritesContent` 可选；不接受 `questionIds`）
+- 返回：`Result<FavoriteFolderVo>`
+
+### Agent：删除收藏夹
+
+- 方法：`DELETE`
+- 路径：`/api/review/agent/favorites?favoriteId=`
+- 限流：30 次/60 秒
+- 返回：`Result<String>`，`data` 为 `"success"`
+
+### Agent：批量添加题目
+
+- 方法：`POST`
+- 路径：`/api/review/agent/favorites/questions`
+- Content-Type：`application/json`
+- 限流：20 次/60 秒
+- 请求体：`AgentFavoriteBatchAddDto`（`favoriteId` 必填；`questionIds` 去重后 1-50 个）
+- 返回：`Result<FavoriteAddResultVo>`
+
+```json
+{
+  "added": 2,
+  "skippedDuplicateIds": [1],
+  "skippedInvisibleIds": [3],
+  "invalidQuestionIds": [4]
+}
+```
+
+只有 `status=1` 或本人创建的题目会真正写入（不可见题前置拦截，比网页端更严格）。
+
+### Agent：批量移除题目
+
+- 方法：`DELETE`
+- 路径：`/api/review/agent/favorites/questions?favoriteId=&questionIds=1,2`
+- 限流：30 次/60 秒
+- 返回：`Result<FavoriteRemoveResultVo>`（`removed`/`notInFolderIds`）
+
+### Agent：跨收藏夹移动题目
+
+- 方法：`POST`
+- 路径：`/api/review/agent/favorites/move`
+- Content-Type：`application/json`
+- 限流：30 次/60 秒
+- 请求体：`AgentFavoriteMoveDto`（`fromFavoriteId`/`toFavoriteId` 必填且不同；`questionIds` 去重后 1-50 个）
+- 返回：`Result<FavoriteMoveResultVo>`（`moved`/`notInSourceIds`/`alreadyInTargetIds`）
+
+并发安全：事务内先按主键升序对源/目标两行 `FOR UPDATE` 加行锁（`FavoritesMapper.lockByIdsForUpdate`），锁内读改写；已同时在两侧的题目保留在源夹中。
+
+## 学习计划（进度计划追踪）Agent 接口
+
+基础路径：`/api/review/agent/progress`，供 codewise-agent（`AgentProgressTrackerController`）调用；网页端接口为 `/api/review/progress/*`（`ProgressTrackerController`）。
+
+状态机单向：`0-未开始 → 1-进行中 →（2-已完成 或 3-已过期）`。开始时间仅在「未开始」可改，备注/反思任何状态可改；已过期只能删除或新建。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/review/agent/progress/today` | 今天要做的计划（瘦身，含题目标题/难度回填） |
+| `GET` | `/api/review/agent/progress/list` | 未开始 + 进行中（接下来要做），按日期升序 |
+| `GET` | `/api/review/agent/progress/detail?progressId=` | 单条详情（含 submitIds 与完整备注/反思） |
+| `GET` | `/api/review/agent/progress/calendar?range=day\|week\|month&date=` | 日历逐日计划/完成数 |
+| `POST` | `/api/review/agent/progress/create` | 批量创建（幂等，重复题 skipped） |
+| `POST` | `/api/review/agent/progress/update` | 更新备注/反思/开始时间（单向状态机校验） |
+| `POST` | `/api/review/agent/progress/delete?progressIds=1,2` | 批量删除 |
+
+### 周报（前端与 agent 共用）
+
+- 方法：`GET`
+- 路径：`/api/review/progress/report/week?date=`
+- 返回：`Result<WeeklyReportVo>`（本周计划/完成/进行中/过期计数 + 逐日分布 + 已完成条目含反思）
+- 读时聚合，不落统计表；锚点日期所在自然周（周一至周日）。
+
 ## DTO 与实体字段
 
 ### ReceiveDto
@@ -230,6 +353,25 @@
 | `totalAc` | `Long` | AC 数 |
 | `passRate` | `BigDecimal` | 通过率 |
 | `contentHash` | `String` | 内容哈希 |
+
+### QuestionBriefDto
+
+路径：`service-api/src/main/java/org/example/serviceapi/dto/question/QuestionBriefDto.java`
+
+service-question 内部批量瘦身接口（`POST /api/question/info/briefquestions`）与 Agent 收藏夹题目列表使用的瘦身 DTO，不含题干/样例等大字段。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `questionId` | `Long` | 题目 ID |
+| `title` | `String` | 标题 |
+| `difficulty` | `Integer` | 难度 |
+| `tags` | `String` | 标签 |
+| `status` | `Integer` | 题目状态，供调用方做可见性过滤 |
+| `createUserId` | `Long` | 创建用户 ID，供调用方做可见性过滤 |
+| `totalSubmit` | `Long` | 总提交数 |
+| `totalAc` | `Long` | AC 数 |
+| `passRate` | `BigDecimal` | 通过率 |
+| `createTime` | `LocalDateTime` | 创建时间 |
 
 ## 复习计划接口
 

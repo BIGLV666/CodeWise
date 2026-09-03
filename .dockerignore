@@ -1,0 +1,9 @@
+# 构建上下文瘦身：Java 服务镜像由 deploy/Dockerfile.service 在容器内 Maven 构建，
+# 以下目录既不参与 COPY 也不需要进入 context
+.git/
+**/target/
+**/node_modules/
+codewise-agent/.venv/
+codewise-agent/agent-runtime/node_modules/
+codewise-agent/agent-runtime/plugins/*/node_modules/
+codewise-agent/data/

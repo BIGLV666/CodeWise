@@ -3,7 +3,7 @@ package org.example.servicereview.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.example.servicereview.entry.ConsumedEvent;
-import org.example.servicereview.entry.ConsumedEventStatus;
+import org.example.servicereview.enums.ConsumedEventStatus;
 import org.example.servicereview.mapper.ConsumedEventMapper;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;

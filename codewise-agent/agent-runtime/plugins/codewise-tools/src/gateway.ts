@@ -30,6 +30,31 @@ const ALLOWED_GATEWAY_PATHS: ReadonlySet<string> = new Set([
   '/api/question/getsubmitrecordbyid',
   '/api/question/getsubmitrecordsbyuserid',
   '/api/question/getsubmitrecordsbyids',
+  '/api/question/agent/detail',
+  '/api/community/agent/post',
+  '/api/community/agent/posts',
+  '/api/community/agent/posts/hot',
+  '/api/community/agent/posts/search',
+  '/api/community/agent/comments',
+  '/api/community/agent/likes',
+  '/api/community/agent/mine',
+  '/api/review/agent/favorites',
+  '/api/review/agent/favorites/questions',
+  '/api/review/agent/favorites/move',
+  '/api/review/agent/favorites/locate',
+  '/api/review/agent/progress/today',
+  '/api/review/agent/progress/list',
+  '/api/review/agent/progress/detail',
+  '/api/review/agent/progress/calendar',
+  '/api/review/agent/progress/create',
+  '/api/review/agent/progress/update',
+  '/api/review/agent/progress/delete',
+  '/api/review/progress/report/week',
+  '/api/review/agent/note/folders',
+  '/api/review/agent/note/list',
+  '/api/review/agent/note/detail',
+  '/api/review/agent/note/move',
+  '/api/review/agent/note',
   '/api/review/review/allreview',
   '/api/review/review/config',
   '/api/review/review/reviewrecord',
@@ -40,6 +65,7 @@ export class GatewayError extends Error {}
 
 export class CodeWiseGateway {
   private readonly baseUrl: string
+  private readonly origin: string
   private readonly tokenFile: string
 
   constructor(baseUrl: string | undefined, tokenFile: string | undefined) {
@@ -56,7 +82,7 @@ export class CodeWiseGateway {
 
   /** 发起一次网关调用并解包 Result<T>，失败抛 GatewayError。 */
   async request(
-    method: 'GET' | 'POST' | 'PUT',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     options: {
       params?: Record<string, string | number>

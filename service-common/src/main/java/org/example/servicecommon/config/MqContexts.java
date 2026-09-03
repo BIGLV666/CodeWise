@@ -69,6 +69,13 @@ public  class MqContexts {
     public static final String REVIEW_QUEUE_NAME = "reviews.queue";
     public static final String REVIEW_EXCHANGE = "reviews.exchange";
     public static final String REVIEW_JUDGE_RECORD_ROUTING_KEY = "reviews.judge.record.routing";
+    public static final String PLAN_JUDGE_RECORD_ROUTING_KEY = "plan.judge.record.routing";
+    /**
+     * 进度计划判题结果独立队列：与 reviews.queue 消费同一交换机但路由键不同。
+     * 必须与复习消费分开——同一队列挂两个 @RabbitListener 会形成竞争消费者，
+     * 各自把不匹配路由键的消息 ACK 丢弃，导致两类消息各丢约一半。
+     */
+    public static final String REVIEW_PLAN_QUEUE_NAME = "reviews.plan.queue";
     //用户队列
     public static final String USER_QUEUE_NAME = "user.queue";
     public static final String USER_EXCHANGE = "user.exchange";

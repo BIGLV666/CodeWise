@@ -1,4 +1,4 @@
-package org.example.servicereview.entry;
+package org.example.servicereview.enums;
 
 /**
  * 事件消费状态。

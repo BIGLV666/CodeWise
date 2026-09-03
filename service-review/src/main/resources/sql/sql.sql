@@ -131,3 +131,40 @@ CREATE TABLE IF NOT EXISTS consumed_event (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='已消费事件幂等与状态表';
 
+-- ==========================================================
+-- 进度计划追踪表（用户自定义题单）
+-- 每条记录代表：某用户 对 某题目 的学习进度计划
+-- submit_ids：当天该题目的提交记录ID集合，仅记录当天新增；
+--             存在 AC 提交时由判题消费方置为 COMPLETED(2)
+-- status：整数编码（实体为 Integer）：0-未开始 1-进行中 2-已完成 3-已过期；
+--         0→1 / →3 的流转为懒加载判定（查询时顺手刷新，无常驻任务）
+-- begin_time：DATE 类型，与实体 LocalDate 对应，按天精确查询/聚合
+-- ==========================================================
+create table progress_tracker (
+    progress_id bigint not null primary key auto_increment comment '进度追踪ID',
+
+    -- ========== 关联字段 ==========
+    user_id bigint not null comment '用户ID',
+    question_id bigint not null comment '题目ID',
+
+    -- ========== 进度内容 ==========
+    submit_ids JSON default null comment '当天提交记录ID集合（存在提交记录时才有值，存在AC即视为完成）',
+    status tinyint not null default 0 comment '状态: 0-未开始 1-进行中 2-已完成 3-已过期',
+    notes_content text default null comment '学习计划备注（用户自定义题单描述）',
+    summary_content text default null comment '完成后的反思总结',
+    begin_time date not null comment '计划开始日期（已开始/过期后不允许修改，过期可整体重新规划）',
+
+    -- ========== 审计字段 ==========
+    create_time datetime not null default current_timestamp comment '创建时间',
+    update_time datetime not null default current_timestamp on update current_timestamp comment '更新时间',
+
+    -- ========== 索引 ==========
+    -- 每个用户对每道题只有一条计划（重复创建抛 DuplicateKeyException，
+    -- 过期后通过更新 begin_time 重新规划，不另起新行）
+    unique key uk_tracker_user_question (user_id, question_id),
+    -- 日期列表聚合与按天精确查询的主路径：用户 + 日期
+    index idx_tracker_user_begin (user_id, begin_time),
+    index idx_tracker_status (status)
+) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_unicode_ci comment='进度计划追踪表(自定义题单)';
+
+

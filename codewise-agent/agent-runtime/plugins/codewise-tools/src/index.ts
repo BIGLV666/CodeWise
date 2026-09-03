@@ -15,7 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { CodeWiseGateway } from './gateway.js'
 import { getCurrentTime, getUserInfo } from './tools/basic.js'
-import { getQuestionById, searchQuestion } from './tools/question.js'
+import { getQuestionById, getQuestionDetails, searchQuestion } from './tools/question.js'
 import {
   getRecentSubmissions,
   getSubmissionById,
@@ -27,6 +27,53 @@ import {
   getUserReviewConfig,
   updateReviewConfig,
 } from './tools/review.js'
+import {
+  addQuestionsToFavorite,
+  createFavoriteFolder,
+  deleteFavoriteFolder,
+  findQuestionInFavorites,
+  getFavoriteQuestions,
+  listFavoriteFolders,
+  moveQuestionsToFavorite,
+  removeQuestionsFromFavorite,
+  updateFavoriteFolder,
+} from './tools/favorite.js'
+import {
+  createCommunityComment,
+  createCommunityPost,
+  deleteCommunityComment,
+  deleteCommunityPost,
+  getCommunityHotPosts,
+  getCommunityPost,
+  likeCommunityTarget,
+  listCommunityPosts,
+  listMyCommunityContent,
+  listPostComments,
+  searchCommunityPosts,
+  updateCommunityPost,
+} from './tools/community.js'
+import {
+  createStudyPlan,
+  deleteStudyPlan,
+  getPlanCalendar,
+  getPlanDetail,
+  getTodayPlan,
+  getWeeklyReport,
+  listStudyPlan,
+  updateStudyPlan,
+} from './tools/progress.js'
+import {
+  createNote,
+  createNoteFolder,
+  deleteNote,
+  deleteNoteFolder,
+  getNote,
+  listNoteFolders,
+  listNotes,
+  moveNote,
+  renameNoteFolder,
+  updateNote,
+} from './tools/note.js'
 
 export const name = 'codewise-tools'
 
@@ -56,6 +103,7 @@ export function apply(ctx: Context, _config: Config): void {
   ctx.tools.register(getUserInfo(gateway))
   ctx.tools.register(searchQuestion(gateway))
   ctx.tools.register(getQuestionById(gateway))
+  ctx.tools.register(getQuestionDetails(gateway))
   ctx.tools.register(getRecentSubmissions(gateway))
   ctx.tools.register(getSubmissionById(gateway))
   ctx.tools.register(getSubmissionsByIds(gateway))
@@ -63,4 +111,43 @@ export function apply(ctx: Context, _config: Config): void {
   ctx.tools.register(getUserReviewConfig(gateway))
   ctx.tools.register(getAllReview(gateway))
   ctx.tools.register(updateReviewConfig(gateway))
+  ctx.tools.register(listFavoriteFolders(gateway))
+  ctx.tools.register(getFavoriteQuestions(gateway))
+  ctx.tools.register(createFavoriteFolder(gateway))
+  ctx.tools.register(updateFavoriteFolder(gateway))
+  ctx.tools.register(deleteFavoriteFolder(gateway))
+  ctx.tools.register(addQuestionsToFavorite(gateway))
+  ctx.tools.register(removeQuestionsFromFavorite(gateway))
+  ctx.tools.register(moveQuestionsToFavorite(gateway))
+  ctx.tools.register(findQuestionInFavorites(gateway))
+  ctx.tools.register(listCommunityPosts(gateway))
+  ctx.tools.register(searchCommunityPosts(gateway))
+  ctx.tools.register(getCommunityHotPosts(gateway))
+  ctx.tools.register(getCommunityPost(gateway))
+  ctx.tools.register(createCommunityPost(gateway))
+  ctx.tools.register(updateCommunityPost(gateway))
+  ctx.tools.register(deleteCommunityPost(gateway))
+  ctx.tools.register(listPostComments(gateway))
+  ctx.tools.register(createCommunityComment(gateway))
+  ctx.tools.register(deleteCommunityComment(gateway))
+  ctx.tools.register(likeCommunityTarget(gateway))
+  ctx.tools.register(listMyCommunityContent(gateway))
+  ctx.tools.register(getTodayPlan(gateway))
+  ctx.tools.register(listStudyPlan(gateway))
+  ctx.tools.register(getPlanDetail(gateway))
+  ctx.tools.register(getPlanCalendar(gateway))
+  ctx.tools.register(getWeeklyReport(gateway))
+  ctx.tools.register(createStudyPlan(gateway))
+  ctx.tools.register(updateStudyPlan(gateway))
+  ctx.tools.register(deleteStudyPlan(gateway))
+  ctx.tools.register(listNoteFolders(gateway))
+  ctx.tools.register(createNoteFolder(gateway))
+  ctx.tools.register(renameNoteFolder(gateway))
+  ctx.tools.register(deleteNoteFolder(gateway))
+  ctx.tools.register(listNotes(gateway))
+  ctx.tools.register(getNote(gateway))
+  ctx.tools.register(createNote(gateway))
+  ctx.tools.register(updateNote(gateway))
+  ctx.tools.register(moveNote(gateway))
+  ctx.tools.register(deleteNote(gateway))
 }

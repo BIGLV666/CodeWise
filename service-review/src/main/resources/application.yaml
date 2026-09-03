@@ -25,6 +25,10 @@ server:
 
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
+  # 显式开启 MQ 拓扑声明（MqConfig @ConditionalOnProperty）：缺省时 MqConfig 不加载，
+  # 新队列（如 reviews.plan.queue）不会被声明，消费监听会因队列不存在而启动失败。
+  mq:
+    enabled: true
 
 # OutboxPro（生产者）：事务内 append -> Relay 经 Publisher Confirm 投递；
 # poll-interval 显式配纯毫秒：默认 "1000ms" 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 不支持

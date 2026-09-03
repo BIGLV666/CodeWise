@@ -7,6 +7,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.example.servicereview.enums.ConsumedEventStatus;
 
 import java.time.LocalDateTime;
 
