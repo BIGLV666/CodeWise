@@ -16,6 +16,7 @@
 - [-] 将内部 Token、JWT Secret、其他敏感配置移出源码，改为环境变量、Nacos 加密配置或密钥管理服务。（2026-08-23：`codewise.internal-token` 全服务无默认值经 `CODEWISE_INTERNAL_TOKEN` 注入（gateway/拦截器/Feign 三处同源）；service-common JwtUntil 改构造器注入；gateway yaml 密钥改 `${JWT_SECRET}`；UserAuthInterceptor 不再全量打印请求头；文档同步脱敏。部署要求：8 个服务均需 `CODEWISE_INTERNAL_TOKEN`，gateway/message/review 另需 `JWT_SECRET`，缺失启动失败属预期）
 - [-] 收紧 `UserAuthInterceptor` 的匿名放行规则，删除基于 `contains("login")`、`contains("/info")`、`contains("uploads")` 的宽泛匹配。
 - [-] WebSocket 入口不能完全绕过内部身份校验。
+- [-] 修复 `@RequireAdmin` 管理员鉴权运行时失效问题。（2026-09-11 闭环审计发现：`AdminAuthAspect` 从未在任何服务注册为 Bean——各服务只扫描自身包、service-common 的 AutoConfiguration.imports 未列出，api-governance FilterChain 收集不到该 PreFilter，导致 judge 失败重试、question 测试点 CRUD、community 审核台/申诉管理等全部管理端点对任意登录用户放行。修复：切面加入 service-common `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 全服务生效；`DockerController`（容器池扩缩容/删除，原先连注解都没有）补类级 `@RequireAdmin`；新增 `DockerControllerAdminAuthTest` 7 例（注解反射守护 + 未登录/普通用户/管理员/root/用户不存在/无注解放行））
 
 ### 2. Judge MQ 可靠性
 
