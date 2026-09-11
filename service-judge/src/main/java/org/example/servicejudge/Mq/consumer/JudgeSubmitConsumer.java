@@ -46,11 +46,16 @@ public class JudgeSubmitConsumer {
     /**
      * 消费一条提交判题消息。
      *
+     * <p>并发度经 {@code codewise.judge.consumer-concurrency} 配置（默认 2）：判题吞吐上限 =
+     * 消费并发 × 单题判题速率，必须与容器池容量（{@code /api/judge/containers} 扩容）同步上调——
+     * 消费并发超过池容量只会在池等待队列空转，池容量超过消费并发则容器闲置（2026-09-12 压测实测：
+     * 默认并发 1 时 2 容器池的第二个容器全程闲置）。</p>
+     *
      * @param message 原始 AMQP 消息（body 为信封或裸 Long JSON）
      * @param channel 当前 channel，用于手动 ACK/NACK
      * @throws IOException ACK/NACK 失败（交还容器处理，消息重新投递）
      */
-    @RabbitListener(queues = MqContexts.JUDGE_SUBMIT_QUEUE)
+    @RabbitListener(queues = MqContexts.JUDGE_SUBMIT_QUEUE, concurrency = "${codewise.judge.consumer-concurrency:2}")
     public void onMessage(Message message, Channel channel) throws IOException {
         long deliveryTag = message.getMessageProperties().getDeliveryTag();
         String body = new String(message.getBody(), StandardCharsets.UTF_8);

@@ -18,8 +18,6 @@ import java.util.function.Consumer;
 @Service
 public class NikoApiGptService implements CallAi {
 
-    private static final String ENDPOINT = "https://nikoapi.xyz/v1/chat/completions";
-
     private final NikoApiGpt config;
 
     public NikoApiGptService(NikoApiGpt config) {
@@ -55,7 +53,7 @@ public class NikoApiGptService implements CallAi {
             log.info("Niko API request, model={}, promptLength={}",
                     config.getModel(), prompt == null ? 0 : prompt.length());
 
-            connection = openConnection(ENDPOINT, config.getApikey());
+            connection = openConnection(config.getEndpoint(), config.getApikey());
             try (OutputStream outputStream = connection.getOutputStream()) {
                 outputStream.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }

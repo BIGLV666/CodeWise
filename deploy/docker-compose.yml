@@ -205,7 +205,7 @@ services:
       start_period: 60s
 
   service-question:
-    mem_limit: 768m
+    mem_limit: 1g
     depends_on:
       judge-base:
         condition: service_completed_successfully
@@ -235,7 +235,8 @@ services:
       start_period: 60s
 
   service-judge:
-    mem_limit: 768m
+    # 判题吞吐主力：容器池常驻 Docker 执行器，压测/生产建议 ≥1.5g
+    mem_limit: 1536m
     depends_on:
       judge-base:
         condition: service_completed_successfully
@@ -251,6 +252,8 @@ services:
       <<: [*common-env, *db-env]
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_question?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
       DOCKER_HOST: unix:///var/run/docker.sock
+      # 判题消费并发：必须与容器池容量同步（见 JudgeSubmitConsumer 注释）
+      CODEWISE_JUDGE_CONSUMERCONCURRENCY: ${JUDGE_CONCURRENCY:-2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:

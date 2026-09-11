@@ -18,8 +18,6 @@ import java.util.function.Consumer;
 @Service
 public class GLMService implements CallAi {
 
-    private static final String ENDPOINT = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
-
     private final GLMConfig config;
 
     public GLMService(GLMConfig config) {
@@ -55,7 +53,7 @@ public class GLMService implements CallAi {
             log.info("GLM request, model={}, promptLength={}",
                     config.getModel(), prompt == null ? 0 : prompt.length());
 
-            connection = openConnection(ENDPOINT, config.getApikey());
+            connection = openConnection(config.getEndpoint(), config.getApikey());
             try (OutputStream outputStream = connection.getOutputStream()) {
                 outputStream.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }

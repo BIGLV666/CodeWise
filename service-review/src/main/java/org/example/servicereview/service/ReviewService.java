@@ -466,6 +466,8 @@ public class ReviewService {
         }
         ReviewRecord todayRecord = reviewRecordMapper.getTodayRecord(dto.getUserId());
         if (todayRecord == null) {
+            // 业务无副作用即为成功：跳过态落 COMPLETED，避免幂等台账残留 PROCESSING（重投会被再次接管却永远无事可做）
+            consumedEventService.complete(eventId);
             return false;
         }
         List<Long> pending = todayRecord.getPendingReviewQuestionIds() == null
@@ -473,6 +475,7 @@ public class ReviewService {
         List<Long> completed = todayRecord.getCompletedReviewQuestionIds() == null
                 ? new ArrayList<>() : new ArrayList<>(todayRecord.getCompletedReviewQuestionIds());
         if (completed.contains(dto.getQuestionId()) || !pending.contains(dto.getQuestionId())) {
+            consumedEventService.complete(eventId);
             return false;
         }
 
