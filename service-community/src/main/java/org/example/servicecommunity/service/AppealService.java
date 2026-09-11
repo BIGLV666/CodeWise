@@ -203,33 +203,7 @@ public class AppealService {
         List<AppealVo> records = new ArrayList<>();
 
         for (Appeal appeal : list) {
-            AppealVo vo = new AppealVo();
-            vo.setAppealId(appeal.getAppealId());
-            vo.setPostId(appeal.getPostId());
-            vo.setPostType(appeal.getPostType());
-            vo.setReason(appeal.getReason());
-            vo.setTakeDownReason(appeal.getTakeDownReason());
-            vo.setStatus(appeal.getStatus());
-            vo.setCreateTime(appeal.getCreateTime());
-            vo.setUpdateTime(appeal.getUpdateTime());
-
-            // 获取申诉用户信息
-            try {
-                Result<UserDto> userResult = userFeignClient.getUserInfo(appeal.getUserId());
-                if (userResult != null && userResult.getData() != null) {
-                    vo.setUser(userResult.getData());
-                }
-            } catch (Exception e) {
-                log.error("获取用户信息失败: userId={}", appeal.getUserId(), e);
-            }
-
-            // 获取内容标题
-            Object post = getPost(appeal.getPostId(), appeal.getPostType());
-            if (post != null) {
-                vo.setTitle(getTitle(appeal.getPostType(), post));
-            }
-
-            records.add(vo);
+            records.add(toAppealVo(appeal, true));
         }
 
         Long nextCursor = null;
@@ -241,6 +215,92 @@ public class AppealService {
         }
 
         return new CursorPageResult<>(records, nextCursor, hasNext, (long) records.size());
+    }
+
+    /**
+     * 当前用户的申诉历史（游标分页，按 appealId 升序）。
+     *
+     * @param lastId   上一页返回的最大 appealId，首页传 null
+     * @param pageSize 页大小（调用方已做范围收敛）
+     * @return 分页结果；VO 不含申诉人信息（即当前用户），含关联内容标题
+     */
+    public CursorPageResult<AppealVo> getMyAppeals(Long lastId, Integer pageSize) {
+        LambdaQueryWrapper<Appeal> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Appeal::getUserId, UserContext.getUserId());
+        if (lastId != null) {
+            wrapper.gt(Appeal::getAppealId, lastId);
+        }
+        wrapper.orderByAsc(Appeal::getAppealId);
+        wrapper.last("LIMIT " + (pageSize + 1));
+
+        List<Appeal> list = appealMapper.selectList(wrapper);
+        boolean hasNext = list.size() > pageSize;
+        if (hasNext) {
+            list = list.subList(0, pageSize);
+        }
+        List<AppealVo> records = new ArrayList<>();
+        for (Appeal appeal : list) {
+            records.add(toAppealVo(appeal, false));
+        }
+        Long nextCursor = hasNext && !records.isEmpty() ? records.get(records.size() - 1).getAppealId() : null;
+        return new CursorPageResult<>(records, nextCursor, hasNext, (long) records.size());
+    }
+
+    /**
+     * 查看当前用户自己的申诉详情。
+     *
+     * @param appealId 申诉 ID
+     * @return 申诉详情（含关联内容标题）
+     * @throws IllegalArgumentException 申诉不存在，或该申诉不属于当前用户（防 IDOR）
+     */
+    public AppealVo getMyAppealDetail(Long appealId) {
+        Appeal appeal = appealMapper.selectById(appealId);
+        if (appeal == null) {
+            throw new IllegalArgumentException("申诉不存在");
+        }
+        Long userId = UserContext.getUserId();
+        if (userId == null || !userId.equals(appeal.getUserId())) {
+            throw new IllegalArgumentException("无权查看该申诉");
+        }
+        return toAppealVo(appeal, false);
+    }
+
+    /**
+     * 申诉实体转 VO 的公共映射。
+     *
+     * @param appeal         申诉实体
+     * @param withUserDetail 是否回查申诉人用户信息（管理端需要，用户侧查自己的申诉不需要）
+     * @return 填充完成的 VO，标题在关联内容存在时填充
+     */
+    private AppealVo toAppealVo(Appeal appeal, boolean withUserDetail) {
+        AppealVo vo = new AppealVo();
+        vo.setAppealId(appeal.getAppealId());
+        vo.setPostId(appeal.getPostId());
+        vo.setPostType(appeal.getPostType());
+        vo.setReason(appeal.getReason());
+        vo.setTakeDownReason(appeal.getTakeDownReason());
+        vo.setStatus(appeal.getStatus());
+        vo.setCreateTime(appeal.getCreateTime());
+        vo.setUpdateTime(appeal.getUpdateTime());
+
+        if (withUserDetail) {
+            // 获取申诉用户信息（失败不阻断列表展示）
+            try {
+                Result<UserDto> userResult = userFeignClient.getUserInfo(appeal.getUserId());
+                if (userResult != null && userResult.getData() != null) {
+                    vo.setUser(userResult.getData());
+                }
+            } catch (Exception e) {
+                log.error("获取用户信息失败: userId={}", appeal.getUserId(), e);
+            }
+        }
+
+        // 获取内容标题
+        Object post = getPost(appeal.getPostId(), appeal.getPostType());
+        if (post != null) {
+            vo.setTitle(getTitle(appeal.getPostType(), post));
+        }
+        return vo;
     }
 
     /**
