@@ -49,4 +49,9 @@ ENV TZ=Asia/Shanghai
 USER codewise
 EXPOSE 8080
 # 判题/容器管理路径由 compose 单独覆盖（judge 需要访问 Docker daemon，以 root 运行）
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
+#
+# 内存策略（防止容器被 OOM kill）：
+# - 堆上限按容器限额的 45% 计（Spring Boot 服务 384m-768m 限额对应 172m-345m 堆，足够）；
+# - Metaspace 封顶 160m，避免类元数据随限额水涨船高；
+# - 线程栈 512k（默认 1m），Spring 应用线程多，栈是 RSS 大头之一。
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=45.0", "-XX:MaxMetaspaceSize=160m", "-Xss512k", "-jar", "/app/app.jar"]
