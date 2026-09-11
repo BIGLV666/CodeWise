@@ -16,12 +16,15 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Method;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -30,9 +33,8 @@ import static org.mockito.Mockito.when;
  * <p>覆盖两层防线：</p>
  * <ul>
  *   <li>反射守护：控制器类级必须持续标注 {@link RequireAdmin}，防止重构时注解丢失；</li>
- *   <li>行为验证：{@link AdminAuthAspect} 对容器池接口的未登录、普通用户、管理员、
- *       root、用户不存在与无注解放行分支（aspect 在 service-common 中经
- *       AutoConfiguration.imports 注册，此处直接实例化验证判定逻辑本身）。</li>
+ *   <li>行为验证：{@link AdminAuthAspect} 按 PreFilter 契约拒绝（setRejectReason + 返回 false），
+ *       覆盖未登录、普通用户、管理员、root、用户不存在与无注解放行分支。</li>
  * </ul>
  */
 @ExtendWith(MockitoExtension.class)
@@ -64,7 +66,7 @@ class DockerControllerAdminAuthTest {
         return aspect;
     }
 
-    /** 构造携带指定方法的过滤上下文（切面只读取 method）。 */
+    /** 构造携带指定方法的过滤上下文（切面只读取 method 与写入 rejectReason）。 */
     private FilterContext contextOf(Method method) {
         FilterContext context = mock(FilterContext.class);
         lenient().when(context.getMethod()).thenReturn(method);
@@ -87,29 +89,40 @@ class DockerControllerAdminAuthTest {
     @Test
     void blocksAnonymousRequest() {
         AdminAuthAspect aspect = newAspect();
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> aspect.doFilter(contextOf(LIST_CONTAINERS)));
-        assertEquals("请登录后重试", e.getMessage());
+        FilterContext context = contextOf(LIST_CONTAINERS);
+        assertFalse(aspect.doFilter(context));
+        verify(context).setRejectReason("请登录后重试");
     }
 
     @Test
     void blocksNormalUser() {
         UserContext.setUserId(1001L);
         stubUser(1);
-        AdminAuthAspect aspect = newAspect();
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> aspect.doFilter(contextOf(LIST_CONTAINERS)));
-        assertEquals("无权访问", e.getMessage());
+        FilterContext context = contextOf(LIST_CONTAINERS);
+        assertFalse(newAspect().doFilter(context));
+        verify(context).setRejectReason("无权访问");
+    }
+
+    @Test
+    void blocksNullRoleIdAsNormalUser() {
+        UserContext.setUserId(1006L);
+        stubUser(1);
+        // roleId 为 null 的异常账号按普通用户拒绝，避免拆箱 NPE
+        UserDto user = new UserDto();
+        user.setRoleId(null);
+        when(userFeignClient.getUserInfo(1006L)).thenReturn(Result.success(user));
+        FilterContext context = contextOf(LIST_CONTAINERS);
+        assertFalse(newAspect().doFilter(context));
+        verify(context).setRejectReason("无权访问");
     }
 
     @Test
     void blocksWhenUserRecordMissing() {
         UserContext.setUserId(1002L);
         when(userFeignClient.getUserInfo(1002L)).thenReturn(Result.success(null));
-        AdminAuthAspect aspect = newAspect();
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> aspect.doFilter(contextOf(LIST_CONTAINERS)));
-        assertEquals("用户不存在", e.getMessage());
+        FilterContext context = contextOf(LIST_CONTAINERS);
+        assertFalse(newAspect().doFilter(context));
+        verify(context).setRejectReason("用户不存在");
     }
 
     @Test
@@ -117,6 +130,9 @@ class DockerControllerAdminAuthTest {
         UserContext.setUserId(1003L);
         stubUser(2);
         assertTrue(newAspect().doFilter(contextOf(LIST_CONTAINERS)));
+        // 放行时不得写入拒绝原因
+        verify(contextOf(LIST_CONTAINERS), never()).setRejectReason(anyString());
+        verify(userFeignClient).getUserInfo(any());
     }
 
     @Test
@@ -137,5 +153,10 @@ class DockerControllerAdminAuthTest {
             throw new IllegalStateException(e);
         }
         assertTrue(newAspect().doFilter(contextOf(plainMethod)));
+        verifyNoUserLookup();
+    }
+
+    private void verifyNoUserLookup() {
+        verify(userFeignClient, never()).getUserInfo(any());
     }
 }

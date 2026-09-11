@@ -127,7 +127,8 @@ services:
       start_period: 30s
 
   nacos:
-    mem_limit: 640m
+    # JVM_XMX 512m + 堆外/元空间实际 RSS 约 630m+，640m 限额只剩十几 MB 会被 OOM kill
+    mem_limit: 1g
     image: nacos/nacos-server:v2.3.2
     <<: *infra-logging
     environment:

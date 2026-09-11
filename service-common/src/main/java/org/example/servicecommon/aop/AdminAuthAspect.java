@@ -1,8 +1,6 @@
 package org.example.servicecommon.aop;
 
 import lombok.extern.slf4j.Slf4j;
-import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.annotation.Before;
 import io.github.biglv666.apigovernance.filter.FilterContext;
 import io.github.biglv666.apigovernance.filter.PreFilter;
 import org.example.serviceapi.dto.Result;
@@ -18,10 +16,13 @@ import java.lang.reflect.Method;
 /**
  * 管理员权限校验切面。
  * <p>拦截标注了 {@link org.example.servicecommon.aop.RequireAdmin} 的方法（方法级），
- * 以及位于标注了该注解的类中的方法（类级）。</p>
+ * 以及位于标注了该注解的类中的方法（类级）。本切面经
+ * {@code META-INF/spring/...AutoConfiguration.imports} 注册，所有引入 service-common 的服务自动生效。</p>
  * <p>身份来自 {@link UserContext#getUserId()}（由 UserAuthInterceptor 写入），
- * 再回查用户的 roleId 判定是否为管理员（roleId == 2）。
- * 校验失败抛出 RuntimeException，由各 controller 的 GlobalExceptionHandler 统一返回 Result.error。</p>
+ * 再经 Feign 回查用户的 roleId 判定是否为管理员（roleId == 2）或 root（roleId == 0）。</p>
+ * <p>遵循 PreFilter 契约：拒绝时通过 {@link FilterContext#setRejectReason(String)} 设置原因并返回
+ * {@code false}，由 api-governance 统一转换为拒绝响应；不要在切面内抛异常——
+ * 过滤器链会把异常包装成无业务含义的「过滤器异常: xxx」。</p>
  */
 @Slf4j
 @Order(2)
@@ -38,28 +39,30 @@ public class AdminAuthAspect implements PreFilter {
     @Override
     public boolean doFilter(FilterContext context) {
 
-        Method method=context.getMethod();
-        Class<?> clazz=method.getDeclaringClass();
-        RequireAdmin admin;
-        admin=clazz.getAnnotation(RequireAdmin.class);
+        Method method = context.getMethod();
+        Class<?> clazz = method.getDeclaringClass();
+        RequireAdmin admin = clazz.getAnnotation(RequireAdmin.class);
         if (admin == null) {
-            admin=method.getAnnotation(RequireAdmin.class);
+            admin = method.getAnnotation(RequireAdmin.class);
         }
         if (admin == null) {
             return true;
         }
-        Long userId=UserContext.getUserId();
+        Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("请登录后重试");
+            context.setRejectReason("请登录后重试");
+            return false;
         }
         Result<UserDto> userBody = userFeignClient.getUserInfo(userId);
         if (userBody == null || userBody.getData() == null) {
-            throw new IllegalArgumentException("用户不存在");
+            context.setRejectReason("用户不存在");
+            return false;
         }
-        UserDto user=userBody.getData();
-        if(user.getRoleId()!=ROLE_ADMIN && user.getRoleId()!=ROLE_ROOT){
+        UserDto user = userBody.getData();
+        if (user.getRoleId() == null || (user.getRoleId() != ROLE_ADMIN && user.getRoleId() != ROLE_ROOT)) {
             log.warn("非管理员用户尝试访问管理接口, userId={}", userId);
-            throw new IllegalArgumentException("无权访问");
+            context.setRejectReason("无权访问");
+            return false;
         }
         return true;
     }

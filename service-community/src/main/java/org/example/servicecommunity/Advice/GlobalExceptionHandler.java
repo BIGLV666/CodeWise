@@ -1,5 +1,6 @@
 package org.example.servicecommunity.Advice;
 
+import io.github.biglv666.apigovernance.exception.GovernanceException;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.springframework.dao.DataAccessException;
@@ -13,6 +14,16 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @Slf4j
 @RestControllerAdvice(basePackages = "org.example.servicecommunity.controller")
 public class GlobalExceptionHandler {
+
+    /**
+     * api-governance 过滤器链的拒绝响应（如管理员校验的「无权访问」）：
+     * message 即面向用户的拒绝原因，原样返回，不能落到兜底分支掩盖语义。
+     */
+    @ExceptionHandler(GovernanceException.class)
+    public Result<?> handleGovernance(GovernanceException e) {
+        log.warn("治理过滤器拒绝: {}", e.getMessage());
+        return Result.error(e.getMessage());
+    }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public Result<?> handleIllegalArgument(IllegalArgumentException e) {
