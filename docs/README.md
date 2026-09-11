@@ -34,6 +34,7 @@
 - [`docs/codewise-flow-and-features.md`](codewise-flow-and-features.md)：刷题、判题、复习、社区、通知和 AI 的业务闭环。
 - [`docs/project-structure.md`](project-structure.md)：主要目录、模块职责、数据库边界和消息依赖。
 - [`docs/project-metrics.md`](project-metrics.md)：按固定口径记录的工程规模快照。
+- [`docs/loadtest-report.md`](loadtest-report.md)：判题链路压测报告（吞吐上限、瓶颈定位与修复证据链）。
 - [`docs/backend-controller-api.md`](backend-controller-api.md)：统一调用约定、服务接口索引、内部接口和 DTO 速查。
 
 ## 发布与维护
