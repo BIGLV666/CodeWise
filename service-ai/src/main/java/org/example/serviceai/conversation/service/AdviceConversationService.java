@@ -126,6 +126,12 @@ public class AdviceConversationService {
             aiConversationRepository.finishGeneratingMessage(savedMessage.getMessageId(), "", MessageStatus.FAILED);
             throw exception;
         }
+        // 空响应守卫：网关限流/流解析异常可能返回空串，按成功落库会出现空 COMPLETED 消息（前端空胶囊）；
+        // 置 FAILED 并上抛，交分发器延迟重试或死信留痕
+        if (repost == null || repost.isBlank()) {
+            aiConversationRepository.finishGeneratingMessage(savedMessage.getMessageId(), "", MessageStatus.FAILED);
+            throw new IllegalStateException("模型返回空响应");
+        }
         aiConversationRepository.finishGeneratingMessage(savedMessage.getMessageId(), repost, MessageStatus.COMPLETED);
         savedMessage.setContent(repost);
         savedMessage.setStatus(MessageStatus.COMPLETED);
@@ -285,6 +291,12 @@ public class AdviceConversationService {
             throw exception;
         }
 
+        // 空响应守卫：同 ask()——空流按 FAILED 收尾并上抛重试，不落空 COMPLETED 行
+        if (fullAnswer.toString().isBlank()) {
+            aiConversationRepository.finishGeneratingMessage(
+                    savedAssistant.getMessageId(), "", MessageStatus.FAILED);
+            throw new IllegalStateException("模型返回空响应");
+        }
         aiConversationRepository.finishGeneratingMessage(
                 savedAssistant.getMessageId(), fullAnswer.toString(), MessageStatus.COMPLETED);
         savedAssistant.setContent(fullAnswer.toString());

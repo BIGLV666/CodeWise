@@ -121,10 +121,11 @@ public class GLMService implements CallAi {
     }
 
     private String parseContent(String line, String provider) {
-        if (!line.startsWith("data: ")) {
+        // SSE 规范允许 "data:" 后不带空格，部分网关（如 new-api）会省略——只认 "data: " 会静默丢块导致回复截断
+        if (!line.startsWith("data:")) {
             return null;
         }
-        String data = line.substring(6).trim();
+        String data = line.substring(5).trim();
         if (data.isEmpty() || "[DONE]".equals(data)) {
             return null;
         }
