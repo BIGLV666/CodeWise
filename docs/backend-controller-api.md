@@ -24,8 +24,15 @@
 | `service-gateway` | `8082` | - | 推荐前端统一访问网关 |
 | `service-user` | `8081` | `/api/user/**` | 用户、登录、头像接口 |
 | `service-question` | `8084` | `/api/question/**` | 题目、测试点、提交、调试接口 |
-| `service-review` | `8097` | `/api/review/**` | 收藏夹与复习服务 |
+| `service-review` | `8097` | `/api/review/**` | 收藏夹、复习、笔记与学习计划 |
 | `service-community` | `8087` | `/api/community/**` | 帖子、题解、评论和点赞 |
+| `service-message` | `8083` | `/api/message/**`、`/websocket/**` | 通知中心与 WebSocket 推送 |
+| `service-ai` | `8085` | `/api/ai/**` | AI 建议、会话与自定义模型 |
+| `service-judge` | `8086` | `/api/judge/**` | 容器池与失败提交管理（管理员） |
+
+`codewise-agent`（FastAPI，8000）不经过网关路由：生产环境由 nginx 以 `/agentapi/` 反代，前端直连其 `/api/agent/**`（7 个端点，含 SSE 流式 `/api/agent/stream`），JWT 由 Agent 自行校验。
+
+实时端点：WebSocket（STOMP）统一由 `service-message` 提供（网关 `/websocket/**` 路由）；SSE 为 `POST /api/ai/advice/ask`（题目内追问）与 `POST /api/agent/stream`（Agent 对话）。
 
 通过网关调用示例：
 

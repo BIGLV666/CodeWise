@@ -4,9 +4,7 @@ import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.aop.RequireAdmin;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.servicecommunity.enums.PostType;
-import org.example.servicecommunity.service.AppealService;
 import org.example.servicecommunity.service.PostCheckService;
-import org.example.servicecommunity.vo.AppealVo;
 import org.example.servicecommunity.vo.CheckDetailVo;
 import org.example.servicecommunity.vo.CommentVo;
 import org.example.servicecommunity.vo.CursorPageResult;
@@ -32,9 +30,6 @@ public class PostCheckController {
 
     @Autowired
     private PostCheckService postCheckService;
-
-    @Autowired
-    private AppealService appealService;
 
     // ============ 帖子 ============
 
@@ -125,27 +120,6 @@ public class PostCheckController {
     @GetMapping("/detail")
     public Result<CheckDetailVo> detail(@RequestParam PostType type, @RequestParam Long targetId) {
         return Result.success(postCheckService.getDetail(type, targetId));
-    }
-
-    // ============ 申诉管理 ============
-
-    /** 获取申诉列表，可按状态筛选：0-待处理 1-已拒绝 2-已恢复。 */
-    @GetMapping("/appeal/list")
-    public Result<CursorPageResult<AppealVo>> listAppeals(
-            @RequestParam(required = false) Long lastId,
-            @RequestParam(defaultValue = "10") Integer pageSize,
-            @RequestParam(required = false) Integer status) {
-        return Result.success(appealService.getAppealList(lastId, pageSize, status));
-    }
-
-    /** 处理申诉：pass true-恢复内容 false-拒绝申诉。 */
-    @PostMapping("/appeal/handle")
-    public Result<Void> handleAppeal(
-            @RequestParam Long appealId,
-            @RequestParam Boolean pass,
-            @RequestParam(required = false) String adminReason) {
-        appealService.handleAppeal(appealId, pass, adminReason);
-        return Result.success(null);
     }
 
     // ============ 下架记录 ============

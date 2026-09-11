@@ -695,7 +695,7 @@ GET /api/community/check/takedown/list
 ## 二、申诉管理 API（管理员专用）
 
 **权限要求**: `@RequireAdmin`  
-**基础路径**: `/api/community/appeal-admin`（也可通过 `/api/community/check/appeal` 访问）
+**基础路径**: `/api/community/appeal-admin`
 
 ### 2.1 获取申诉列表
 
@@ -774,13 +774,11 @@ POST /api/community/appeal-admin/handle
 POST /api/community/appeal/submit
 ```
 
-**请求体**:
+**请求体**（与后端 `AppealDto` 字段一致）:
 ```json
 {
-  "rootType": "POST",
-  "rootId": 123456,
-  "rootCommentId": null,
-  "questionId": null,
+  "postId": 123456,
+  "postType": "POST",
   "reason": "我认为我的帖子没有违规，请重新审核..."
 }
 ```
@@ -788,10 +786,8 @@ POST /api/community/appeal/submit
 **字段说明**:
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| rootType | String | 是 | POST/COMMENT/SOLUTION |
-| rootId | Long | 是 | 内容 ID（帖子/评论/题解的 ID） |
-| rootCommentId | Long | 否 | 如果是评论，填写 comment_id |
-| questionId | Long | 否 | 关联题目 ID（题解时使用） |
+| postId | Long | 是 | 内容 ID（帖子/评论/题解的 ID） |
+| postType | String | 是 | POST/COMMENT/SOLUTION |
 | reason | String | 是 | 申诉理由 |
 
 **响应**:
@@ -803,8 +799,59 @@ POST /api/community/appeal/submit
 ```
 
 **说明**: 
-- 同一内容可无限次申诉，每次生成新的 `Appeal` 记录
-- 申诉成功后，系统会通知管理员
+- 只能申诉本人发布的内容，且内容处于被下架/被拒绝状态（status=2/3）时才可申诉
+- 同一内容只有一条 `Appeal` 记录：待审核（status=0）期间重复提交会被拒绝；处理完结后可再次提交并更新理由、重置状态
+- 申诉状态：0-待审核，1-拒绝，2-恢复（通过后原内容恢复）
+
+### 3.2 我的申诉历史
+
+```http
+GET /api/community/appeal/my?lastId=&pageSize=10
+```
+
+**参数**:
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| lastId | Long | 否 | 游标：上一页返回的最大 appealId，首页省略 |
+| pageSize | Integer | 否 | 页大小，默认 10，上限 50 |
+
+**响应**: `data` 为游标分页结构（按 appealId 升序）：
+```json
+{
+  "code": 200,
+  "data": {
+    "records": [
+      {
+        "appealId": 7,
+        "postId": 123456,
+        "postType": "POST",
+        "title": "帖子标题",
+        "reason": "误判，内容未违规",
+        "takeDownReason": "管理员回复/下架原因",
+        "status": 0,
+        "user": null,
+        "createTime": "2026-09-11T10:00:00",
+        "updateTime": "2026-09-11T10:00:00"
+      }
+    ],
+    "nextCursor": 7,
+    "hasNext": true,
+    "total": 1
+  }
+}
+```
+
+**说明**: 仅返回当前登录用户的申诉（身份取自网关注入的用户上下文）；`records[].user` 恒为 null（查自己的申诉不回填申诉人信息）。
+
+### 3.3 申诉详情
+
+```http
+GET /api/community/appeal/{appealId}
+```
+
+**响应**: `data` 为单条 `AppealVo`（结构同 3.2 中 records 元素）。
+
+**说明**: 仅申诉发起人可查看；查询他人申诉返回错误「无权查看该申诉」，不存在返回「申诉不存在」。
 
 ---
 
@@ -1301,9 +1348,9 @@ createTime        DATETIME
 | `GET /api/community/check/posts` | `GET /api/community/check/post/list` |
 | `POST /api/community/check/posts/{id}` | `POST /api/community/check/post`（query 传 `postId`、`status`） |
 | `POST /api/community/check/posts/{id}/takedown` / `/restore` | `POST /api/community/check/post/status` |
-| `GET /api/community/appeal` / `/appeal/my` / `/appeal/{appealId}` | `POST /api/community/appeal/submit` |
-| `GET /api/community/appeal/admin/pending` | `GET /api/community/appeal-admin/list` 或 `GET /api/community/check/appeal/list` |
-| `POST /api/community/appeal/admin/{appealId}/handle` | `POST /api/community/appeal-admin/handle` 或 `POST /api/community/check/appeal/handle` |
+| `GET /api/community/appeal` / `/appeal/my` / `/appeal/{appealId}` | `POST /api/community/appeal/submit`、`GET /api/community/appeal/my`、`GET /api/community/appeal/{appealId}` |
+| `GET /api/community/appeal/admin/pending` | `GET /api/community/appeal-admin/list` |
+| `POST /api/community/appeal/admin/{appealId}/handle` | `POST /api/community/appeal-admin/handle` |
 | `GET /api/community/my-content` | `GET /api/community/mine?type=POST&lastId=&pageSize=20` |
 
 评论与题解的审核同理使用 `check/comment/*`、`check/solution/*` 系列路径。

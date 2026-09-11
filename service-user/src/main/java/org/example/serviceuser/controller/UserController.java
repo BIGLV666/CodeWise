@@ -23,10 +23,6 @@ public class UserController {
     private UserService userService;
     @Autowired
     private RabbitTemplate rabbitTemplate;
-    @GetMapping("/hello")
-    public String hello(){
-        return "hello";
-    }
     @PostMapping("/emailregister")
     @RateLimit(limit = 20, window = 60)
     public Result<String> emailRegister(@RequestParam String email, @RequestParam String password, @RequestParam String username){

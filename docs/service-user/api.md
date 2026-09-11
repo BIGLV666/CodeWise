@@ -4,14 +4,6 @@
 
 基础路径：`/api/user`
 
-### 健康测试
-
-```http
-GET /api/user/hello
-```
-
-说明：简单连通性测试，直接返回字符串 `"hello"`，不包 `Result`。
-
 ### 邮箱预注册
 
 ```http

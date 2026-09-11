@@ -169,7 +169,7 @@ public class AiAdviceController {
     }
     @GetMapping("/task")
     @RateLimit(limit = 100, window = 60)
-    public Result<List<Object>>getAllAdviceTasks(@RequestParam Long questionId) {
+    public Result<List<String>> getAllAdviceTasks(@RequestParam Long questionId) {
         return Result.success(aiAdviceTaskService.getAiAdvices(UserContext.getUserId(), questionId));
     }
 

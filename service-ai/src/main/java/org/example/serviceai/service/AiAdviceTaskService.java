@@ -351,13 +351,32 @@ public class AiAdviceTaskService {
         return Objects.requireNonNullElse(change.getRangeOffset(), -1);
     }
 
-    public List<Object>getAiAdvices(Long userId,Long questionId){
-        String key=AI_ADVICE_KEY+":"+userId+":"+questionId;
-        Long size=redisTemplate.opsForList().size(key);
-        if(size==null){
+    /**
+     * 查询指定用户某题目的 AI 建议列表。
+     *
+     * <p>Redis 列表中保存的是每轮生成的建议原文（String），
+     * 读取时会触发一次时间戳压缩（{@code timeChange}）。</p>
+     *
+     * @param userId     用户 ID
+     * @param questionId 题目 ID
+     * @return 建议原文列表，无记录时返回空列表
+     */
+    public List<String> getAiAdvices(Long userId, Long questionId) {
+        String key = AI_ADVICE_KEY + ":" + userId + ":" + questionId;
+        Long size = redisTemplate.opsForList().size(key);
+        if (size == null) {
             return List.of();
         }
-        timeChange(":"+userId+":"+questionId);
-        return redisTemplate.opsForList().range(key, 0L, size);
+        timeChange(":" + userId + ":" + questionId);
+        List<Object> range = redisTemplate.opsForList().range(key, 0L, size);
+        List<String> advices = new ArrayList<>(range == null ? 0 : range.size());
+        if (range != null) {
+            for (Object item : range) {
+                if (item instanceof String text) {
+                    advices.add(text);
+                }
+            }
+        }
+        return advices;
     }
 }
