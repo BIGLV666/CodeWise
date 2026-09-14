@@ -84,6 +84,7 @@ public class ConsumedEventService {
      * @return 更新后的已失败尝试次数（回读；幂等行不存在时返回 0）
      */
     public int recordFailure(String eventId, String error) {
+
         consumedEventMapper.update(null, new LambdaUpdateWrapper<ConsumedEvent>()
                 .eq(ConsumedEvent::getEventId, eventId)
                 .setSql("retry_count = retry_count + 1")
@@ -100,6 +101,7 @@ public class ConsumedEventService {
      * @param error   失败原因（异常描述）
      */
     public void markFailed(String eventId, String error) {
+
         consumedEventMapper.update(null, new LambdaUpdateWrapper<ConsumedEvent>()
                 .eq(ConsumedEvent::getEventId, eventId)
                 .set(ConsumedEvent::getStatus, ConsumedEventStatus.FAILED)

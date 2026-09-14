@@ -25,6 +25,8 @@ jobs:
           cache: maven
       - name: Install parent POM & shared modules (api before common)
         run: |
+          # Windows 提交易丢 mvnw 执行位（100644），此处兜底修正
+          chmod +x mvnw
           ./mvnw -N -B install
           ./mvnw -f service-api/pom.xml -B -DskipTests install
           ./mvnw -f service-common/pom.xml -B -DskipTests install
@@ -54,6 +56,8 @@ jobs:
           cache: maven
       - name: Install parent POM & shared modules (per-job, isolated)
         run: |
+          # Windows 提交易丢 mvnw 执行位（100644），此处兜底修正（后续步骤复用同一工作区）
+          chmod +x mvnw
           ./mvnw -N -B install
           ./mvnw -f service-api/pom.xml -B -DskipTests install
           ./mvnw -f service-common/pom.xml -B -DskipTests install
