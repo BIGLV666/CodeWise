@@ -67,7 +67,18 @@ public class JudgeService {
     }
 
 
+    /**
+     * 归一化提交场景。
+     *
+     * @param type 客户端提交的 submitScene（NORMAL/REVIEW/PLAN）
+     * @return 归一化后的场景字符串
+     * @throws IllegalArgumentException 场景缺失或不在枚举内——缺失时必须返回明确业务错误，
+     *         不能进入 switch 触发 NPE（否则客户端漏传字段拿到 500 而非 400 语义）
+     */
     private String getType(String type){
+         if (type == null || type.isBlank()) {
+             throw new IllegalArgumentException("提交场景不能为空");
+         }
          return switch (type){
              case "REVIEW" -> "REVIEW";
              case "NORMAL" -> "NORMAL";

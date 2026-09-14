@@ -21,9 +21,11 @@ import org.springframework.data.redis.core.RedisTemplate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -71,6 +73,7 @@ class JudgeServiceTest {
         getCodeDto.setLanguage("Python");
         getCodeDto.setQuestionId(5L);
         getCodeDto.setQuestionTitle("两数之和");
+        getCodeDto.setSubmitScene("NORMAL");
 
         Long submitRecordId = judgeService.judge(getCodeDto);
 
@@ -80,6 +83,20 @@ class JudgeServiceTest {
         verify(outboxPublisher).publish(
                 eq(EventTypes.JUDGE_SUBMIT_REQUEST),
                 eq(777L));
+    }
+
+    /** 提交场景缺失时应返回明确业务错误，而不是 switch(null) 的 NPE（客户端漏传字段不得成为 500）。 */
+    @Test
+    void judgeRejectsMissingSubmitSceneWithBusinessError() {
+        GetCodeDto getCodeDto = new GetCodeDto();
+        getCodeDto.setCode("print(1)");
+        getCodeDto.setLanguage("Python");
+        getCodeDto.setQuestionId(5L);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> judgeService.judge(getCodeDto));
+        assertEquals("提交场景不能为空", exception.getMessage());
+        verifyNoInteractions(submitRecordMapper);
     }
 
     @Test
