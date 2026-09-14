@@ -10,9 +10,10 @@
 
 ```
 ┌────────────────────────────── 客户端 ───────────────────────────────┐
-│   Web 前端（HTTP / SSE / WebSocket）        CodeWise-Agent（Python）  │
-│                                            LangGraph 智能体，复用用户 │
-│                                            原始 Bearer Token 回调     │
+│   Web 前端（HTTP / SSE / WebSocket）        codewise-agent（Python）  │
+│                                            FastAPI 门面 + dsh Node  │
+│                                            工具运行时，复用用户原始   │
+│                                            Bearer Token 回调网关     │
 └───────────────┬──────────────────────────────────┬──────────────────┘
                 │                                  │
                 ▼                                  ▼

@@ -38,22 +38,29 @@ CodeWise 面向在线刷题场景，核心目标是把高延迟、高风险的�
 sequenceDiagram
     participant C as Client
     participant Q as service-question
+    participant O as 事务性 Outbox
     participant M as RabbitMQ
     participant J as service-judge
-    participant D as Docker
+    participant D as Docker 沙箱
+    participant A as service-ai
     participant N as service-message
 
     C->>Q: 提交代码
-    Q->>Q: 创建提交记录
-    Q->>M: 发布判题任务
-    M->>J: 消费任务
-    J->>D: 创建容器并执行代码
-    D-->>J: 编译/运行结果
+    Q->>Q: 创建提交记录（pending）
+    Q->>O: 同事务登记判题事件
+    O->>M: Relay 投递（至少一次）
+    M->>J: 消费任务（消费并发可配，默认 2）
+    J->>D: 从预热容器池租借容器并执行
+    D-->>J: 编译 / 运行结果
     J->>M: 发布判题结果
-    M->>Q: 更新提交记录
-    M->>N: 发送通知
+    M->>Q: 回写提交记录（judging→success CAS 幂等）
+    M->>A: 判题失败事件 → 生成 AI 建议
+    M->>N: 通知事件
+    A->>N: 建议通知（经事务性 Outbox 登记）
     N-->>C: WebSocket 推送
 ```
+
+失败路径：消费异常按 5s/10s/20s 延迟重试，超过最大重试次数进入死信队列（`judge.dead.queue` / `ai.dead.queue`）留痕，可人工重放；重复投递由 `submit_record` 的状态 CAS 与 `consumed_event` 幂等表拦截。
 
 ### 4.2 为什么使用消息队列
 

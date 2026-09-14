@@ -15,36 +15,59 @@ CodeWise 是面向在线编程、代码判题和错题复习场景的学习平�
 ## 系统架构
 
 ```mermaid
-flowchart LR
-    Client["Web / API Client"] --> Gateway["service-gateway"]
-    Gateway --> User["service-user"]
-    Gateway --> Question["service-question"]
-    Gateway --> Review["service-review"]
-    Gateway --> Community["service-community"]
-    Gateway --> Message["service-message"]
-    Gateway --> AI["service-ai"]
-    Client --> Agent["codewise-agent / FastAPI"]
-    Agent -->|"Bearer Token + HTTP Tools"| Gateway
-    Agent --> AgentDB["codewise_ai / Agent Tables"]
-    Agent --> LLM["OpenAI-compatible Model"]
+flowchart TB
+    Web["Web 前端（HTTP / SSE / WebSocket）"]
+    ApiClient["API Client"]
+    Gateway["service-gateway :8082<br/>JWT 校验 · 剥离伪造头后注入可信身份 · 路由"]
 
-    Question -->|"判题任务"| MQ["RabbitMQ"]
-    MQ --> Judge["service-judge"]
+    subgraph services["业务服务"]
+        User["service-user :8081<br/>账户 / 邮箱 / 封禁"]
+        Question["service-question :8084<br/>题目 / 测试点 / 提交"]
+        Review["service-review :8097<br/>收藏夹 / 复习 / 笔记"]
+        Community["service-community :8087<br/>帖子 / 题解 / 评论"]
+        Message["service-message :8083<br/>通知 / 邮件 / WebSocket"]
+        AI["service-ai :8085<br/>判题建议 / SSE 追问"]
+    end
+
+    subgraph pipeline["异步判题"]
+        Outbox["事务性 Outbox<br/>与业务同事务登记"]
+        MQ["RabbitMQ<br/>延迟重试 + DLX/DLQ"]
+        Judge["service-judge :8086<br/>不经网关"]
+        Sandbox["Docker 判题沙箱<br/>容器池 2 Java + Python/C/C++"]
+    end
+
+    Agent["codewise-agent（FastAPI + dsh 工具运行时）<br/>原 Token 经网关调用业务工具"]
+    Infra["基础设施<br/>MySQL（每服务一库）· Redis · Nacos"]
+    ModelGateway["OpenAI 兼容模型网关<br/>平台 Provider + 用户自定义模型"]
+
+    Web --> Gateway
+    ApiClient --> Gateway
+    Gateway --> services
+
+    Web -->|"Bearer Token 直达"| Agent
+    Agent -->|"原 Token + 工具调用"| Gateway
+    Agent --> ModelGateway
+
+    Question -->|"记录落库 + 事件登记"| Outbox
+    Outbox -->|"Relay"| MQ
+    MQ -->|"judge.submit.queue"| Judge
+    Judge --> Sandbox
     Judge -->|"判题结果"| MQ
-    MQ --> Question
+    MQ -->|"回写 / 通知 / AI 建议"| services
+    AI --> ModelGateway
 
-    Judge --> Docker["Docker Runtime"]
-    Question --> Redis["Redis"]
-    Community --> Redis
-    Review --> Redis
+    Message -.->|"WebSocket"| Web
+    AI -.->|"SSE"| Web
+    services --- Infra
+    Agent -.->|"agent_* 表"| Infra
 ```
 
-- Gateway 校验 JWT，并通过请求头向下游传递用户身份。
-- 下游拦截器解析身份并写入 `UserContext`，业务服务继续判断题目作者、记录所有者等资源权限。
-- `service-api` 维护 Feign 接口和跨服务 DTO，`service-common` 提供用户上下文、Redis、RabbitMQ 等公共配置。
-- 每个业务服务维护自己的数据访问边界，跨服务数据通过 Feign 或消息传递，不使用跨库 SQL 作为常规调用方式。
-- Python Agent 由前端携带 CodeWise Bearer Token 直接访问。Agent 使用与 Java 端一致的 JWT 密钥解析用户身份，调用工具时继续携带原 Token，经 Gateway 访问用户、题目、提交和复习接口。
-- `service-ai` 与 Python Agent 职责不同：前者处理判题事件驱动建议和题目内追问，后者处理独立 Agent 页面中的跨模块自然语言操作。
+- Gateway 校验 JWT，**先剥离**客户端伪造的 `X-User-Id`/`X-User-Name`/`X-Internal-Token`/`X-Real-IP`，**再注入**可信值；下游拦截器校验内部 Token 并写入 `UserContext`，Feign 调用继续透传同一身份。
+- **每个服务一个数据库**，跨服务数据只经 Feign 或消息传递，不做跨库 SQL；判题服务与题目服务共库但只读写判题相关表。
+- **异步判题**：提交记录落库与事件登记在同一事务（事务性 Outbox），Relay 投递到 RabbitMQ，判题服务在 Docker 沙箱执行后回写结果；失败走延迟重试（5s/10s/20s），超限进死信队列留痕可重放。
+- **实时通道**：通知中心经 WebSocket 推送（判题结果、点赞、申诉处理），`service-ai` 的题目内追问与 Agent 对话走 SSE 流式返回。
+- **Python Agent** 由前端携带用户原始 Bearer Token 直达，用与 Java 端一致的 JWT 密钥解析身份，工具调用携带原 Token 经 Gateway 访问各服务；Agent 不接受模型生成的 `userId`。
+- **两条 AI 路径职责不同**：`service-ai` 消费判题失败事件生成建议、提供题目内追问；`codewise-agent` 提供独立会话页面的跨模块自然语言操作。两者都通过 OpenAI 兼容网关接入模型，平台 Provider 由 Nacos 下发，用户也可配置自定义模型。
 
 ## 服务模块
 
