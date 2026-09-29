@@ -1,8 +1,10 @@
 package org.example.servicejudge.service;
 
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicejudge.entry.*;
 import org.example.servicejudge.enums.QuestionType;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.interfaces.JudgeInterface;
 import org.example.servicejudge.mapper.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -202,9 +204,12 @@ class JudgeTaskServiceTest {
         question.setQuestionType(null);
         when(questionMapper.selectById(1L)).thenReturn(question);
 
-        org.junit.jupiter.api.Assertions.assertThrows(
-                IllegalStateException.class,
+        // 题目/类型缺失改为 BizException（枚举文案），仍为上抛快速失败
+        BizException exception = org.junit.jupiter.api.Assertions.assertThrows(
+                BizException.class,
                 () -> judgeTaskService.judgeAndPersist(record, true));
+        assertEquals(JudgeErrorCode.JUDGE_QUESTION_NOT_FOUND.getCode(), exception.getCode());
+        assertEquals(JudgeErrorCode.JUDGE_QUESTION_NOT_FOUND.getMessage(), exception.getMessage());
 
         verifyNoInteractions(judge, outboxPublisher);
     }

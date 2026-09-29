@@ -1,6 +1,7 @@
 package org.example.servicegateway.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.servicegateway.exception.GatewayErrorCode;
 import org.springframework.boot.web.reactive.error.ErrorWebExceptionHandler;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.buffer.DataBuffer;
@@ -36,13 +37,13 @@ public class GlobalErrorWebExceptionHandler implements ErrorWebExceptionHandler 
     public Mono<Void> handle(ServerWebExchange exchange, Throwable ex) {
         ServerHttpResponse response = exchange.getResponse();
         HttpStatus status = resolveStatus(exchange, ex);
-        String message = messageFor(status);
+        GatewayErrorCode errorCode = errorCodeFor(status);
         log.error("网关转发异常: status={}, path={}, error={}",
                 status.value(), exchange.getRequest().getPath(), ex.getMessage(), ex);
 
-        // 消息为固定文案（不含异常明细），无需转义；UTF-8 直接写出
-        byte[] bytes = ("{\"code\":" + status.value()
-                + ",\"message\":\"" + message
+        // 文案来自固定枚举（不含异常明细），无需转义；UTF-8 直接写出
+        byte[] bytes = ("{\"code\":" + errorCode.getCode()
+                + ",\"message\":\"" + errorCode.getMessage()
                 + "\",\"data\":null}").getBytes(StandardCharsets.UTF_8);
         response.setStatusCode(status);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
@@ -68,15 +69,26 @@ public class GlobalErrorWebExceptionHandler implements ErrorWebExceptionHandler 
         return HttpStatus.INTERNAL_SERVER_ERROR;
     }
 
-    /** 按状态码给出固定文案，不外泄异常/内部信息。 */
-    private String messageFor(HttpStatus status) {
+    /** 状态码归一到错误码枚举，文案固定，不外泄异常明细与英文 reason phrase。 */
+    private GatewayErrorCode errorCodeFor(HttpStatus status) {
         if (status == HttpStatus.NOT_FOUND) {
-            return "接口不存在";
+            return GatewayErrorCode.NOT_FOUND;
+        }
+        if (status == HttpStatus.UNAUTHORIZED) {
+            return GatewayErrorCode.LOGIN_REQUIRED;
+        }
+        if (status == HttpStatus.FORBIDDEN) {
+            return GatewayErrorCode.NO_PERMISSION;
+        }
+        if (status == HttpStatus.TOO_MANY_REQUESTS) {
+            return GatewayErrorCode.RATE_LIMITED;
+        }
+        if (status == HttpStatus.BAD_REQUEST) {
+            return GatewayErrorCode.PARAM_INVALID;
         }
         if (status.is5xxServerError()) {
-            return "系统繁忙，请稍后重试";
+            return GatewayErrorCode.DOWNSTREAM_UNAVAILABLE;
         }
-        String reason = status.getReasonPhrase();
-        return reason != null ? reason : "请求失败";
+        return GatewayErrorCode.INTERNAL_ERROR;
     }
 }

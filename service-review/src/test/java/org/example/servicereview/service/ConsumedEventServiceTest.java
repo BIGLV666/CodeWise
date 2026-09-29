@@ -1,5 +1,7 @@
 package org.example.servicereview.service;
 
+import org.example.serviceapi.exception.BizException;
+
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -85,7 +87,7 @@ class ConsumedEventServiceTest {
         when(consumedEventMapper.insert(any(ConsumedEvent.class))).thenThrow(new DuplicateKeyException("duplicate"));
         when(consumedEventMapper.selectOne(any())).thenReturn(null);
 
-        assertThrows(IllegalStateException.class, () -> consumedEventService.claim(EVENT_ID, ROUTING_KEY));
+        assertThrows(BizException.class, () -> consumedEventService.claim(EVENT_ID, ROUTING_KEY));
     }
 
     @Test

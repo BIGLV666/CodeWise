@@ -1,6 +1,8 @@
 package org.example.servicecommunity.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.Post;
@@ -8,6 +10,7 @@ import org.example.servicecommunity.entry.Solution;
 import org.example.servicecommunity.entry.TakeDownPost;
 import org.example.servicecommunity.entry.Tags;
 import org.example.servicecommunity.enums.PostType;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.PostMapper;
 import org.example.servicecommunity.mapper.SolutionMapper;
@@ -44,10 +47,10 @@ public class MyContentService {
 
     public CursorPageResult<MyContentVo> list(PostType type, Long lastId, Integer pageSize) {
         if (type == null) {
-            throw new IllegalArgumentException("内容类型不能为空");
+            throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         }
         if (pageSize == null || pageSize < 1 || pageSize > 100) {
-            throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
+            throw new BizException(CommunityErrorCode.PAGE_SIZE_INVALID);
         }
         return switch (type) {
             case POST -> listPosts(lastId, pageSize);
@@ -153,7 +156,7 @@ public class MyContentService {
     private Long currentUserId() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("请登录后查看自己的内容");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         return userId;
     }

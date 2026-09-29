@@ -2,6 +2,7 @@ package org.example.servicequestion.service;
 
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.entry.FunctionConfig;
@@ -183,9 +184,9 @@ class QuestionServiceAgentDetailTest {
 
     @Test
     void batchDetails_inputHygiene() {
-        assertThrows(IllegalArgumentException.class, () -> questionService.getQuestionDetailsBatch(List.of()));
-        assertThrows(IllegalArgumentException.class, () -> questionService.getQuestionDetailsBatch(null));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class, () -> questionService.getQuestionDetailsBatch(List.of()));
+        assertThrows(BizException.class, () -> questionService.getQuestionDetailsBatch(null));
+        assertThrows(BizException.class,
                 () -> questionService.getQuestionDetailsBatch(LongStream.rangeClosed(1, 11).boxed().toList()));
         // null 与重复元素被过滤后不超限（Arrays.asList 允许 null，与真实 JSON 入参一致）
         when(questionMapper.selectList(any())).thenReturn(List.of());

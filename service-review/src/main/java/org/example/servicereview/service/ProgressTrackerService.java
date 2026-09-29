@@ -5,6 +5,8 @@ import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
@@ -14,6 +16,7 @@ import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.ProgressTrackerDto;
 import org.example.servicereview.entry.ProgressTracker;
 import org.example.servicereview.enums.ProgressTrackerStatus;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.example.servicereview.mapper.ProgressTrackerMapper;
 import org.example.servicereview.vo.ProgressBatchCreateVo;
 import org.example.servicereview.vo.ProgressBatchDeleteVo;
@@ -119,7 +122,7 @@ public class ProgressTrackerService {
         String lockKey = "review:plan:" + record.getUserId() + ":" + LocalDate.now();
         RLock lock = redissonClient.getLock(lockKey);
         if (!lock.tryLock(3, TimeUnit.SECONDS)) {
-            throw new IllegalStateException("计划正在更新，请稍后重试");
+            throw new BizException(ReviewErrorCode.PLAN_UPDATE_BUSY);
         }
         try {
             ProgressTracker plan = progressTrackerMapper.selectOne(new QueryWrapper<ProgressTracker>()
@@ -159,13 +162,13 @@ public class ProgressTrackerService {
         try{
            int r= progressTrackerMapper.insert(progressTracker);
            if(r==0){
-               throw new RuntimeException("创建进度计划失败");
+               throw new BizException(ReviewErrorCode.PLAN_CREATE_FAILED);
            }
         }catch (Exception e){
             if(e instanceof DuplicateKeyException){
-                throw new RuntimeException("该题目已存在进度计划");
+                throw new BizException(ReviewErrorCode.PLAN_DUPLICATE, e);
             }
-            throw new RuntimeException("创建进度计划失败");
+            throw new BizException(ReviewErrorCode.PLAN_CREATE_FAILED, e);
         }
         return progressTracker;
     }
@@ -217,10 +220,10 @@ public class ProgressTrackerService {
         if (beginTime != null && !beginTime.equals(existing.getBeginTime())) {
             // 单向状态机：仅「未开始」允许改开始时间；进行中/已过期/已完成一律锁定
             if (!Integer.valueOf(ProgressTrackerStatus.NOT_STARTED.getCode()).equals(existing.getStatus())) {
-                throw new IllegalArgumentException("仅未开始的计划可修改开始时间");
+                throw new BizException(ReviewErrorCode.PLAN_TIME_NOT_EDITABLE);
             }
             if (beginTime.isBefore(LocalDate.now())) {
-                throw new IllegalArgumentException("开始时间不可早于当前时间");
+                throw new BizException(ReviewErrorCode.PLAN_BEGIN_TIME_PAST);
             }
             existing.setBeginTime(beginTime);
             // 重新规划后按新日期重算状态（改到今天→进行中，仍在未来→未开始）
@@ -281,10 +284,10 @@ public class ProgressTrackerService {
      */
     public ProgressBatchCreateVo batchCreate(List<ProgressTrackerDto> dtos) {
         if (dtos == null || dtos.isEmpty()) {
-            throw new IllegalArgumentException("计划列表不能为空");
+            throw new BizException(ReviewErrorCode.PLAN_LIST_EMPTY);
         }
         if (dtos.size() > MAX_PROGRESS_BATCH) {
-            throw new IllegalArgumentException("单次最多创建 " + MAX_PROGRESS_BATCH + " 条计划");
+            throw new BizException(ReviewErrorCode.PLAN_BATCH_LIMIT, MAX_PROGRESS_BATCH);
         }
         Long userId = UserContext.getUserId();
         int created = 0;
@@ -298,7 +301,7 @@ public class ProgressTrackerService {
             try {
                 int r = progressTrackerMapper.insert(plan);
                 if (r == 0) {
-                    throw new RuntimeException("创建进度计划失败");
+                    throw new BizException(ReviewErrorCode.PLAN_CREATE_FAILED);
                 }
                 created++;
             } catch (DuplicateKeyException e) {
@@ -317,10 +320,10 @@ public class ProgressTrackerService {
         List<Long> distinct = progressIds == null ? List.of()
                 : progressIds.stream().filter(id -> id != null).distinct().toList();
         if (distinct.isEmpty()) {
-            throw new IllegalArgumentException("计划 ID 列表不能为空");
+            throw new BizException(ReviewErrorCode.PLAN_ID_LIST_EMPTY);
         }
         if (distinct.size() > MAX_PROGRESS_BATCH) {
-            throw new IllegalArgumentException("单次最多删除 " + MAX_PROGRESS_BATCH + " 条计划");
+            throw new BizException(ReviewErrorCode.PLAN_DELETE_BATCH_LIMIT, MAX_PROGRESS_BATCH);
         }
         Long userId = UserContext.getUserId();
         int deleted = 0;
@@ -499,10 +502,10 @@ public class ProgressTrackerService {
     private ProgressTracker getOwnProgressOrThrow(Long progressId) {
         ProgressTracker existing = progressTrackerMapper.selectById(progressId);
         if (existing == null) {
-            throw new IllegalArgumentException("进度计划不存在");
+            throw new BizException(ReviewErrorCode.PLAN_NOT_FOUND);
         }
         if (!existing.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("无权操作该进度计划");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         return existing;
     }

@@ -6,10 +6,12 @@ import org.example.serviceai.conversation.enums.Role;
 import org.example.serviceai.entry.AiConversationMemory;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.Message;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.mapper.AiConversationMemoryMapper;
 import org.example.serviceai.mapper.ConversationMapper;
 import org.example.serviceai.mapper.MessageMapper;
 import org.example.serviceai.service.OllamaService;
+import org.example.serviceapi.exception.BizException;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -77,7 +79,7 @@ public class AiConversationMemaryService {
             if (aiConversationMemory == null) {
                 recentSubmissions = keepLatestSubmissions(recentSubmissions, 4);
                 String prompt = buildPrompt("INCREMENTAL", conversation, null, recentSubmissions, recentMessages);
-                String answer = ollamaService.callAi(prompt);
+                String answer = requireSummaryAnswer(ollamaService.callAi(prompt));
                 aiConversationMemory = new AiConversationMemory();
                 aiConversationMemory.setConversationId(conversationId);
                 aiConversationMemory.setUserId(userId);
@@ -95,7 +97,7 @@ public class AiConversationMemaryService {
             recentSubmissions = keepLatestSubmissions(recentSubmissions, 4);
             String prompt = buildPrompt(mode, conversation, aiConversationMemory,
                     recentSubmissions, recentMessages);
-            String answer = ollamaService.callAi(prompt);
+            String answer = requireSummaryAnswer(ollamaService.callAi(prompt));
             aiConversationMemory.setUpdateTime(LocalDateTime.now());
             aiConversationMemory.setEndMessageId(batchEndMessageId);
             aiConversationMemory.setSummary(answer);
@@ -111,8 +113,15 @@ public class AiConversationMemaryService {
         }
     }
 
-    private List<Message> selectPendingMessages(Long conversationId, Long userId, Long endMessageId) {
-        QueryWrapper<Message> query = new QueryWrapper<Message>()
+    /** 摘要模型返回空内容时不落空记忆，抛业务异常（异步链路仅日志留痕，下轮自动重试）。 */
+    private String requireSummaryAnswer(String answer) {
+        if (answer == null || answer.isBlank()) {
+            throw new BizException(AiErrorCode.SUMMARY_UPDATE_FAILED);
+        }
+        return answer;
+    }
+
+    private List<Message> selectPendingMessages(Long conversationId, Long userId, Long endMessageId) {        QueryWrapper<Message> query = new QueryWrapper<Message>()
                 .eq("conversation_id", conversationId)
                 .eq("user_id", userId)
                 .orderByAsc("message_id")

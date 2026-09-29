@@ -2,8 +2,10 @@ package org.example.servicereview.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicereview.entry.ConsumedEvent;
 import org.example.servicereview.enums.ConsumedEventStatus;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.example.servicereview.mapper.ConsumedEventMapper;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -53,7 +55,7 @@ public class ConsumedEventService {
                     consumedEventMapper.insert(buildNewEvent(eventId, routingKey));
                     return ClaimResult.NEW;
                 } catch (DuplicateKeyException secondConflict) {
-                    throw new IllegalStateException("事件幂等行冲突且无法读取：" + eventId, secondConflict);
+                    throw new BizException(ReviewErrorCode.EVENT_CLAIM_CONFLICT, secondConflict);
                 }
             }
             if (existing.getStatus() == ConsumedEventStatus.COMPLETED) {

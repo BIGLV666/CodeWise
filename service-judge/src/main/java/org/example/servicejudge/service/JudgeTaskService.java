@@ -4,6 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.ai.AiAdviceWADto;
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.Dto.TestDto;
 import org.example.servicejudge.Util.CodeBuild;
 import org.example.servicejudge.entry.*;
@@ -104,7 +107,7 @@ public class JudgeTaskService {
      * @param submitRecordId 提交记录主键
      * @return 判题结果记录；领取阶段幂等短路（见 {@link #claimSubmitRecord}）返回 null
      * @throws IOException     判题执行失败
-     * @throws IllegalStateException 题目/配置缺失、结果入库失败等业务异常
+     * @throws BizException 题目/配置缺失、结果入库失败等业务异常（消息面向后台留痕，原因只进日志）
      */
     public JudgeRecord handleSubmit(Long submitRecordId) throws IOException {
         SubmitRecord submitRecord = claimSubmitRecord(submitRecordId);
@@ -123,7 +126,7 @@ public class JudgeTaskService {
      *                     Retry 流程维持现状不发）
      * @return 已落库并回填主键的判题结果
      * @throws IOException     判题执行失败
-     * @throws IllegalStateException 题目/配置缺失、结果入库失败等业务异常
+     * @throws BizException 题目/配置缺失、结果入库失败等业务异常（消息面向后台留痕，原因只进日志）
      */
     public JudgeRecord judgeAndPersist(SubmitRecord submitRecord, boolean sendAiAdvice) throws IOException {
         JudgeRecord finalResult = executeJudge(submitRecord);
@@ -139,7 +142,9 @@ public class JudgeTaskService {
     private JudgeRecord executeJudge(SubmitRecord submitRecord) throws IOException {
         Question question = questionMapper.selectById(submitRecord.getQuestionId());
         if (question == null || question.getQuestionType() == null) {
-            throw new IllegalStateException("题目或题目类型不存在，questionId=" + submitRecord.getQuestionId());
+            log.warn("题目或题目类型不存在，submitId={}, questionId={}",
+                    submitRecord.getSubmitRecordId(), submitRecord.getQuestionId());
+            throw new BizException(JudgeErrorCode.JUDGE_QUESTION_NOT_FOUND);
         }
 
         if (QuestionType.ACM.equals(question.getQuestionType())) {
@@ -148,7 +153,9 @@ public class JudgeTaskService {
         if (QuestionType.FUNCTION.equals(question.getQuestionType())) {
             return judgeFunction(submitRecord);
         }
-        throw new IllegalStateException("不支持的题目类型：" + question.getQuestionType());
+        log.warn("不支持的题目类型：{}，submitId={}",
+                question.getQuestionType(), submitRecord.getSubmitRecordId());
+        throw new BizException(JudgeErrorCode.QUESTION_TYPE_UNSUPPORTED);
     }
 
     /**
@@ -159,7 +166,7 @@ public class JudgeTaskService {
      * @param submitRecord  提交记录
      * @param finalResult   判题结果（本事务内回填主键）
      * @param sendAiAdvice  是否在 WA/RE/TLE 时登记 AI 建议事件
-     * @throws IllegalStateException 插入失败或主键未回填（整体回滚）
+     * @throws BizException 插入失败或主键未回填（整体回滚）
      */
     @Transactional
     public void persistResultWithEvents(
@@ -210,11 +217,12 @@ public class JudgeTaskService {
     }
 
     /**
-     * 补齐提交关联字段并持久化判题结果，同时校验主键回填（失败抛异常整体回滚）。
+     * 补齐提交关联字段并持久化判题结果，同时校验主键回填（失败抛业务异常整体回滚）。
      */
     private void prepareAndInsertResult(JudgeRecord finalResult, SubmitRecord submitRecord) {
         if (finalResult == null) {
-            throw new IllegalStateException("判题器返回空结果，submitId=" + submitRecord.getSubmitRecordId());
+            log.error("判题器返回空结果，submitId={}", submitRecord.getSubmitRecordId());
+            throw new BizException(JudgeErrorCode.JUDGE_ENV_UNAVAILABLE);
         }
         finalResult.setSubmitRecordId(submitRecord.getSubmitRecordId());
         finalResult.setCode(submitRecord.getSubmitContent());
@@ -222,7 +230,8 @@ public class JudgeTaskService {
 
         int inserted = judgeRecordMapper.insert(finalResult);
         if (inserted != 1 || finalResult.getJudgeRecordId() == null) {
-            throw new IllegalStateException("判题结果入库失败，submitId=" + submitRecord.getSubmitRecordId());
+            log.error("判题结果入库失败，submitId={}", submitRecord.getSubmitRecordId());
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
     }
 

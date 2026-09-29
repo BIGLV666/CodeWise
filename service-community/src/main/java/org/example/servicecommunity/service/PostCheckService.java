@@ -10,10 +10,13 @@ import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.enums.BusinessType;
 import org.example.serviceapi.enums.NotificationCenterType;
 import org.example.serviceapi.feign.UserFeignClient;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
 
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.entry.*;
 import org.example.servicecommunity.enums.PostType;
@@ -145,20 +148,20 @@ public class PostCheckService {
 
     public void checkPost(Long postId, Integer status, String reason) {
         if(status!=2&&status!=1){
-            throw new IllegalArgumentException("状态不合法");
+            throw new BizException(CommunityErrorCode.CHECK_STATUS_INVALID);
         }
 
         Post post = postMapper.selectById(postId);
         if(post==null){
-            throw new IllegalArgumentException("帖子不存在");
+            throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
         }
         if(post.getStatus()!=0){
-            throw new IllegalArgumentException("非待审核状态");
+            throw new BizException(CommonErrorCode.STATE_CONFLICT);
         }
         post.setStatus(status);
         int r= postMapper.updateById(post);
         if(r==0){
-            throw new IllegalArgumentException("更新帖子状态失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         if (status == NORMAL) {
             redisTemplate.opsForZSet().add(RedisContext.HOST_POST_KEY, postId.toString(), 0.0);
@@ -172,19 +175,19 @@ public class PostCheckService {
     //下架
     public void TackDownPost(Long postId, Integer status, String reason) {
         if(status!=NORMAL&&status!=TACK_DOWN){
-            throw new IllegalArgumentException("状态不合法");
+            throw new BizException(CommunityErrorCode.CHECK_STATUS_INVALID);
         }
         Post post = postMapper.selectById(postId);
         if(post==null){
-            throw new IllegalArgumentException("帖子不存在");
+            throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
         }
         if(post.getStatus()!=1&&post.getStatus()!=TACK_DOWN){
-            throw new IllegalArgumentException("非正常状态");
+            throw new BizException(CommonErrorCode.STATE_CONFLICT);
         }
         post.setStatus(status);
         int r= postMapper.updateById(post);
         if(r==0){
-            throw new IllegalArgumentException("更新帖子状态失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
 
         // 下架时记录到下架表
@@ -264,19 +267,19 @@ public class PostCheckService {
      */
     public void UpdateComment(Long commentId, Integer status, String reason) {
         if(status!=NORMAL&&status!=TACK_DOWN){
-            throw new IllegalArgumentException("状态不合法");
+            throw new BizException(CommunityErrorCode.CHECK_STATUS_INVALID);
         }
         Comment comment = commentMapper.selectById(commentId);
         if(comment==null){
-            throw new IllegalArgumentException("评论不存在");
+            throw new BizException(CommunityErrorCode.COMMENT_NOT_FOUND);
         }
         if(comment.getStatus()!=NORMAL&&comment.getStatus()!=TACK_DOWN){
-            throw new IllegalArgumentException("非正常状态");
+            throw new BizException(CommonErrorCode.STATE_CONFLICT);
         }
         comment.setStatus(status);
         int r= commentMapper.updateById(comment);
         if(r==0){
-            throw new IllegalArgumentException("更新评论状态失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
 
         // 下架时记录到下架表
@@ -335,20 +338,20 @@ public class PostCheckService {
 
     public void checkSolution(Long solutionId, Integer status, String reason) {
         if(status!=2&&status!=1){
-            throw new IllegalArgumentException("状态不合法");
+            throw new BizException(CommunityErrorCode.CHECK_STATUS_INVALID);
         }
 
         Solution solution = solutionMapper.selectById(solutionId);
         if(solution==null){
-            throw new IllegalArgumentException("题解不存在");
+            throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
         }
         if(solution.getStatus()!=0){
-            throw new IllegalArgumentException("非待审核状态");
+            throw new BizException(CommonErrorCode.STATE_CONFLICT);
         }
         solution.setStatus(status);
         int r= solutionMapper.updateById(solution);
         if(r==0){
-            throw new IllegalArgumentException("更新题解状态失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         if (status == TACK_DOWN) {
             saveTakeDownReason(PostType.SOLUTION, solutionId, null, solution.getQuestionId(), reason);
@@ -370,20 +373,19 @@ public class PostCheckService {
 
     public void updateSolution(Long solutionId, Integer status, String reason) {
         if(status!=2&&status!=1){
-            throw new
-                    IllegalArgumentException("状态不合法");
+            throw new BizException(CommunityErrorCode.CHECK_STATUS_INVALID);
         }
         Solution solution = solutionMapper.selectById(solutionId);
         if(solution==null){
-            throw new IllegalArgumentException("题解不存在");
+            throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
         }
         if(solution.getStatus()!=NORMAL&&solution.getStatus()!=TACK_DOWN){
-            throw new IllegalArgumentException("非正常状态");
+            throw new BizException(CommonErrorCode.STATE_CONFLICT);
         }
         solution.setStatus(status);
         int r= solutionMapper.updateById(solution);
         if(r==0){
-            throw new IllegalArgumentException("更新题解状态失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
 
         // 下架时记录到下架表
@@ -411,7 +413,7 @@ public class PostCheckService {
     public CheckDetailVo getPostDetail(Long postId) {
         Post post = postMapper.selectById(postId);
         if (post == null) {
-            throw new IllegalArgumentException("帖子不存在");
+            throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
         }
         CheckDetailVo vo = CheckDetailVo.of(post);
         vo.setTags(getTagNames(postId, PostType.POST));
@@ -423,7 +425,7 @@ public class PostCheckService {
     public CheckDetailVo getCommentDetail(Long commentId) {
         Comment comment = commentMapper.selectById(commentId);
         if (comment == null) {
-            throw new IllegalArgumentException("评论不存在");
+            throw new BizException(CommunityErrorCode.COMMENT_NOT_FOUND);
         }
         CheckDetailVo vo = CheckDetailVo.of(comment);
         vo.setUserDto(getUser(comment.getUserId()));
@@ -447,7 +449,7 @@ public class PostCheckService {
     public CheckDetailVo getSolutionDetail(Long solutionId) {
         Solution solution = solutionMapper.selectById(solutionId);
         if (solution == null) {
-            throw new IllegalArgumentException("题解不存在");
+            throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
         }
         CheckDetailVo vo = CheckDetailVo.of(solution);
         vo.setTags(getTagNames(solutionId, PostType.SOLUTION));
@@ -458,7 +460,7 @@ public class PostCheckService {
     /** 按内容类型分发到对应的详情查询。 */
     public CheckDetailVo getDetail(PostType type, Long targetId) {
         if (type == null) {
-            throw new IllegalArgumentException("类型错误");
+            throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         }
         return switch (type) {
             case POST -> getPostDetail(targetId);
@@ -533,7 +535,7 @@ public class PostCheckService {
            case SOLUTION:
                 return "你的题解已通过审核，现在其他用户可以看到它了。";
            default:
-               throw new IllegalArgumentException("类型错误");
+               throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
        }
 
     }
@@ -547,7 +549,7 @@ public class PostCheckService {
             case SOLUTION:
                 return "你的题解未通过审核，请检查内容是否符合社区规范后重新发布。";
             default:
-                throw new IllegalArgumentException("类型错误");
+                throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         }
     }
 
@@ -561,7 +563,7 @@ public class PostCheckService {
             case SOLUTION:
                 return "你的题解因不符合社区规范已被管理员下架，如有疑问可联系管理员申诉。";
             default:
-                throw new IllegalArgumentException("类型错误");
+                throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         }
     }
 
@@ -575,7 +577,7 @@ public class PostCheckService {
             case SOLUTION:
                 return "你的题解已恢复展示，其他用户可以重新看到它了。";
             default:
-                throw new IllegalArgumentException("类型错误");
+                throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         }
     }
 

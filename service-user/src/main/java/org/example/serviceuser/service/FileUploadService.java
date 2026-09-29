@@ -1,5 +1,7 @@
 package org.example.serviceuser.service;
 
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceuser.exception.UserErrorCode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -30,35 +32,35 @@ public class FileUploadService {
     public String uploadFile(MultipartFile file, String businessDir) {
         // 1. 校验文件是否为空
         if (file == null || file.isEmpty()) {
-            throw new RuntimeException("文件不能为空");
+            throw new BizException(UserErrorCode.FILE_EMPTY);
         }
         if (businessDir == null || businessDir.isBlank() || businessDir.contains("..") || businessDir.contains("/") || businessDir.contains("\\")) {
-            throw new RuntimeException("非法业务目录");
+            throw new BizException(UserErrorCode.UPLOAD_TARGET_INVALID);
         }
 
         // 2. 校验文件类型
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
-            throw new RuntimeException("只允许上传图片");
+            throw new BizException(UserErrorCode.FILE_NOT_IMAGE);
         }
 
         String originalFilename = file.getOriginalFilename();
         String extension = getExtension(originalFilename);
         if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension)) {
-            throw new RuntimeException("只允许上传 jpg、jpeg、png、gif 图片");
+            throw new BizException(UserErrorCode.IMAGE_FORMAT_UNSUPPORTED);
         }
 
         try {
             if (ImageIO.read(file.getInputStream()) == null) {
-                throw new RuntimeException("文件内容不是有效图片");
+                throw new BizException(UserErrorCode.IMAGE_CONTENT_INVALID);
             }
         } catch (IOException e) {
-            throw new RuntimeException("图片文件校验失败");
+            throw new BizException(UserErrorCode.IMAGE_CHECK_FAILED, e);
         }
 
         // 3. 校验文件大小（限制 5MB）
         if (file.getSize() > MAX_IMAGE_SIZE) {
-            throw new RuntimeException("文件大小不能超过 5MB");
+            throw new BizException(UserErrorCode.IMAGE_SIZE_EXCEEDED, MAX_IMAGE_SIZE / (1024 * 1024));
         }
 
         // 4. 生成存储路径
@@ -68,7 +70,7 @@ public class FileUploadService {
         Path rootPath = Paths.get(uploadRoot).toAbsolutePath().normalize();
         Path destPath = rootPath.resolve(relativePath).normalize();
         if (!destPath.startsWith(rootPath)) {
-            throw new RuntimeException("非法文件路径");
+            throw new BizException(UserErrorCode.UPLOAD_PATH_CONFIG_ERROR);
         }
         File dest = destPath.toFile();
 
@@ -81,7 +83,7 @@ public class FileUploadService {
         try {
             file.transferTo(dest);
         } catch (IOException e) {
-            throw new RuntimeException("文件保存失败: " + e.getMessage());
+            throw new BizException(UserErrorCode.FILE_SAVE_FAILED, e);
         }
 
         // 8. 返回访问 URL（前端直接访问这个路径）

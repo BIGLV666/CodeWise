@@ -4,9 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.MQ.Mq;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.serviceQuestion.TestCaseBuilder;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.dto.QuestionMessage;
@@ -52,16 +54,16 @@ public class QwenTestCaseHandle implements TestCaseHandle {
         }catch (JsonProcessingException exception){
             // 毒消息：载荷非法重试无意义，交分发器直接死信
             log.error("用例消息载荷解析失败，按毒消息死信: body={}", messageBody, exception);
-            throw new IllegalArgumentException("消息载荷解析失败: " + exception.getMessage(), exception);
+            throw new BizException(AiErrorCode.TESTCASE_PAYLOAD_INVALID, exception);
         }
         int retryCount = readRetryCount(amqpMessage.getMessageProperties());
         try{
         Result<QuestionDto> questionDto=questionFeignClient.getQuestionInfo(message.getQuestionId());
         if(questionDto.getCode()!=200){
-            throw new RuntimeException(questionDto.getCode()+":"+questionDto.getMessage());
+            throw new BizException(AiErrorCode.QUESTION_INFO_FETCH_FAILED);
         }
         if(questionDto.getData()==null){
-            throw new RuntimeException(questionDto.getCode()+":"+questionDto.getMessage());
+            throw new BizException(AiErrorCode.QUESTION_INFO_FETCH_FAILED);
         }
         if(questionDto.getData().getAiStatue().equals("success")){
             return;

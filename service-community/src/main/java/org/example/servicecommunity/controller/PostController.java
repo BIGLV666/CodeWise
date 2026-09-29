@@ -1,8 +1,10 @@
 package org.example.servicecommunity.controller;
 
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommunity.Dto.PostDto;
 import org.example.servicecommunity.entry.Post;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.service.PostService;
 import org.example.servicecommunity.service.HostPostService;
 import org.example.servicecommunity.vo.CursorPageResult;
@@ -122,7 +124,7 @@ public class PostController {
 
     private void validatePageSize(Integer pageSize) {
         if (pageSize == null || pageSize < 1 || pageSize > 100) {
-            throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
+            throw new BizException(CommunityErrorCode.PAGE_SIZE_INVALID);
         }
     }
 }

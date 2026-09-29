@@ -2,9 +2,12 @@ package org.example.servicequestion.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.dto.QuestionMessage;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.entry.Question;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.script.LuoGuHtml;
 import org.outboxpro.core.OutboxProPublisher;
@@ -46,20 +49,24 @@ public class HtmlService {
         try {
             boolean isLock = lock.tryLock(3, 10, TimeUnit.SECONDS);
             if (!isLock) {
-                throw new RuntimeException("请勿重复提交同一题");
+                throw new BizException(CommonErrorCode.DUPLICATE_RESOURCE);
             }
             int r = questionMapper.insert(question);
             if (r != 1) {
                 log.info("题目添加失败{}", question.toString());
-                throw new RuntimeException("添加失败");
+                throw new BizException(QuestionErrorCode.QUESTION_SAVE_FAILED);
             }
             // AI 用例生成请求与题目插入同事务走 Outbox（原为事务内裸发，存在「DB 提交但消息丢失」隐患）
             outboxPublisher.publish(EventTypes.AI_TESTCASE_REQUEST, ToQuestionMessage(question));
             return question;
 
 
+        } catch (BizException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException(e.getMessage());
+            // 原始异常（解析/SQL/中断）只进日志，前端仅见通用导入失败文案
+            log.error("洛谷题目导入失败, file={}", file, e);
+            throw new BizException(QuestionErrorCode.QUESTION_IMPORT_FAILED, e);
         }finally {
             if(lock.isHeldByCurrentThread())
                 lock.unlock();

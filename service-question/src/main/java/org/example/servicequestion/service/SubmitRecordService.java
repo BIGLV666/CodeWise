@@ -4,10 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.entry.SubmitRecord;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -27,7 +30,7 @@ public class SubmitRecordService {
 
     public SubmitRecord getSubmitRecordById(Long submitRecordId) {
         if (submitRecordId == null) {
-            throw new IllegalArgumentException("提交记录 ID 不能为空");
+            throw new BizException(QuestionErrorCode.SUBMIT_RECORD_ID_REQUIRED);
         }
         SubmitRecord submitRecord = submitRecordMapper.selectOne(
                 new LambdaQueryWrapper<SubmitRecord>()
@@ -35,22 +38,22 @@ public class SubmitRecordService {
                         .eq(SubmitRecord::getUserId, UserContext.getUserId())
         );
         if (submitRecord == null) {
-            throw new RuntimeException("提交记录不存在");
+            throw new BizException(QuestionErrorCode.SUBMIT_RECORD_NOT_FOUND);
         }
         return submitRecord;
     }
 
     public List<SubmitRecord> getSubmitRecordsByIds(List<Long> submitRecordIds) {
         if (submitRecordIds == null || submitRecordIds.isEmpty()) {
-            throw new IllegalArgumentException("提交记录 ID 列表不能为空");
+            throw new BizException(QuestionErrorCode.SUBMIT_RECORD_LIST_REQUIRED);
         }
 
         List<Long> distinctIds = new ArrayList<>(new LinkedHashSet<>(submitRecordIds));
         if (distinctIds.stream().anyMatch(id -> id == null || id <= 0)) {
-            throw new IllegalArgumentException("提交记录 ID 必须为正整数");
+            throw new BizException(QuestionErrorCode.SUBMIT_RECORD_ID_INVALID);
         }
         if (distinctIds.size() > 10) {
-            throw new IllegalArgumentException("一次最多查询 10 条提交记录");
+            throw new BizException(QuestionErrorCode.SUBMIT_RECORD_BATCH_LIMIT, 10);
         }
 
         return submitRecordMapper.selectList(
@@ -66,11 +69,11 @@ public class SubmitRecordService {
 
         Long userId = UserContext.getUserId();
         if(userId==null){
-            throw new IllegalArgumentException("请登录后重试");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         int r=submitRecordMapper.delete(new QueryWrapper<SubmitRecord>().eq("submit_record_id",submitRecordId).eq("user_id",userId));
         if(r==0){
-            throw new IllegalArgumentException("未找到属于您的该记录");
+            throw new BizException(QuestionErrorCode.SUBMIT_RECORD_NOT_FOUND);
         }
     }
 

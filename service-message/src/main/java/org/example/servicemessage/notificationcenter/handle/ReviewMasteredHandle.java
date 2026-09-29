@@ -1,5 +1,7 @@
 package org.example.servicemessage.notificationcenter.handle;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
@@ -136,7 +138,7 @@ public class ReviewMasteredHandle implements MessageHandler {
     private void validate(ReviewMasteredDto dto) {
         if (dto == null || dto.getMessageId() == null || dto.getMessageId().isBlank()
                 || dto.getUserId() == null || dto.getQuestionId() == null) {
-            throw new IllegalArgumentException("复习掌握消息缺少必要字段");
+            throw new BizException(MessageErrorCode.NOTIFICATION_PAYLOAD_INCOMPLETE);
         }
     }
 
@@ -148,7 +150,7 @@ public class ReviewMasteredHandle implements MessageHandler {
     private String fetchQuestionTitle(Long questionId) {
         Result<QuestionDto> result = questionFeignClient.getQuestionInfo(questionId);
         if (result == null || !Integer.valueOf(200).equals(result.getCode()) || result.getData() == null) {
-            throw new IllegalStateException("获取题目信息失败: questionId=" + questionId);
+            throw new BizException(MessageErrorCode.QUESTION_INFO_UNAVAILABLE);
         }
         return result.getData().getTitle();
     }
@@ -187,7 +189,7 @@ public class ReviewMasteredHandle implements MessageHandler {
         try {
             return objectMapper.writeValueAsString(dto);
         } catch (Exception exception) {
-            throw new IllegalStateException("复习掌握事件序列化失败", exception);
+            throw new BizException(MessageErrorCode.REVIEW_EVENT_SERIALIZE_FAILED, exception);
         }
     }
 }

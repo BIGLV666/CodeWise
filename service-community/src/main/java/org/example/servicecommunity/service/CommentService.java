@@ -3,9 +3,12 @@ package org.example.servicecommunity.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.CommentDto;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
@@ -47,7 +50,7 @@ public class CommentService {
     @Transactional
     public Comment createComment(CommentDto commentDto, String uuid) {
         if (commentDto == null || commentDto.getComment() == null || commentDto.getPostId() == null) {
-            throw new IllegalArgumentException("comment content and postId can not be null");
+            throw new BizException(CommunityErrorCode.COMMENT_CONTENT_REQUIRED);
         }
         if (Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.REQUEST_ID_KEY + uuid, "pending", 3, TimeUnit.MINUTES))) {
             log.info("duplicate comment request");
@@ -60,13 +63,19 @@ public class CommentService {
         if (type == PostType.POST) {
             post = postMapper.selectById(commentDto.getPostId());
             // 待审核 / 已下架的帖子不可评论
-            if (post == null || !PostStatus.isVisible(post.getStatus())) {
-                throw new IllegalArgumentException("post not found");
+            if (post == null) {
+                throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
+            }
+            if (!PostStatus.isVisible(post.getStatus())) {
+                throw new BizException(CommonErrorCode.STATE_CONFLICT);
             }
         } else {
             solution = solutionMapper.selectById(commentDto.getPostId());
-            if (solution == null || !PostStatus.isVisible(solution.getStatus())) {
-                throw new IllegalArgumentException("solution not found");
+            if (solution == null) {
+                throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
+            }
+            if (!PostStatus.isVisible(solution.getStatus())) {
+                throw new BizException(CommonErrorCode.STATE_CONFLICT);
             }
         }
 
@@ -85,7 +94,7 @@ public class CommentService {
                 .build();
         int result = commentMapper.insert(comment);
         if (result == 0) {
-            throw new IllegalArgumentException("create comment failed");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
 
         int r;
@@ -97,7 +106,7 @@ public class CommentService {
             r = solutionMapper.updateCommentTotal(1, solution.getSolutionId());
         }
         if (r == 0) {
-            throw new IllegalArgumentException("create comment failed");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         redisTemplate.opsForValue().set(RedisContext.REQUEST_ID_KEY + uuid, "success", 3, TimeUnit.MINUTES);
         return comment;
@@ -161,10 +170,10 @@ public class CommentService {
     public void deleteComment(Long commentId) {
         Comment comment = commentMapper.selectById(commentId);
         if (comment == null) {
-            throw new IllegalArgumentException("comment not found");
+            throw new BizException(CommunityErrorCode.COMMENT_NOT_FOUND);
         }
         if (!comment.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("no permission to delete this comment");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         PostType type = comment.getType() == null ? PostType.POST : comment.getType();
         List<Comment> comments = commentMapper.selectList(new QueryWrapper<Comment>()
@@ -176,7 +185,7 @@ public class CommentService {
         if (type == PostType.POST) {
             Post post = postMapper.selectById(comment.getPostId());
             if (post == null) {
-                throw new IllegalArgumentException("post not found");
+                throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
             }
             redisTemplate.opsForZSet().incrementScore(
                     RedisContext.HOST_POST_KEY,
@@ -184,7 +193,7 @@ public class CommentService {
                     -2.0 * commentIds.size()
             );
         } else if (solutionMapper.selectById(comment.getPostId()) == null) {
-            throw new IllegalArgumentException("solution not found");
+            throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
         }
 
         CompletableFuture.runAsync(() -> {

@@ -7,11 +7,14 @@ import org.example.serviceai.conversation.vo.HomeConversationVo;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.AiConversationMemory;
 import org.example.serviceai.entry.MessageStatus;
+import org.example.serviceai.exception.AiErrorCode;
 
 import org.example.serviceai.conversation.repository.AiConversationRepository;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.service.AIService;
 import org.example.serviceai.service.UserAiService;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -63,7 +66,7 @@ public class AdviceConversationService {
      * @param type                   追问消息角色（USER/SYSTEM）
      * @param reuseAssistantMessageId 复用的 ASSISTANT 生成行主键，null 表示首次
      * @return 已收尾（COMPLETED/FAILED 由异常体现）的建议消息
-     * @throws IllegalStateException 会话不存在或无权操作（业务校验失败，走重试/死信而非毒消息）
+     * @throws org.example.serviceapi.exception.BizException 会话不存在或无权操作（业务校验失败，走重试/死信而非毒消息）
      */
     public Message ask(
             Long userId,
@@ -76,10 +79,10 @@ public class AdviceConversationService {
         // 校验会话归属
         Conversation conversation = aiConversationRepository.get(conversationId);
         if(conversation ==null){
-            throw new IllegalStateException("未找到该会话");
+            throw new BizException(AiErrorCode.CONVERSATION_NOT_FOUND);
         }
         if(!conversation.getUserId().equals(userId)){
-            throw new IllegalStateException("无权操作他人会话");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         // 构建 prompt
         String prompt= AdvicePromptBuilder.buildFollowUp(
@@ -96,7 +99,7 @@ public class AdviceConversationService {
             aiConversationRepository.restartFailedGeneration(reuseAssistantMessageId);
             savedMessage = aiConversationRepository.getMessage(reuseAssistantMessageId);
             if (savedMessage == null) {
-                throw new IllegalStateException("复用的生成行不存在: messageId=" + reuseAssistantMessageId);
+                throw new BizException(AiErrorCode.ADVICE_MESSAGE_NOT_FOUND);
             }
         } else {
             // 保存用户消息
@@ -130,7 +133,7 @@ public class AdviceConversationService {
         // 置 FAILED 并上抛，交分发器延迟重试或死信留痕
         if (repost == null || repost.isBlank()) {
             aiConversationRepository.finishGeneratingMessage(savedMessage.getMessageId(), "", MessageStatus.FAILED);
-            throw new IllegalStateException("模型返回空响应");
+            throw new BizException(AiErrorCode.MODEL_EMPTY_RESPONSE);
         }
         aiConversationRepository.finishGeneratingMessage(savedMessage.getMessageId(), repost, MessageStatus.COMPLETED);
         savedMessage.setContent(repost);
@@ -153,10 +156,10 @@ public class AdviceConversationService {
     ) {
         Conversation conversation = aiConversationRepository.get(conversationId);
         if (conversation == null) {
-            throw new IllegalArgumentException("会话不存在");
+            throw new BizException(AiErrorCode.CONVERSATION_NOT_FOUND);
         }
         if (!conversation.getUserId().equals(userId)) {
-            throw new IllegalArgumentException("无权查看他人会话");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
 
         int pageSize = Math.max(1, Math.min(size, 50));
@@ -194,8 +197,7 @@ public class AdviceConversationService {
      * 落库后经 onAssistantCreated 回调其 messageId（供调用方做超时精准取消等收尾），
      * 之后流式生成并原子收尾（完成 COMPLETED / 异常 FAILED / 客户端断开 CANCELLED）。
      *
-     * @throws IllegalStateException 会话不存在或无权操作（业务校验失败，走重试/死信而非毒消息）
-     * @throws IllegalArgumentException 自定义模型参数不全（客户端入参错误）
+     * @throws org.example.serviceapi.exception.BizException 会话不存在、无权操作或自定义模型参数不全
      */
     public Message askStream(
             Long userId,
@@ -212,11 +214,11 @@ public class AdviceConversationService {
                 aiConversationRepository.get(conversationId);
 
         if (conversation == null) {
-            throw new IllegalStateException("会话不存在");
+            throw new BizException(AiErrorCode.CONVERSATION_NOT_FOUND);
         }
 
         if (!conversation.getUserId().equals(userId)) {
-            throw new IllegalStateException("无权操作该会话");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
 
         String prompt = AdvicePromptBuilder.buildFollowUp(
@@ -247,7 +249,7 @@ public class AdviceConversationService {
                 && (modelName == null || modelName.isBlank());
         if (!useAutoProvider
                 && (userAiConfigId == null || modelName == null || modelName.isBlank())) {
-            throw new IllegalArgumentException("自定义模型必须同时提供配置 ID 和模型名称");
+            throw new BizException(AiErrorCode.MODEL_ARGS_INCOMPLETE);
         }
 
         // 流开始前先落 status=GENERATING 的 ASSISTANT 占位行（content 列 NOT NULL，先插空串），
@@ -295,7 +297,7 @@ public class AdviceConversationService {
         if (fullAnswer.toString().isBlank()) {
             aiConversationRepository.finishGeneratingMessage(
                     savedAssistant.getMessageId(), "", MessageStatus.FAILED);
-            throw new IllegalStateException("模型返回空响应");
+            throw new BizException(AiErrorCode.MODEL_EMPTY_RESPONSE);
         }
         aiConversationRepository.finishGeneratingMessage(
                 savedAssistant.getMessageId(), fullAnswer.toString(), MessageStatus.COMPLETED);

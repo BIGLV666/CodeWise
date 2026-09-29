@@ -4,7 +4,9 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.config.GLMConfig;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -61,11 +63,11 @@ public class GLMService implements CallAi {
             int responseLength = readStream(connection, "GLM", onChunk);
             log.info("GLM stream completed, responseLength={}", responseLength);
         } catch (AiProviderHttpException exception) {
-            log.warn("GLM request rejected: {}", exception.getMessage());
+            log.warn("GLM request rejected: {}", exception.getDiagnostic());
             throw exception;
         } catch (Exception exception) {
             log.error("GLM stream failed: {}", exception.getMessage(), exception);
-            throw new RuntimeException("GLM 流式调用失败", exception);
+            throw new BizException(AiErrorCode.PROVIDER_CALL_FAILED, exception);
         } finally {
             if (connection != null) {
                 connection.disconnect();

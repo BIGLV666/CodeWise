@@ -1,10 +1,12 @@
 package org.example.servicejudge.judge;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicejudge.Dto.JudgeReturnDto;
 import org.example.servicejudge.Dto.TestDto;
 import org.example.servicejudge.Util.BuildResult;
 import org.example.servicejudge.entry.JudgeRecord;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.interfaces.JudgeInterface;
 import org.example.servicejudge.judge.container.ContainerPoolManager;
 import org.example.servicejudge.judge.container.DockerExecTemplate;
@@ -49,7 +51,7 @@ public class JudgeService implements JudgeInterface {
      * 查询各语言容器池状态。
      *
      * @return 每种语言一条状态记录
-     * @throws IllegalArgumentException 未登录、用户不存在或非管理员
+     * @throws org.example.serviceapi.exception.BizException 未登录、用户不存在或非管理员
      */
     public List<DockersStatusVo> getDockers() {
         return containerPoolManager.getDockers();
@@ -428,7 +430,7 @@ public class JudgeService implements JudgeInterface {
      * @param testCases 测试用例列表
      * @return 每个用例一条判题记录
      * @throws IOException     工作区准备失败
-     * @throws IllegalArgumentException 主程序为空
+     * @throws BizException 主程序为空
      */
     @Override
     public List<JudgeRecord> batchDebugCode(
@@ -459,7 +461,7 @@ public class JudgeService implements JudgeInterface {
             ));
         }
         if (mainCode == null || mainCode.isBlank()) {
-            throw new IllegalArgumentException("函数模式主程序不能为空");
+            throw new BizException(JudgeErrorCode.FUNCTION_MAIN_MISSING);
         }
 
         LanguageSpec spec = LanguageSpec.of(language);

@@ -2,6 +2,7 @@ package org.example.servicecommon.event;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.example.servicecommon.exception.InfraErrorCode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.serviceapi.dto.event.EventEnvelope;
 
@@ -82,7 +83,7 @@ public final class EnvelopeCodec {
         try {
             JsonNode root = MAPPER.readTree(body);
             if (!root.isObject() || !root.has("eventId") || !root.has("eventType")) {
-                throw new IllegalArgumentException("消息体不是统一信封格式");
+                throw new IllegalArgumentException(InfraErrorCode.ENVELOPE_FORMAT_INVALID.getMessage());
             }
             EventEnvelope envelope = new EventEnvelope();
             envelope.setEventId(textOrNull(root, "eventId"));
@@ -98,7 +99,7 @@ public final class EnvelopeCodec {
         } catch (IllegalArgumentException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new IllegalArgumentException("信封解析失败: " + exception.getMessage(), exception);
+            throw new IllegalArgumentException(InfraErrorCode.ENVELOPE_PARSE_FAILED.getMessage(), exception);
         }
     }
 
@@ -125,7 +126,7 @@ public final class EnvelopeCodec {
                     : root;
             return MAPPER.treeToValue(payloadNode, payloadType);
         } catch (Exception exception) {
-            throw new IllegalArgumentException("消息载荷解析失败: " + exception.getMessage(), exception);
+            throw new IllegalArgumentException(InfraErrorCode.MESSAGE_PAYLOAD_PARSE_FAILED.getMessage(), exception);
         }
     }
 
@@ -139,7 +140,7 @@ public final class EnvelopeCodec {
         try {
             return MAPPER.writeValueAsString(envelope);
         } catch (Exception exception) {
-            throw new IllegalStateException("信封序列化失败", exception);
+            throw new IllegalStateException(InfraErrorCode.ENVELOPE_SERIALIZE_FAILED.getMessage(), exception);
         }
     }
 }

@@ -2,7 +2,9 @@ package org.example.serviceai.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.AIServiceManager.AIServiceManager;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -23,7 +25,7 @@ public class AIService {
     public String callAi(String prompt, int maxTokens) {
         CallAi first = serviceManager.getAvailableService();
         if (first == null) {
-            throw new IllegalStateException("No healthy AI provider available");
+            throw new BizException(AiErrorCode.AI_SERVICE_NOT_READY);
         }
 
         long start = System.currentTimeMillis();
@@ -66,7 +68,7 @@ public class AIService {
     public void streamAi(String prompt, Consumer<String> onChunk) {
         CallAi first = serviceManager.getAvailableService();
         if (first == null) {
-            throw new IllegalStateException("No healthy AI provider available");
+            throw new BizException(AiErrorCode.AI_SERVICE_NOT_READY);
         }
 
         long start = System.currentTimeMillis();
@@ -143,19 +145,17 @@ public class AIService {
                 : current.getClass().getSimpleName() + ": " + current.getMessage();
     }
 
-    private RuntimeException combinedFailure(
+    /**
+     * 两个服务商都失败后的统一异常：消息取枚举固定文案，原始根因（服务商名、
+     * 超时类型等）只挂在 cause/suppressed 上供日志排查，不透传前端。
+     */
+    private BizException combinedFailure(
             CallAi first,
             Exception firstFailure,
             CallAi second,
             Exception secondFailure
     ) {
-        String message = "AI providers failed: first=" + first.getModelName()
-                + ", firstCause=" + rootCause(firstFailure);
-        if (second != null && secondFailure != null) {
-            message += ", retry=" + second.getModelName()
-                    + ", retryCause=" + rootCause(secondFailure);
-        }
-        RuntimeException result = new RuntimeException(message,
+        BizException result = new BizException(AiErrorCode.PROVIDER_CALL_FAILED,
                 secondFailure == null ? firstFailure : secondFailure);
         if (secondFailure != null) {
             result.addSuppressed(firstFailure);

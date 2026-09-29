@@ -1,8 +1,11 @@
 package org.example.servicecommunity.service;
 
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommunity.entry.Appeal;
 import org.example.servicecommunity.entry.Post;
 import org.example.servicecommunity.enums.PostType;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.mapper.AppealMapper;
 import org.example.servicecommunity.mapper.CommentMapper;
 import org.example.servicecommunity.mapper.PostMapper;
@@ -130,17 +133,19 @@ class AppealServiceMyAppealsTest {
     void myAppealDetailRejectsForeignAppeal() {
         when(appealMapper.selectById(8L)).thenReturn(appeal(8L, 999L));
 
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        BizException e = assertThrows(BizException.class,
                 () -> appealService.getMyAppealDetail(8L));
-        assertEquals("无权查看该申诉", e.getMessage());
+        assertEquals(CommonErrorCode.NO_PERMISSION.getCode(), e.getCode());
+        assertEquals("没有权限执行该操作", e.getMessage());
     }
 
     @Test
     void myAppealDetailRejectsMissingAppeal() {
         when(appealMapper.selectById(9L)).thenReturn(null);
 
-        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+        BizException e = assertThrows(BizException.class,
                 () -> appealService.getMyAppealDetail(9L));
-        assertEquals("申诉不存在", e.getMessage());
+        assertEquals(CommunityErrorCode.APPEAL_NOT_FOUND.getCode(), e.getCode());
+        assertEquals("申诉记录不存在或已被删除", e.getMessage());
     }
 }

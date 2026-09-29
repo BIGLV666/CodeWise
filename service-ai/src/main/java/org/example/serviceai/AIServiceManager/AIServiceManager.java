@@ -3,7 +3,9 @@ package org.example.serviceai.AIServiceManager;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -77,7 +79,7 @@ public class AIServiceManager {
      */
     public CallAi getAvailableService() {
         if (availableServices.isEmpty()) {
-            throw new RuntimeException("没有可用的AI服务");
+            throw new BizException(AiErrorCode.AI_SERVICE_NOT_READY);
         }
 
         int startIndex = currentIndex.get();

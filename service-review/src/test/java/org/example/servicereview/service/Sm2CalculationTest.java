@@ -1,5 +1,7 @@
 package org.example.servicereview.service;
 
+import org.example.serviceapi.exception.BizException;
+
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicereview.entry.Review;
 import org.example.servicereview.entry.ReviewConfig;
@@ -137,11 +139,11 @@ class Sm2CalculationTest {
 
     @Test
     void calculateRejectsInvalidInput() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> reviewService.calculateNextReviewInterval(null, 5));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> reviewService.calculateNextReviewInterval(buildReview(0, 0, new BigDecimal("2.5")), 6));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> reviewService.calculateNextReviewInterval(buildReview(0, 0, new BigDecimal("2.5")), null));
     }
 

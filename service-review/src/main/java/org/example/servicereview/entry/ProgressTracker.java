@@ -5,8 +5,10 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 import lombok.Data;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicereview.dto.ProgressTrackerDto;
 import org.example.servicereview.enums.ProgressTrackerStatus;
+import org.example.servicereview.exception.ReviewErrorCode;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -61,15 +63,15 @@ public class ProgressTracker {
     }
     public ProgressTracker(ProgressTrackerDto dto) {
         if(dto.getQuestionId()==null){
-            throw new IllegalArgumentException("题目不可为空");
+            throw new BizException(ReviewErrorCode.PLAN_QUESTION_MISSING);
         }
         if(dto.getBeginTime()==null){
-            throw new IllegalArgumentException("开始时间不可为空");
+            throw new BizException(ReviewErrorCode.PLAN_BEGIN_TIME_MISSING);
         }
         // 计划只允许从今天或未来开始（单向状态机入口约束）：
         // 早于今天的日期创建后即「已过期」，且过期不可逆向，故直接拒绝
         if(dto.getBeginTime().isBefore(LocalDate.now())){
-            throw new IllegalArgumentException("开始时间不可早于当前时间");
+            throw new BizException(ReviewErrorCode.PLAN_BEGIN_TIME_PAST);
         }
         this.questionId=dto.getQuestionId();
         this.notesContent=dto.getNotesContent();

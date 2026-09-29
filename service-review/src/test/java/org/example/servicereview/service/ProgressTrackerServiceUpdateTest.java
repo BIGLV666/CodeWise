@@ -1,5 +1,7 @@
 package org.example.servicereview.service;
 
+import org.example.serviceapi.exception.BizException;
+
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.entry.ProgressTracker;
 import org.example.servicereview.enums.ProgressTrackerStatus;
@@ -85,7 +87,7 @@ class ProgressTrackerServiceUpdateTest {
         ProgressTracker p = plan(ProgressTrackerStatus.COMPLETED.getCode(), LocalDate.now().minusDays(2), USER_ID);
         when(progressTrackerMapper.selectById(PLAN_ID)).thenReturn(p);
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> progressTrackerService.updateProgress(PLAN_ID, LocalDate.now().plusDays(3), "备注", null));
         verify(progressTrackerMapper, never()).updateById(any(ProgressTracker.class));
     }
@@ -95,7 +97,7 @@ class ProgressTrackerServiceUpdateTest {
         ProgressTracker p = plan(ProgressTrackerStatus.IN_PROGRESS.getCode(), LocalDate.now(), USER_ID);
         when(progressTrackerMapper.selectById(PLAN_ID)).thenReturn(p);
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> progressTrackerService.updateProgress(PLAN_ID, LocalDate.now().plusDays(1), null, null));
     }
 
@@ -104,7 +106,7 @@ class ProgressTrackerServiceUpdateTest {
         ProgressTracker p = plan(ProgressTrackerStatus.EXPIRED.getCode(), LocalDate.now().minusDays(1), USER_ID);
         when(progressTrackerMapper.selectById(PLAN_ID)).thenReturn(p);
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> progressTrackerService.updateProgress(PLAN_ID, LocalDate.now().plusDays(2), null, null));
         verify(progressTrackerMapper, never()).updateById(any(ProgressTracker.class));
     }
@@ -124,7 +126,7 @@ class ProgressTrackerServiceUpdateTest {
         ProgressTracker p = plan(ProgressTrackerStatus.NOT_STARTED.getCode(), LocalDate.now().plusDays(1), USER_ID);
         when(progressTrackerMapper.selectById(PLAN_ID)).thenReturn(p);
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> progressTrackerService.updateProgress(PLAN_ID, LocalDate.now().minusDays(2), null, null));
         verify(progressTrackerMapper, never()).updateById(any(ProgressTracker.class));
     }
@@ -134,7 +136,7 @@ class ProgressTrackerServiceUpdateTest {
         ProgressTracker p = plan(ProgressTrackerStatus.NOT_STARTED.getCode(), LocalDate.now().plusDays(1), OTHER_USER);
         when(progressTrackerMapper.selectById(PLAN_ID)).thenReturn(p);
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> progressTrackerService.updateProgress(PLAN_ID, null, "备注", null));
         verify(progressTrackerMapper, never()).updateById(any(ProgressTracker.class));
     }

@@ -3,7 +3,9 @@ package org.example.serviceai.MQ;
 import com.rabbitmq.client.Channel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceapi.dto.event.EventEnvelope;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.event.EnvelopeCodec;
 import org.example.servicecommon.event.EventPublisher;
@@ -24,7 +26,8 @@ import java.util.Map;
 /**
  * AI 队列分发器（ai.testcase.queue + ai.advice.queue，手动 ACK）。
  *
- * <p>失败策略：handler 载荷解析/校验失败（毒消息，IllegalArgumentException）
+ * <p>失败策略：handler 载荷解析/校验失败（毒消息：信封解包抛的
+ * IllegalArgumentException，或 AiErrorCode 中的载荷不完整类 BizException）
  * 直接 nack 进 ai.dlx；业务异常按 {@code x-codewise-retry-count} 头指数退避
  * （5s/10s/20s）——小于 3 次时把原始消息体（保持信封/裸格式不变）经默认交换机
  * 投入对应等待队列，TTL 到期后弹回主队列；达到 3 次仍失败则 nack 死信，由
@@ -90,8 +93,20 @@ public class Mq {
         try {
             handler.handle(body, amqpMessage);
             channel.basicAck(deliveryTag, false);
+        } catch (BizException exception) {
+            if (AiErrorCode.isPayloadPoison(exception.getErrorCode())) {
+                // 毒消息：载荷缺必要键，重试无意义，直接死信
+                log.error("消息载荷不完整，按毒消息直接死信: routingKey={}, eventId={}, body={}",
+                        routingKey, readEventIdQuietly(body), abbreviate(body), exception);
+                channel.basicNack(deliveryTag, false, false);
+            } else {
+                log.error("消息处理失败，进入延迟重试或死信: routingKey={}, eventId={}, retryCount={}",
+                        routingKey, readEventIdQuietly(body),
+                        readRetryCount(amqpMessage.getMessageProperties()), exception);
+                scheduleRetryOrDeadLetter(body, routingKey, amqpMessage.getMessageProperties(), channel, deliveryTag);
+            }
         } catch (IllegalArgumentException exception) {
-            // 毒消息：载荷非法重试无意义，直接死信
+            // 毒消息（EnvelopeCodec 解包失败仍按 IllegalArgumentException 透出）：重试无意义，直接死信
             log.error("消息载荷解析失败，按毒消息直接死信: routingKey={}, eventId={}, body={}",
                     routingKey, readEventIdQuietly(body), abbreviate(body), exception);
             channel.basicNack(deliveryTag, false, false);

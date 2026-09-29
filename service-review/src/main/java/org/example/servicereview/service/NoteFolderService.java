@@ -1,11 +1,14 @@
 package org.example.servicereview.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.NoteFolderSaveDto;
 import org.example.servicereview.entry.Note;
 import org.example.servicereview.entry.NoteFolder;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.example.servicereview.mapper.NoteFolderMapper;
 import org.example.servicereview.mapper.NoteMapper;
 import org.example.servicereview.vo.FolderNoteCountVo;
@@ -101,7 +104,7 @@ public class NoteFolderService {
     private Long requireLogin() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         return userId;
     }
@@ -111,10 +114,10 @@ public class NoteFolderService {
         Long userId = requireLogin();
         NoteFolder folder = noteFolderMapper.selectById(folderId);
         if (folder == null) {
-            throw new IllegalArgumentException("文件夹不存在");
+            throw new BizException(ReviewErrorCode.NOTE_FOLDER_NOT_FOUND);
         }
         if (!userId.equals(folder.getUserId())) {
-            throw new IllegalArgumentException("无权操作该文件夹");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         return folder;
     }
@@ -127,11 +130,11 @@ public class NoteFolderService {
 
     private String normalizeFolderName(String name) {
         if (name == null || name.trim().isEmpty()) {
-            throw new IllegalArgumentException("文件夹名称不能为空");
+            throw new BizException(ReviewErrorCode.FIELD_REQUIRED, "文件夹名称");
         }
         String trimmed = name.trim();
         if (trimmed.length() > 255) {
-            throw new IllegalArgumentException("文件夹名称长度不能超过 255 字符");
+            throw new BizException(ReviewErrorCode.FIELD_TOO_LONG, "文件夹名称", 255);
         }
         return trimmed;
     }
@@ -143,7 +146,7 @@ public class NoteFolderService {
         }
         if (Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(
                 RedisContext.REQUEST_ID_KEY + requestId, requestId, 3, TimeUnit.MINUTES))) {
-            throw new IllegalArgumentException("该" + subject + "已创建，请勿重复提交");
+            throw new BizException(ReviewErrorCode.RESOURCE_ALREADY_CREATED, subject);
         }
     }
 

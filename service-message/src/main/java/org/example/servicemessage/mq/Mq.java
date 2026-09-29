@@ -1,5 +1,7 @@
 package org.example.servicemessage.mq;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.rabbitmq.client.Channel;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -36,7 +38,7 @@ public class Mq {
         for (MessageHandler handler : handlers) {
             MessageHandler previous = handlerMap.put(handler.getRoutingKey(), handler);
             if (previous != null) {
-                throw new IllegalStateException("存在重复的消息路由处理器：" + handler.getRoutingKey());
+                throw new BizException(MessageErrorCode.DUPLICATE_MESSAGE_HANDLER);
             }
         }
     }

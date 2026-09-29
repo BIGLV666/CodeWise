@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicemessage.consumedevent.entry.ConsumedEvent;
 import org.example.servicemessage.consumedevent.entry.ConsumedEventStatus;
 import org.example.servicemessage.consumedevent.mapper.ConsumedEventMapper;
@@ -97,7 +98,7 @@ class ConsumedEventServiceTest {
         when(consumedEventMapper.insert(any(ConsumedEvent.class))).thenThrow(new DuplicateKeyException("duplicate"));
         when(consumedEventMapper.selectOne(any())).thenReturn(null);
 
-        assertThrows(IllegalStateException.class, () -> consumedEventService.claim(EVENT_ID, ROUTING_KEY));
+        assertThrows(BizException.class, () -> consumedEventService.claim(EVENT_ID, ROUTING_KEY));
     }
 
     @Test

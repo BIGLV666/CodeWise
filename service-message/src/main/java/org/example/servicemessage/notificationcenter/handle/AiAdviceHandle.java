@@ -1,5 +1,7 @@
 package org.example.servicemessage.notificationcenter.handle;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
@@ -101,7 +103,7 @@ public class AiAdviceHandle implements MessageHandler {
     private void validate(NotificationDto dto) {
         if (dto == null || dto.getMessageId() == null || dto.getMessageId().isBlank()
                 || dto.getUserId() == null || dto.getExtraData() == null || dto.getExtraData().isBlank()) {
-            throw new IllegalArgumentException("AI advice message is missing required fields");
+            throw new BizException(MessageErrorCode.NOTIFICATION_PAYLOAD_INCOMPLETE);
         }
     }
 }

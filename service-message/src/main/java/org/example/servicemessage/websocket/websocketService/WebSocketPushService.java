@@ -1,5 +1,7 @@
 package org.example.servicemessage.websocket.websocketService;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import org.example.servicecommon.config.MqContexts;
@@ -49,7 +51,7 @@ public class WebSocketPushService implements MessageHandler {
             channel.basicAck(tag,false);
         }catch (Exception e){
             channel.basicNack(tag,false,false);
-            throw new IllegalStateException(e.getMessage());
+            throw new BizException(MessageErrorCode.WEBSOCKET_PUSH_FAILED, e);
         }
     }
 }

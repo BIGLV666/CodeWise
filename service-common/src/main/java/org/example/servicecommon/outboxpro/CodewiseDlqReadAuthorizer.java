@@ -1,5 +1,6 @@
 package org.example.servicecommon.outboxpro;
 
+import org.example.servicecommon.exception.InfraErrorCode;
 import org.outboxpro.spi.deadletter.DlqReplayAuthorizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,6 +27,6 @@ public class CodewiseDlqReadAuthorizer implements DlqReplayAuthorizer {
         }
         log.warn("拒绝 OutboxPro 运维操作: scope/eventId={}, operator={}（仅只读检索开放，重放未启用）",
                 eventIdOrScope, operator);
-        throw new SecurityException("CodeWise 仅开放 outbox:list / dlq:list 只读检索；人工重放请走 DBA 流程");
+        throw new SecurityException(InfraErrorCode.OPERATION_NOT_ALLOWED.getMessage());
     }
 }

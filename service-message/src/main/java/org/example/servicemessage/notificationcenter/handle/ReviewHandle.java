@@ -1,5 +1,7 @@
 package org.example.servicemessage.notificationcenter.handle;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
@@ -94,13 +96,13 @@ public class ReviewHandle implements MessageHandler {
     private void validate(NotificationDto dto) {
         if (dto == null || dto.getMessageId() == null || dto.getMessageId().isBlank()
                 || dto.getUserId() == null || dto.getExtraData() == null || dto.getExtraData().isBlank()) {
-            throw new IllegalArgumentException("复习通知缺少必要字段");
+            throw new BizException(MessageErrorCode.NOTIFICATION_PAYLOAD_INCOMPLETE);
         }
     }
 
     private void validate(NotificationReviewMqDto dto) {
         if (dto == null || dto.getReminderType() == null || dto.getTotal() == null || dto.getTotal() < 0) {
-            throw new IllegalArgumentException("复习通知扩展数据不完整");
+            throw new BizException(MessageErrorCode.NOTIFICATION_DETAIL_INCOMPLETE);
         }
     }
 

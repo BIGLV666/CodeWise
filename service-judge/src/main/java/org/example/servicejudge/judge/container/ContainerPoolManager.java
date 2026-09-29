@@ -1,13 +1,17 @@
 package org.example.servicejudge.judge.container;
 
 import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.exception.NotFoundException;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.judge.LanguageSpec;
 import org.example.servicejudge.vo.DockersStatusVo;
 import org.springframework.stereotype.Component;
@@ -75,7 +79,7 @@ public class ContainerPoolManager {
      * 查询各语言容器池状态（不改变池内容）。
      *
      * @return 每种语言一条状态记录
-     * @throws IllegalArgumentException 调用方未登录、用户不存在或非管理员
+     * @throws BizException 调用方未登录、用户不存在或非管理员
      */
     public List<DockersStatusVo> getDockers() {
         checkAdmin();
@@ -110,14 +114,14 @@ public class ContainerPoolManager {
      * 为指定语言扩容一个容器。
      *
      * @param language 语言标识
-     * @throws IllegalArgumentException 语言不支持或调用方非管理员
-     * @throws IllegalStateException    容器创建/入池失败
+     * @throws BizException 语言不支持、调用方非管理员或容器创建/入池失败
+     *                      （docker 原始错误只进日志，消息用枚举文案 + cause）
      */
     public void addDocker(String language) {
         checkAdmin();
         LanguageSpec spec = LanguageSpec.of(language);
         if (spec == null) {
-            throw new IllegalArgumentException("不支持的语言: " + language);
+            throw new BizException(JudgeErrorCode.LANGUAGE_UNSUPPORTED);
         }
 
         String containerId = null;
@@ -129,7 +133,7 @@ public class ContainerPoolManager {
                         key -> new LinkedBlockingQueue<>()
                 );
                 if (!idlePool.offer(containerId)) {
-                    throw new IllegalStateException("容器空闲队列已满");
+                    throw new BizException(JudgeErrorCode.CONTAINER_POOL_UNAVAILABLE);
                 }
                 allContainerIds.computeIfAbsent(spec.language(), key -> ConcurrentHashMap.newKeySet()).add(containerId);
                 configuredContainerCounts.computeIfAbsent(spec.language(), key -> new AtomicInteger())
@@ -149,7 +153,14 @@ public class ContainerPoolManager {
                 }
                 dockerExecTemplate.removeContainerQuietly(containerId);
             }
-            throw new IllegalStateException("创建 " + spec.language() + " 容器失败", exception);
+            if (exception instanceof BizException bizException) {
+                throw bizException;
+            }
+            if (exception instanceof NotFoundException) {
+                // 沙箱镜像缺失：管理员需要先补齐对应语言的判题镜像
+                throw new BizException(JudgeErrorCode.SANDBOX_IMAGE_MISSING, exception);
+            }
+            throw new BizException(JudgeErrorCode.CONTAINER_CREATE_FAILED, exception);
         }
     }
 
@@ -159,31 +170,31 @@ public class ContainerPoolManager {
      * @param language    语言标识
      * @param containerId 容器 ID
      * @return 删除成功返回 true
-     * @throws IllegalArgumentException 容器不存在/参数非法或调用方非管理员
-     * @throws IllegalStateException    容器使用中、最后一个容器或物理删除失败
+     * @throws BizException 语言/容器标识非法、容器不存在、容器使用中、
+     *                      最后一个容器或物理删除失败（docker 细节只进日志）
      */
     public boolean removeDocker(String language, String containerId) {
         checkAdmin();
         LanguageSpec spec = LanguageSpec.of(language);
         if (spec == null) {
-            throw new IllegalArgumentException("不支持的语言: " + language);
+            throw new BizException(JudgeErrorCode.LANGUAGE_UNSUPPORTED);
         }
         if (containerId == null || containerId.isBlank()) {
-            throw new IllegalArgumentException("容器 ID 不能为空");
+            throw new BizException(JudgeErrorCode.CONTAINER_ID_MISSING);
         }
 
         BlockingQueue<String> idlePool = containerPools.get(spec.language());
         Set<String> allIds = allContainerIds.get(spec.language());
         if (idlePool == null || allIds == null || !allIds.contains(containerId)) {
-            throw new IllegalArgumentException("该容器不存在");
+            throw new BizException(JudgeErrorCode.CONTAINER_NOT_FOUND);
         }
 
         synchronized (containerPoolLocks.computeIfAbsent(spec.language(), key -> new Object())) {
             if (allIds.size() <= 1) {
-                throw new IllegalStateException("每种语言至少保留一个容器");
+                throw new BizException(JudgeErrorCode.CONTAINER_LAST_ONE);
             }
             if (!idlePool.remove(containerId)) {
-                throw new IllegalStateException("容器正在使用，不能删除");
+                throw new BizException(JudgeErrorCode.CONTAINER_IN_USE);
             }
             try {
                 dockerClient.removeContainerCmd(containerId).withForce(true).exec();
@@ -193,26 +204,28 @@ public class ContainerPoolManager {
                 return true;
             } catch (Exception exception) {
                 idlePool.offer(containerId);
-                throw new IllegalStateException("删除容器失败: " + containerId, exception);
+                log.error("删除 {} 容器失败: {}", spec.language(), containerId, exception);
+                throw new BizException(JudgeErrorCode.CONTAINER_REMOVE_FAILED, exception);
             }
         }
     }
 
     /**
-     * 校验当前登录用户为管理员（roleId==2），否则抛出非法参数异常。
-     * 用户身份取自 {@link UserContext}，不信任客户端传入的 userId。
+     * 校验当前登录用户为管理员（roleId==2），否则抛出业务异常。
+     * 用户身份取自 {@link UserContext}，不信任客户端传入的 userId；
+     * 保持既有语义：root（roleId=0）同样不能操作容器池。
      */
     private void checkAdmin() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("用户未登录");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         Result<UserDto> response = userFeignClient.getUserInfo(userId);
         if (response == null || response.getData() == null) {
-            throw new IllegalArgumentException("用户不存在");
+            throw new BizException(CommonErrorCode.ADMIN_ONLY);
         }
         if (!Objects.equals(response.getData().getRoleId(), 2)) {
-            throw new IllegalArgumentException("无权管理判题容器");
+            throw new BizException(CommonErrorCode.ADMIN_ONLY);
         }
     }
 

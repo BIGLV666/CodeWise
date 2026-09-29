@@ -3,6 +3,7 @@ package org.example.servicejudge.controller;
 import io.github.biglv666.apigovernance.filter.FilterContext;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.aop.AdminAuthAspect;
 import org.example.servicecommon.aop.RequireAdmin;
@@ -91,7 +92,8 @@ class DockerControllerAdminAuthTest {
         AdminAuthAspect aspect = newAspect();
         FilterContext context = contextOf(LIST_CONTAINERS);
         assertFalse(aspect.doFilter(context));
-        verify(context).setRejectReason("请登录后重试");
+        // 拒绝原因与共享切面口径一致：未登录 -> LOGIN_REQUIRED 枚举文案
+        verify(context).setRejectReason(CommonErrorCode.LOGIN_REQUIRED.getMessage());
     }
 
     @Test
@@ -100,7 +102,7 @@ class DockerControllerAdminAuthTest {
         stubUser(1);
         FilterContext context = contextOf(LIST_CONTAINERS);
         assertFalse(newAspect().doFilter(context));
-        verify(context).setRejectReason("无权访问");
+        verify(context).setRejectReason(CommonErrorCode.ADMIN_ONLY.getMessage());
     }
 
     @Test
@@ -113,7 +115,7 @@ class DockerControllerAdminAuthTest {
         when(userFeignClient.getUserInfo(1006L)).thenReturn(Result.success(user));
         FilterContext context = contextOf(LIST_CONTAINERS);
         assertFalse(newAspect().doFilter(context));
-        verify(context).setRejectReason("无权访问");
+        verify(context).setRejectReason(CommonErrorCode.ADMIN_ONLY.getMessage());
     }
 
     @Test
@@ -122,7 +124,8 @@ class DockerControllerAdminAuthTest {
         when(userFeignClient.getUserInfo(1002L)).thenReturn(Result.success(null));
         FilterContext context = contextOf(LIST_CONTAINERS);
         assertFalse(newAspect().doFilter(context));
-        verify(context).setRejectReason("用户不存在");
+        // 回查不到用户记录按登录态失效拒绝（切面统一走 LOGIN_REQUIRED 文案）
+        verify(context).setRejectReason(CommonErrorCode.LOGIN_REQUIRED.getMessage());
     }
 
     @Test

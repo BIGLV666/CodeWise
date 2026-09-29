@@ -6,11 +6,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.SolutionDto;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Solution;
@@ -60,7 +63,7 @@ public class SolutionService {
     @Transactional
     public HomeSolutionVo createSolution(SolutionDto dto,String requestId) {
         if(requestId==null){
-            throw new IllegalArgumentException("未知请求");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         if(Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.REQUEST_ID_KEY+":"+requestId,"pending"))){
             log.info("重复处理");
@@ -80,11 +83,11 @@ public class SolutionService {
                 .updateTime(LocalDateTime.now())
                 .build();
         if (solutionMapper.insert(solution) == 0) {
-            throw new IllegalArgumentException("发布题解失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         List<Tags> tags = buildTags(solution.getSolutionId(), dto.getTags());
         if (!tags.isEmpty() && tagsMapper.batchInsert(tags) != tags.size()) {
-            throw new IllegalArgumentException("保存题解标签失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         redisTemplate.opsForValue().set(RedisContext.REQUEST_ID_KEY+":"+requestId,"success",2,TimeUnit.MINUTES);
         return toHomeSolutionVo(solution, tags);
@@ -126,7 +129,8 @@ public class SolutionService {
         Solution solution = solutionMapper.selectById(solutionId);
         if (solution == null || (!PostStatus.isVisible(solution.getStatus())
                 && !java.util.Objects.equals(solution.getSolutionUserId(), UserContext.getUserId()))) {
-            throw new IllegalArgumentException("题解不存在或已下架");
+            // 非作者不可见：按不存在处理，不泄漏隐藏题解的存在性
+            throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
         }
         Number bucketId = (Number) redisTemplate.opsForValue().get(RedisContext.SOLUTION_LOOK_BUCKET_KEY);
         if (bucketId == null) {
@@ -134,7 +138,7 @@ public class SolutionService {
             bucketId = (Number) redisTemplate.opsForValue().get(RedisContext.SOLUTION_LOOK_BUCKET_KEY);
         }
         if (bucketId == null) {
-            throw new IllegalStateException("获取题解浏览量桶失败");
+            throw new BizException(CommunityErrorCode.VIEW_COUNT_UNAVAILABLE);
         }
         redisTemplate.opsForHash().increment(
                 RedisContext.SOLUTION_LOOK_KEY + "-" + bucketId.intValue(),
@@ -161,14 +165,14 @@ public class SolutionService {
         solution.setStatus(PostStatus.PENDING);
         solution.setUpdateTime(LocalDateTime.now());
         if (solutionMapper.updateById(solution) == 0) {
-            throw new IllegalArgumentException("修改题解失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         tagsMapper.delete(new LambdaQueryWrapper<Tags>()
                 .eq(Tags::getPostId, solutionId)
                 .eq(Tags::getType, PostType.SOLUTION));
         List<Tags> tags = buildTags(solutionId, dto.getTags());
         if (!tags.isEmpty() && tagsMapper.batchInsert(tags) != tags.size()) {
-            throw new IllegalArgumentException("修改题解标签失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         return toHomeSolutionVo(solution, tags);
     }
@@ -215,10 +219,10 @@ public class SolutionService {
     private Solution requireOwnedSolution(Long solutionId) {
         Solution solution = solutionMapper.selectById(solutionId);
         if (solution == null) {
-            throw new IllegalArgumentException("题解不存在");
+            throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
         }
         if (!solution.getSolutionUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("无权修改或删除该题解");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         return solution;
     }
@@ -227,17 +231,17 @@ public class SolutionService {
         if (dto == null || dto.getQuestionId() == null || dto.getSolutionTitle() == null
                 || dto.getSolutionTitle().trim().isEmpty() || dto.getSolutionContent() == null
                 || dto.getSolutionContent().trim().isEmpty()) {
-            throw new IllegalArgumentException("题目ID、题解标题和题解正文不能为空");
+            throw new BizException(CommunityErrorCode.SOLUTION_FIELDS_REQUIRED);
         }
         if (dto.getSolutionTitle().trim().length() > 200) {
-            throw new IllegalArgumentException("题解标题不能超过200个字符");
+            throw new BizException(CommunityErrorCode.SOLUTION_TITLE_TOO_LONG, 200);
         }
     }
 
     private void requireQuestion(Long questionId) {
         Result<QuestionDto> question = questionFeignClient.getQuestionInfo(questionId);
         if (question == null || question.getData() == null) {
-            throw new IllegalArgumentException("题目不存在");
+            throw new BizException(CommunityErrorCode.QUESTION_NOT_FOUND);
         }
     }
 
@@ -252,7 +256,7 @@ public class SolutionService {
             }
             String normalized = tagName.trim();
             if (normalized.length() >= 20) {
-                throw new IllegalArgumentException("单个标签不能达到或超过20个字符");
+                throw new BizException(CommunityErrorCode.TAG_TOO_LONG, 20);
             }
             if (tags.stream().noneMatch(tag -> tag.getTagName().equals(normalized))) {
                 tags.add(Tags.builder()

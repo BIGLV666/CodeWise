@@ -4,6 +4,7 @@ import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.judge.JudgeResultDto;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
@@ -12,6 +13,7 @@ import org.example.servicecommon.event.EnvelopeCodec;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.SubmitRecord;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.JudgeRecordMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
@@ -152,7 +154,7 @@ public class SubmitRecordHandel implements MessageHandler {
      * 事务体：CAS 收尾 submit_record，命中后同事务完成题目计数与 REVIEW 事件登记。
      *
      * @return true=本次消费完成收尾；false=CAS 未命中且记录已 success（幂等跳过）
-     * @throws IllegalStateException CAS 未命中且状态异常 / 计数更新失败（整体回滚）
+     * @throws BizException CAS 未命中且状态异常 / 计数更新失败（整体回滚，消息重投）
      */
     private boolean applyJudgeResult(JudgeRecord judgeRecord, SubmitRecord submitRecord, JudgeResultDto judgeResultDto) {
         Long submitRecordId = submitRecord.getSubmitRecordId();
@@ -170,18 +172,20 @@ public class SubmitRecordHandel implements MessageHandler {
                         judgeRecord.getJudgeRecordId(), submitRecordId);
                 return false;
             }
-            throw new IllegalStateException("提交记录 CAS 收尾未命中且状态非 success, submitRecordId="
-                    + submitRecordId + ", judgeStatus="
-                    + (latest == null ? "null" : latest.getJudgeStatus()));
+            log.error("提交记录 CAS 收尾未命中且状态非 success, submitRecordId={}, judgeStatus={}",
+                    submitRecordId, latest == null ? "null" : latest.getJudgeStatus());
+            throw new BizException(QuestionErrorCode.SUBMIT_RECORD_STATE_CONFLICT);
         }
 
         // 题目统计与 CAS 同事务：只有真正收尾的那次消费才计数，失败抛异常整体回滚
         Long questionId = submitRecord.getQuestionId();
         if (questionMapper.updateTotal(questionId) == 0) {
-            throw new IllegalStateException("题目提交计数更新失败, questionId=" + questionId);
+            log.error("题目提交计数更新失败, questionId={}", questionId);
+            throw new BizException(QuestionErrorCode.QUESTION_COUNT_UPDATE_FAILED);
         }
         if ("AC".equals(judgeResultDto.getSubmitStatus()) && questionMapper.updateTotalAc(questionId) == 0) {
-            throw new IllegalStateException("题目 AC 计数更新失败, questionId=" + questionId);
+            log.error("题目 AC 计数更新失败, questionId={}", questionId);
+            throw new BizException(QuestionErrorCode.QUESTION_COUNT_UPDATE_FAILED);
         }
 
         // REVIEW 场景改走事务性 Outbox：与 CAS/计数同事务提交，由 Relay 至少一次投递

@@ -3,6 +3,9 @@ package org.example.servicequestion.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -26,7 +29,7 @@ public class FunctionRandomInputGenerator {
     public List<String> generate(String parameterConfig, int count, long seed) {
         JsonNode parameters = readParameters(parameterConfig);
         if (parameters.isEmpty()) {
-            throw new IllegalArgumentException("暂不支持无参数函数的随机测试生成");
+            throw new BizException(QuestionErrorCode.RANDOM_NO_PARAM_UNSUPPORTED);
         }
 
         Random random = new Random(seed);
@@ -40,7 +43,7 @@ public class FunctionRandomInputGenerator {
             inputs.add(String.join("\n", values));
         }
         if (inputs.size() < count) {
-            throw new IllegalStateException("随机输入去重后数量不足，请更换随机种子重试");
+            throw new BizException(QuestionErrorCode.RANDOM_INPUT_INSUFFICIENT);
         }
         return new ArrayList<>(inputs);
     }
@@ -49,11 +52,11 @@ public class FunctionRandomInputGenerator {
         try {
             JsonNode parameters = objectMapper.readTree(parameterConfig);
             if (parameters == null || !parameters.isArray()) {
-                throw new IllegalArgumentException("函数参数配置格式错误");
+                throw new BizException(QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID);
             }
             return parameters;
         } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException("函数参数配置格式错误", exception);
+            throw new BizException(QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID, exception);
         }
     }
 
@@ -65,7 +68,7 @@ public class FunctionRandomInputGenerator {
             case "int[]", "int []" -> writeJson(randomIntArray(random));
             case "String[]", "String []" -> writeJson(randomStringArray(random));
             case "TreeNode" -> writeJson(randomTree(random));
-            default -> throw new IllegalArgumentException("随机生成暂不支持参数类型: " + type);
+            default -> throw new BizException(QuestionErrorCode.RANDOM_TYPE_UNSUPPORTED, type);
         };
     }
 
@@ -129,7 +132,7 @@ public class FunctionRandomInputGenerator {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException exception) {
-            throw new IllegalStateException("随机输入序列化失败", exception);
+            throw new BizException(CommonErrorCode.INTERNAL_ERROR, exception);
         }
     }
 }

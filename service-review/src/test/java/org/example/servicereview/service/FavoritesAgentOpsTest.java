@@ -1,5 +1,7 @@
 package org.example.servicereview.service;
 
+import org.example.serviceapi.exception.BizException;
+
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.feign.QuestionFeignClient;
@@ -131,7 +133,7 @@ class FavoritesAgentOpsTest {
     @Test
     void listFavoriteFolderVos_unauthenticated_throws() {
         UserContext.clear();
-        assertThrows(IllegalArgumentException.class, () -> favoritesService.listFavoriteFolderVos());
+        assertThrows(BizException.class, () -> favoritesService.listFavoriteFolderVos());
     }
 
     // ---------- 收藏夹题目瘦身列表（含懒删除） ----------
@@ -171,7 +173,7 @@ class FavoritesAgentOpsTest {
     void getFavoriteQuestionBriefs_notOwner_throws() {
         when(favoritesMapper.selectById(FOLDER_A)).thenReturn(folder(FOLDER_A, OTHER_USER_ID, List.of(1L)));
 
-        assertThrows(IllegalArgumentException.class, () -> favoritesService.getFavoriteQuestionBriefs(FOLDER_A));
+        assertThrows(BizException.class, () -> favoritesService.getFavoriteQuestionBriefs(FOLDER_A));
         verifyNoInteractions(questionFeignClient);
     }
 
@@ -217,7 +219,7 @@ class FavoritesAgentOpsTest {
         dto.setFavoritesName("面经");
         dto.setRequestId("uuid-1");
 
-        assertThrows(IllegalArgumentException.class, () -> favoritesService.createFavoritesAgent(dto));
+        assertThrows(BizException.class, () -> favoritesService.createFavoritesAgent(dto));
         verify(favoritesMapper, never()).insert(org.mockito.ArgumentMatchers.any(Favorites.class));
     }
 
@@ -226,11 +228,11 @@ class FavoritesAgentOpsTest {
         AgentFavoriteCreateDto noName = new AgentFavoriteCreateDto();
         noName.setRequestId("uuid-1");
         noName.setFavoritesName("   ");
-        assertThrows(IllegalArgumentException.class, () -> favoritesService.createFavoritesAgent(noName));
+        assertThrows(BizException.class, () -> favoritesService.createFavoritesAgent(noName));
 
         AgentFavoriteCreateDto noRequestId = new AgentFavoriteCreateDto();
         noRequestId.setFavoritesName("面经");
-        assertThrows(IllegalArgumentException.class, () -> favoritesService.createFavoritesAgent(noRequestId));
+        assertThrows(BizException.class, () -> favoritesService.createFavoritesAgent(noRequestId));
     }
 
     // ---------- 更新元信息 ----------
@@ -260,7 +262,7 @@ class FavoritesAgentOpsTest {
 
         AgentFavoriteUpdateDto dto = new AgentFavoriteUpdateDto();
         dto.setFavoritesId(FOLDER_A);
-        assertThrows(IllegalArgumentException.class, () -> favoritesService.updateFavoritesMeta(dto));
+        assertThrows(BizException.class, () -> favoritesService.updateFavoritesMeta(dto));
         verify(favoritesMapper, never()).updateById(org.mockito.ArgumentMatchers.any(Favorites.class));
     }
 
@@ -303,14 +305,14 @@ class FavoritesAgentOpsTest {
         when(favoritesMapper.selectById(FOLDER_A)).thenReturn(folder(FOLDER_A, USER_ID, List.of()));
         List<Long> tooMany = LongStream.rangeClosed(1, 51).boxed().toList();
 
-        assertThrows(IllegalArgumentException.class, () -> favoritesService.batchAddQuestions(FOLDER_A, tooMany));
+        assertThrows(BizException.class, () -> favoritesService.batchAddQuestions(FOLDER_A, tooMany));
     }
 
     @Test
     void batchAddQuestions_notOwner_throws() {
         when(favoritesMapper.selectById(FOLDER_A)).thenReturn(folder(FOLDER_A, OTHER_USER_ID, List.of()));
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> favoritesService.batchAddQuestions(FOLDER_A, List.of(1L)));
     }
 
@@ -371,7 +373,7 @@ class FavoritesAgentOpsTest {
 
     @Test
     void moveQuestions_sameFolder_throwsWithoutLocking() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> favoritesService.moveQuestions(FOLDER_A, FOLDER_A, List.of(1L)));
         verify(favoritesMapper, never()).lockByIdsForUpdate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
@@ -382,7 +384,7 @@ class FavoritesAgentOpsTest {
         when(favoritesMapper.selectById(FOLDER_A)).thenReturn(folder(FOLDER_A, USER_ID, List.of(1L)));
         when(favoritesMapper.selectById(FOLDER_B)).thenReturn(null);
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> favoritesService.moveQuestions(FOLDER_A, FOLDER_B, List.of(1L)));
         verify(favoritesMapper, never()).updateById(org.mockito.ArgumentMatchers.any(Favorites.class));
     }
@@ -393,7 +395,7 @@ class FavoritesAgentOpsTest {
         when(favoritesMapper.selectById(FOLDER_A)).thenReturn(folder(FOLDER_A, USER_ID, List.of(1L)));
         when(favoritesMapper.selectById(FOLDER_B)).thenReturn(folder(FOLDER_B, OTHER_USER_ID, List.of()));
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> favoritesService.moveQuestions(FOLDER_A, FOLDER_B, List.of(1L)));
         verify(favoritesMapper, never()).updateById(org.mockito.ArgumentMatchers.any(Favorites.class));
     }
@@ -404,7 +406,7 @@ class FavoritesAgentOpsTest {
         when(favoritesMapper.selectById(FOLDER_A)).thenReturn(folder(FOLDER_A, USER_ID, List.of(1L)));
         when(favoritesMapper.selectById(FOLDER_B)).thenReturn(folder(FOLDER_B, USER_ID, List.of()));
 
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> favoritesService.moveQuestions(FOLDER_A, FOLDER_B, List.of()));
     }
 

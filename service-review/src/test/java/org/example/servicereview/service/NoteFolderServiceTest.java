@@ -1,5 +1,7 @@
 package org.example.servicereview.service;
 
+import org.example.serviceapi.exception.BizException;
+
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.NoteFolderSaveDto;
@@ -93,7 +95,7 @@ class NoteFolderServiceTest {
     @Test
     void listFolders_unauthenticated_throws() {
         UserContext.clear();
-        assertThrows(IllegalArgumentException.class, () -> service.listFolders());
+        assertThrows(BizException.class, () -> service.listFolders());
     }
 
     @Test
@@ -121,7 +123,7 @@ class NoteFolderServiceTest {
     void createFolder_blankName_throws() {
         NoteFolderSaveDto dto = new NoteFolderSaveDto();
         dto.setFolderName("   ");
-        assertThrows(IllegalArgumentException.class, () -> service.createFolder(dto));
+        assertThrows(BizException.class, () -> service.createFolder(dto));
         verify(noteFolderMapper, never()).insert(any(NoteFolder.class));
     }
 
@@ -134,7 +136,7 @@ class NoteFolderServiceTest {
         dto.setFolderName("Java");
         dto.setRequestId("uuid-1");
 
-        assertThrows(IllegalArgumentException.class, () -> service.createFolder(dto));
+        assertThrows(BizException.class, () -> service.createFolder(dto));
         verify(noteFolderMapper, never()).insert(any(NoteFolder.class));
     }
 
@@ -144,7 +146,7 @@ class NoteFolderServiceTest {
 
         NoteFolderSaveDto dto = new NoteFolderSaveDto();
         dto.setFolderName("新名");
-        assertThrows(IllegalArgumentException.class, () -> service.renameFolder(FOLDER_A, dto));
+        assertThrows(BizException.class, () -> service.renameFolder(FOLDER_A, dto));
         verify(noteFolderMapper, never()).updateById(any(NoteFolder.class));
     }
 
@@ -163,7 +165,7 @@ class NoteFolderServiceTest {
     void deleteFolder_notOwner_throws() {
         when(noteFolderMapper.selectById(FOLDER_A)).thenReturn(folder(FOLDER_A, OTHER_USER_ID, "Java"));
 
-        assertThrows(IllegalArgumentException.class, () -> service.deleteFolder(FOLDER_A));
+        assertThrows(BizException.class, () -> service.deleteFolder(FOLDER_A));
         verify(noteMapper, never()).delete(any(QueryWrapper.class));
         verify(noteFolderMapper, never()).deleteById(eq(FOLDER_A));
     }

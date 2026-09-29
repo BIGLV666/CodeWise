@@ -1,6 +1,7 @@
 package org.example.servicejudge.Mq.handler;
 
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.event.EventPublisher;
 import org.example.servicejudge.entry.FailureSubmit;
@@ -136,14 +137,15 @@ class JudgeRetryHandlerTest {
                 eq(FailureSubmitStatus.FAILURE.getValue()),
                 any())).thenReturn(1);
 
-        assertThrows(IllegalStateException.class, () -> judgeRetryHandler.handle(1L));
+        assertThrows(BizException.class, () -> judgeRetryHandler.handle(1L));
 
         ArgumentCaptor<String> errorCaptor = ArgumentCaptor.forClass(String.class);
         verify(failureSubmitMapper).updateFailureStatus(
                 eq(1L),
                 eq(FailureSubmitStatus.FAILURE.getValue()),
                 errorCaptor.capture());
-        assertTrue(errorCaptor.getValue().contains("提交记录不存在"));
+        // 上抛的 BizException 文案来自枚举（判题任务不存在口径），堆栈摘要照旧落库留痕
+        assertTrue(errorCaptor.getValue().contains("判题任务不存在或已被清理"));
         assertTrue(errorCaptor.getValue().length() <= 4000);
         verifyNoInteractions(eventPublisher);
     }

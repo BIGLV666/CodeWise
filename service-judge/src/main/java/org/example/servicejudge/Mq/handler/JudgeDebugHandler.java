@@ -2,6 +2,7 @@ package org.example.servicejudge.Mq.handler;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.GetDebugTestDto;
 import org.example.servicecommon.RedisDto.JudgeReturnRecordDto;
@@ -16,6 +17,7 @@ import org.example.servicejudge.entry.FunctionTestCase;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.Question;
 import org.example.servicejudge.enums.QuestionType;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.functionsService.Java;
 import org.example.servicejudge.judge.JudgeService;
 import org.example.servicejudge.mapper.FunctionConfigMapper;
@@ -71,7 +73,7 @@ public class JudgeDebugHandler {
         try {
             if (uuid == null || uuid.isEmpty()) {
                 log.info("uuid is empty{}", uuid);
-                throw new RuntimeException("未找到该提交");
+                throw new BizException(JudgeErrorCode.JUDGE_TASK_NOT_FOUND);
             }
             Boolean firstConsume = redisTemplate.opsForValue()
                     .setIfAbsent(RedisContext.JUDGE_SUCCESS_KEY + uuid, "pending", 5, TimeUnit.MINUTES);
@@ -82,12 +84,12 @@ public class JudgeDebugHandler {
             debugDto = (DebugDto) redisTemplate.opsForHash().get(RedisContext.JUDGE_DEBUG_KEY, uuid);
             if (debugDto == null) {
                 log.info("未找到该提交");
-                throw new RuntimeException("未找到该提交");
+                throw new BizException(JudgeErrorCode.JUDGE_TASK_NOT_FOUND);
             }
             Question question = questionMapper.selectById(debugDto.getQuestionId());
             if (question == null) {
                 log.info("该题目不存在");
-                throw new RuntimeException("该题目不存在");
+                throw new BizException(JudgeErrorCode.JUDGE_QUESTION_NOT_FOUND);
             }
             List<GetDebugTestDto> tests = debugDto.getTests() == null
                     ? new ArrayList<>()
@@ -143,13 +145,13 @@ public class JudgeDebugHandler {
             List<GetDebugTestDto> tests
     ) throws IOException {
         if (!"java".equalsIgnoreCase(debugDto.getLanguage())) {
-            throw new IllegalArgumentException("函数模式暂时只支持 Java");
+            throw new BizException(JudgeErrorCode.FUNCTION_MODE_JAVA_ONLY);
         }
         FunctionConfig functionConfig = functionConfigMapper.selectOne(
                 new QueryWrapper<FunctionConfig>().eq("question_id", debugDto.getQuestionId())
         );
         if (functionConfig == null) {
-            throw new IllegalStateException("函数模式题目配置不存在");
+            throw new BizException(JudgeErrorCode.FUNCTION_CONFIG_NOT_FOUND);
         }
 
         String mainCode = Java.ToMain(

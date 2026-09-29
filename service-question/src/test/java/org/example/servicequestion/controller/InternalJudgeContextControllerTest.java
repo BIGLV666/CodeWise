@@ -3,11 +3,14 @@ package org.example.servicequestion.controller;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.judge.JudgeContextDto;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.JudgeRecordMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
@@ -84,7 +87,8 @@ class InternalJudgeContextControllerTest {
         UserContext.setUserId(7L);
         stubUserRole(7L, 1);
 
-        assertThrows(IllegalArgumentException.class, () -> controller.getJudgeContext(123L));
+        BizException exception = assertThrows(BizException.class, () -> controller.getJudgeContext(123L));
+        assertEquals(CommonErrorCode.ADMIN_ONLY.getCode(), exception.getCode());
 
         // 非管理员请求不应触达任何业务数据查询（防 IDOR）
         verify(judgeRecordMapper, never()).selectById(anyLong());
@@ -97,7 +101,8 @@ class InternalJudgeContextControllerTest {
         UserContext.setUserId(7L);
         when(userFeignClient.getUserInfo(7L)).thenReturn(null);
 
-        assertThrows(IllegalArgumentException.class, () -> controller.getJudgeContext(123L));
+        BizException exception = assertThrows(BizException.class, () -> controller.getJudgeContext(123L));
+        assertEquals(QuestionErrorCode.USER_NOT_FOUND.getCode(), exception.getCode());
         verify(judgeRecordMapper, never()).selectById(any());
     }
 

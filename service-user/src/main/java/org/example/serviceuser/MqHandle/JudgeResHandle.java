@@ -3,6 +3,8 @@ package org.example.serviceuser.MqHandle;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.config.MqContexts;
 import org.example.serviceuser.entry.User;
 import org.example.serviceuser.mapper.UserMapper;
@@ -52,8 +54,8 @@ public class JudgeResHandle implements MessageHandler {
         } catch (IOException ex) {
             log.error("NACK失败", ex);
         }
-        // 抛出异常让事务回滚
-        throw new RuntimeException("处理判题结果失败", e);
+        // 抛出异常让事务回滚（MQ 消费链路，消息不直达前端；原始错误只进日志）
+        throw new BizException(CommonErrorCode.INTERNAL_ERROR, e);
     }
     }
 }

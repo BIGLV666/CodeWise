@@ -12,9 +12,12 @@ SSE 事件契约（与 dsh 会话事件词汇对齐，前端可按 dsh Web UI �
 
 import json
 from collections.abc import Iterator
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from util.error_codes import AgentErrorCode
 
 from dsh_bridge.service import DshAgentService
 from dto.CallAiDto import CallAiDto
@@ -23,6 +26,8 @@ from entry.database import get_db
 from util.jwt import get_current_user_id, get_token_from_header
 
 router = APIRouter(prefix="/api/agent", tags=["Agent"])
+
+logger = logging.getLogger(__name__)
 
 
 def build_call_dto(request: CallAiRequest, user_id: int) -> CallAiDto:
@@ -66,9 +71,16 @@ def call_ai(
             },
         }
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=404,
+            detail=AgentErrorCode.CONVERSATION_NOT_FOUND.message,
+        ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("Agent 调用失败: %s", exc)
+        raise HTTPException(
+            status_code=400,
+            detail=AgentErrorCode.AGENT_CALL_FAILED.message,
+        ) from exc
 
 
 @router.post("/stream")
@@ -92,11 +104,13 @@ def stream_ai(
 
         except Exception as exc:
             # HTTP 响应开始后不能再改变状态码，因此通过 error 事件通知前端。
+            # 事件文案固定来自枚举，原始异常只进日志。
+            logger.exception("Agent 流式调用失败: %s", exc)
             yield sse_event(
                 "error",
                 {
                     "conversation_id": request.conversation_id,
-                    "message": str(exc) or "Agent 调用失败",
+                    "message": AgentErrorCode.AGENT_CALL_FAILED.message,
                 },
             )
 

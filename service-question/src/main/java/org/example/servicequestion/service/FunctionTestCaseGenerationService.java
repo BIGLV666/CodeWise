@@ -1,6 +1,8 @@
 package org.example.servicequestion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.GetDebugTestDto;
 import org.example.servicecommon.RedisDto.JudgeReturnRecordDto;
@@ -12,6 +14,7 @@ import org.example.servicequestion.dto.FunctionTestCaseGenerateRequest;
 import org.example.servicequestion.entry.FunctionConfig;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.enums.QuestionType;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.FunctionConfigMapper;
 import org.example.servicequestion.vo.FunctionTestCaseGenerationTaskVo;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -65,7 +68,7 @@ public class FunctionTestCaseGenerationService {
         Long userId = UserContext.getUserId();
         Question question = permissionService.requireOwnerOrAdmin(request.getQuestionId(), userId);
         if (question.getQuestionType() != QuestionType.FUNCTION) {
-            throw new IllegalArgumentException("仅函数模式题目支持随机测试生成");
+            throw new BizException(QuestionErrorCode.NOT_FUNCTION_QUESTION);
         }
 
         FunctionConfig config = functionConfigMapper.selectOne(
@@ -74,7 +77,7 @@ public class FunctionTestCaseGenerationService {
                         .last("LIMIT 1")
         );
         if (config == null) {
-            throw new IllegalStateException("函数配置不存在");
+            throw new BizException(QuestionErrorCode.FUNCTION_CONFIG_NOT_FOUND);
         }
 
         int count = request.getCount() == null ? DEFAULT_COUNT : request.getCount();
@@ -126,7 +129,7 @@ public class FunctionTestCaseGenerationService {
         FunctionTestCaseGenerationTaskVo task = loadTask(taskId);
         Long userId = UserContext.getUserId();
         if (userId == null || !userId.equals(task.getUserId())) {
-            throw new SecurityException("无权查看该生成任务");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         permissionService.requireOwnerOrAdmin(task.getQuestionId(), userId);
         return task;
@@ -140,7 +143,7 @@ public class FunctionTestCaseGenerationService {
         FunctionTestCaseGenerationTaskVo task = loadTask(taskId);
         permissionService.requireOwnerOrAdmin(task.getQuestionId(), task.getUserId());
         if (results == null || results.size() != task.getRequestedCount()) {
-            throw new IllegalStateException("标准答案返回的测试结果数量不完整");
+            throw new BizException(QuestionErrorCode.GENERATE_RESULT_INCOMPLETE);
         }
 
         List<FunctionTestCaseDto> testCases = new ArrayList<>(results.size());
@@ -149,7 +152,8 @@ public class FunctionTestCaseGenerationService {
             if (result == null || !("AC".equals(result.getSubmitStatus())
                     || "WA".equals(result.getSubmitStatus()))) {
                 String error = result == null ? "无执行结果" : result.getErrorMsg();
-                throw new IllegalStateException("标准答案在随机输入 " + (index + 1) + " 执行失败: " + error);
+                log.warn("标准答案在随机输入 {} 执行失败, taskId={}, error={}", index + 1, taskId, error);
+                throw new BizException(QuestionErrorCode.GENERATE_STANDARD_ANSWER_FAILED);
             }
             FunctionTestCaseDto testCase = new FunctionTestCaseDto();
             testCase.setInput(result.getInputData());
@@ -187,23 +191,23 @@ public class FunctionTestCaseGenerationService {
 
     private void validateRequest(FunctionTestCaseGenerateRequest request) {
         if (request == null) {
-            throw new IllegalArgumentException("请求不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         if (request.getQuestionId() == null) {
-            throw new IllegalArgumentException("题目 ID 不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
         }
         if (request.getStandardAnswer() == null || request.getStandardAnswer().isBlank()) {
-            throw new IllegalArgumentException("标准答案不能为空");
+            throw new BizException(QuestionErrorCode.STANDARD_ANSWER_REQUIRED);
         }
         if (request.getStandardAnswer().length() > MAX_CODE_LENGTH) {
-            throw new IllegalArgumentException("标准答案长度不能超过 100000 个字符");
+            throw new BizException(QuestionErrorCode.STANDARD_ANSWER_TOO_LONG, MAX_CODE_LENGTH);
         }
         if (request.getLanguage() != null && !"java".equalsIgnoreCase(request.getLanguage())) {
-            throw new IllegalArgumentException("函数模式随机生成暂时只支持 Java");
+            throw new BizException(QuestionErrorCode.GENERATE_LANGUAGE_UNSUPPORTED);
         }
         int count = request.getCount() == null ? DEFAULT_COUNT : request.getCount();
         if (count < 1 || count > MAX_COUNT) {
-            throw new IllegalArgumentException("生成数量必须在 1 到 100 之间");
+            throw new BizException(QuestionErrorCode.GENERATE_COUNT_INVALID, 1, MAX_COUNT);
         }
     }
 
@@ -220,11 +224,11 @@ public class FunctionTestCaseGenerationService {
 
     private FunctionTestCaseGenerationTaskVo loadTask(String taskId) {
         if (taskId == null || taskId.isBlank()) {
-            throw new IllegalArgumentException("任务 ID 不能为空");
+            throw new BizException(QuestionErrorCode.TASK_ID_INVALID);
         }
         Object value = redisTemplate.opsForValue().get(taskKey(taskId));
         if (!(value instanceof FunctionTestCaseGenerationTaskVo task)) {
-            throw new IllegalArgumentException("生成任务不存在或已过期");
+            throw new BizException(QuestionErrorCode.GENERATION_TASK_NOT_FOUND);
         }
         return task;
     }

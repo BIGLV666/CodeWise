@@ -1,9 +1,11 @@
 package org.example.servicecommunity.controller;
 
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommunity.Dto.CommentDto;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.enums.PostType;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.service.CommentService;
 import org.example.servicecommunity.vo.CommentVo;
 import org.example.servicecommunity.vo.CursorPageResult;
@@ -62,7 +64,7 @@ public class CommentController {
 
     private void validatePageSize(Integer pageSize) {
         if (pageSize == null || pageSize < 1 || pageSize > 100) {
-            throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
+            throw new BizException(CommunityErrorCode.PAGE_SIZE_INVALID);
         }
     }
 }

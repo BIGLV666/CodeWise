@@ -1,5 +1,6 @@
 package org.example.serviceai.controller;
 
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.service.AiProviderHttpException;
 import org.junit.jupiter.api.Test;
 
@@ -7,8 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
- * SSE 错误文案脱敏测试：兜底分支返回固定文案（不含 Provider 名/内部根因），
- * AiProviderHttpException 的友好分支保留。
+ * SSE 错误文案测试：文案一律来自错误码枚举（BizException 消息），
+ * 非业务异常兜底返回固定中文提示，不含 Provider 名/内部根因/状态码数字。
  */
 class AiAdviceControllerTest {
 
@@ -22,7 +23,7 @@ class AiAdviceControllerTest {
 
         String message = controller.toUserMessage(exception);
 
-        assertEquals("AI 服务暂时不可用，请稍后重试", message);
+        assertEquals(AiErrorCode.AI_SERVICE_NOT_READY.getMessage(), message);
         assertFalse(message.contains("glm-4"));
         assertFalse(message.contains("internal-proxy"));
     }
@@ -31,23 +32,24 @@ class AiAdviceControllerTest {
     void nullMessageFallsBackToFixedText() {
         String message = controller.toUserMessage(new RuntimeException((String) null));
 
-        assertEquals("AI 服务暂时不可用，请稍后重试", message);
+        assertEquals(AiErrorCode.AI_SERVICE_NOT_READY.getMessage(), message);
     }
 
     @Test
-    void providerAuthFailureKeepsFriendlyBranch() {
+    void providerAuthFailureUsesKeyErrorCode() {
         String message = controller.toUserMessage(
                 new AiProviderHttpException("custom", 403, "secret upstream body", null));
 
-        assertEquals("AI 服务认证失败，请检查 API Key 和模型权限", message);
+        assertEquals(AiErrorCode.PROVIDER_KEY_INVALID.getMessage(), message);
+        assertFalse(message.contains("403"));
     }
 
     @Test
-    void providerRateLimitKeepsFriendlyBranch() {
+    void providerRateLimitUsesQuotaErrorCode() {
         String message = controller.toUserMessage(
                 new AiProviderHttpException("custom", 429, "quota exceeded", "30"));
 
-        assertEquals("AI 服务请求过于频繁或额度不足，请稍后重试", message);
+        assertEquals(AiErrorCode.PROVIDER_QUOTA_EXCEEDED.getMessage(), message);
     }
 
     @Test
@@ -57,6 +59,7 @@ class AiAdviceControllerTest {
 
         String message = controller.toUserMessage(nested);
 
-        assertEquals("AI 服务调用失败，HTTP 500", message);
+        assertEquals(AiErrorCode.PROVIDER_CALL_FAILED.getMessage(), message);
+        assertFalse(message.contains("500"));
     }
 }

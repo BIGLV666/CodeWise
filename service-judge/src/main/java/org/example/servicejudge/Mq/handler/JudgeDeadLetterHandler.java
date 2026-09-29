@@ -4,6 +4,8 @@ import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.event.EventEnvelope;
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.event.EnvelopeCodec;
 import org.example.servicejudge.entry.FailureSubmit;
@@ -119,7 +121,7 @@ public class JudgeDeadLetterHandler {
      * 登记失败提交并把提交状态置为 failure（事务方法，经代理调用）。
      *
      * @param submitRecordId 提交记录主键
-     * @throws IllegalStateException 失败记录和提交状态未同步更新（整体回滚）
+     * @throws BizException 失败记录和提交状态未同步更新（整体回滚；消费者仍按异常 nack，流程不变）
      */
     @Transactional
     public void registerFailure(Long submitRecordId) {
@@ -131,7 +133,9 @@ public class JudgeDeadLetterHandler {
         int inserted = failureSubmitMapper.insert(failureSubmit);
         int updated = submitRecordMapper.updateRecordToFailure(submitRecordId);
         if (inserted != 1 || updated != 1) {
-            throw new IllegalStateException("失败记录和提交状态未同步更新，submitId=" + submitRecordId);
+            log.error("失败记录和提交状态未同步更新，submitId={}, inserted={}, updated={}",
+                    submitRecordId, inserted, updated);
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
     }
 

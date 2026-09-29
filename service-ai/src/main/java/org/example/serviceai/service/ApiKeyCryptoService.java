@@ -1,5 +1,7 @@
 package org.example.serviceai.service;
 
+import org.example.serviceai.exception.AiErrorCode;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -23,23 +25,19 @@ public class ApiKeyCryptoService {
     {
         if(base64MasterKey==null||base64MasterKey.isBlank())
         {
-            throw new IllegalArgumentException("API Key 加密主密钥不能为空");
+            throw new BizException(AiErrorCode.MASTER_KEY_CONFIG_INVALID);
         }
         byte[]keyBytes ;
         try {
             keyBytes = Base64.getDecoder().decode(base64MasterKey);
         }catch (IllegalArgumentException e){
-            throw new IllegalArgumentException(
-                    "API Key 加密主密钥必须是 Base64 格式",
+            throw new BizException(
+                    AiErrorCode.MASTER_KEY_CONFIG_INVALID,
                     e
             );
         }
         if(keyBytes.length!=32){
-            throw new IllegalArgumentException(
-                    "AES-256 主密钥解码后必须是 32 字节，当前是 "
-                            + keyBytes.length
-                            + " 字节"
-            );
+            throw new BizException(AiErrorCode.MASTER_KEY_CONFIG_INVALID);
         }
         this.secretKey = new SecretKeySpec(keyBytes, "AES");
     }
@@ -49,7 +47,7 @@ public class ApiKeyCryptoService {
     public String encrypt(String plainApiKey)
     {
         if (plainApiKey == null || plainApiKey.isBlank()) {
-            throw new IllegalArgumentException("API Key 不能为空");
+            throw new BizException(AiErrorCode.API_KEY_REQUIRED);
         }
 
         try {
@@ -79,7 +77,7 @@ public class ApiKeyCryptoService {
             // 将 IV 和密文拼在一起保存。
             return encodedIv + "." + encodedCiphertext;
         } catch (GeneralSecurityException exception) {
-            throw new IllegalStateException("API Key 加密失败", exception);
+            throw new BizException(AiErrorCode.API_KEY_ENCRYPT_FAILED, exception);
         }
     }
     /**
@@ -87,15 +85,15 @@ public class ApiKeyCryptoService {
      */
     public String decrypt(String encryptedApiKey) {
         if (encryptedApiKey == null || encryptedApiKey.isBlank()) {
-            throw new IllegalArgumentException("加密后的 API Key 不能为空");
+            throw new BizException(AiErrorCode.API_KEY_DECRYPT_FAILED);
         }
 
         try {
             String[] parts = encryptedApiKey.split("\\.", 2);
 
             if (parts.length != 2) {
-                throw new IllegalArgumentException(
-                        "API Key 密文格式不正确"
+                throw new BizException(
+                        AiErrorCode.API_KEY_DECRYPT_FAILED
                 );
             }
 
@@ -103,8 +101,8 @@ public class ApiKeyCryptoService {
             byte[] encryptedBytes = Base64.getDecoder().decode(parts[1]);
 
             if (iv.length != IV_LENGTH) {
-                throw new IllegalArgumentException(
-                        "API Key 密文中的 IV 长度不正确"
+                throw new BizException(
+                        AiErrorCode.API_KEY_DECRYPT_FAILED
                 );
             }
 
@@ -123,7 +121,7 @@ public class ApiKeyCryptoService {
 
             return new String(plainBytes, StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException exception) {
-            throw new IllegalStateException("API Key 解密失败", exception);
+            throw new BizException(AiErrorCode.API_KEY_DECRYPT_FAILED, exception);
         }
     }
 

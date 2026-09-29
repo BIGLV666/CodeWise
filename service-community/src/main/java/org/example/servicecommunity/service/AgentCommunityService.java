@@ -2,6 +2,8 @@ package org.example.servicecommunity.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.AgentCommentCreateDto;
 import org.example.servicecommunity.Dto.AgentPostCreateDto;
@@ -13,6 +15,7 @@ import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
 import org.example.servicecommunity.enums.PostStatus;
 import org.example.servicecommunity.enums.PostType;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.mapper.LikeRecordMapper;
 import org.example.servicecommunity.mapper.PostMapper;
 import org.example.servicecommunity.vo.AgentContentStatusVo;
@@ -116,10 +119,10 @@ public class AgentCommunityService {
      */
     public AgentCreatedVo createPost(AgentPostCreateDto dto) {
         if (dto == null || dto.getRequestId() == null || dto.getRequestId().isBlank()) {
-            throw new IllegalArgumentException("requestId 不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         if (dto.getPostContent() != null && dto.getPostContent().length() > MAX_POST_CONTENT) {
-            throw new IllegalArgumentException("帖子正文长度不能超过 " + MAX_POST_CONTENT + " 字符");
+            throw new BizException(CommunityErrorCode.POST_CONTENT_TOO_LONG, MAX_POST_CONTENT);
         }
         PostDto postDto = PostDto.builder()
                 .postTitle(dto.getPostTitle())
@@ -142,10 +145,10 @@ public class AgentCommunityService {
      */
     public AgentContentStatusVo updatePost(Long postId, AgentPostUpdateDto dto) {
         if (dto == null) {
-            throw new IllegalArgumentException("请求体不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         if (dto.getPostContent() != null && dto.getPostContent().length() > MAX_POST_CONTENT) {
-            throw new IllegalArgumentException("帖子正文长度不能超过 " + MAX_POST_CONTENT + " 字符");
+            throw new BizException(CommunityErrorCode.POST_CONTENT_TOO_LONG, MAX_POST_CONTENT);
         }
         org.example.servicecommunity.vo.PostVo postVo = new org.example.servicecommunity.vo.PostVo();
         postVo.setPostTitle(dto.getPostTitle());
@@ -166,10 +169,10 @@ public class AgentCommunityService {
      */
     public AgentCreatedVo createComment(AgentCommentCreateDto dto) {
         if (dto == null || dto.getRequestId() == null || dto.getRequestId().isBlank()) {
-            throw new IllegalArgumentException("requestId 不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         if (dto.getComment() != null && dto.getComment().length() > MAX_COMMENT_LENGTH) {
-            throw new IllegalArgumentException("评论长度不能超过 " + MAX_COMMENT_LENGTH + " 字符");
+            throw new BizException(CommunityErrorCode.COMMENT_TEXT_TOO_LONG, MAX_COMMENT_LENGTH);
         }
         CommentDto commentDto = CommentDto.builder()
                 .comment(dto.getComment())
@@ -203,11 +206,11 @@ public class AgentCommunityService {
      */
     public AgentLikeResultVo setLikeState(PostType targetType, Long targetId, boolean wantLiked) {
         if (targetType != PostType.POST && targetType != PostType.COMMENT) {
-            throw new IllegalArgumentException("仅支持对帖子或评论点赞");
+            throw new BizException(CommunityErrorCode.LIKE_TARGET_TYPE_UNSUPPORTED);
         }
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         String type = targetType.getType();
         boolean current = likeRecordMapper.selectCount(new QueryWrapper<LikeRecord>()
@@ -244,18 +247,18 @@ public class AgentCommunityService {
     /** 解析 agent 传入的目标类型字符串（大小写不敏感）。 */
     public static PostType parseTargetType(String targetType) {
         if (targetType == null) {
-            throw new IllegalArgumentException("targetType 不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         try {
             return PostType.valueOf(targetType.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("targetType 仅支持 POST / COMMENT");
+            throw new BizException(CommunityErrorCode.LIKE_TARGET_TYPE_UNSUPPORTED);
         }
     }
 
     private int validatePageSize(Integer pageSize) {
         if (pageSize == null || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-            throw new IllegalArgumentException("pageSize 必须在 1 到 " + MAX_PAGE_SIZE + " 之间");
+            throw new BizException(CommunityErrorCode.PAGE_SIZE_INVALID);
         }
         return pageSize;
     }

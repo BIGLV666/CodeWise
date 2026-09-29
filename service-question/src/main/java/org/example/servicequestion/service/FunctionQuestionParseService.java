@@ -3,12 +3,15 @@ package org.example.servicequestion.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicequestion.dto.FunctionDto;
 import org.example.servicequestion.dto.FunctionTestCaseDto;
 import org.example.servicequestion.entry.FunctionConfig;
 import org.example.servicequestion.entry.FunctionTestCase;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.enums.QuestionType;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.FunctionConfigMapper;
 import org.example.servicequestion.mapper.FunctionTestCaseMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
@@ -74,10 +77,10 @@ public class FunctionQuestionParseService {
     @Transactional
     public Long insert(FunctionDto functionDto) {
         if(functionDto.getDescription()==null) {
-            throw new IllegalArgumentException("题目详情不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_CONTENT_REQUIRED);
         }
         if(functionDto.getTitle()==null) {
-            throw new IllegalArgumentException("标题不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_TITLE_REQUIRED);
         }
         Question question = new Question();
         question.setDescription(functionDto.getDescription());
@@ -117,10 +120,10 @@ public class FunctionQuestionParseService {
         ));
         try {
             if (questionMapper.insert(question) != 1) {
-                throw new IllegalStateException("函数题目保存失败");
+                throw new BizException(QuestionErrorCode.QUESTION_SAVE_FAILED);
             }
         }catch (DuplicateKeyException e){
-            throw new IllegalArgumentException("该题目已存在");
+            throw new BizException(QuestionErrorCode.QUESTION_DUPLICATED, e);
         }
 
 
@@ -133,7 +136,7 @@ public class FunctionQuestionParseService {
                 .createTime(LocalDateTime.now())
                 .build();
         if (functionConfigMapper.insert(config) != 1) {
-            throw new IllegalStateException("函数配置保存失败");
+            throw new BizException(QuestionErrorCode.FUNCTION_CONFIG_SAVE_FAILED);
         }
 
         if (samples != null) {
@@ -153,7 +156,7 @@ public class FunctionQuestionParseService {
                         .updateTime(LocalDateTime.now())
                         .build();
                 if (functionTestCaseMapper.insert(testCase) ==0) {
-                    throw new IllegalStateException("函数样例保存失败");
+                    throw new BizException(QuestionErrorCode.TESTCASE_SAVE_FAILED);
                 }
             }
         }
@@ -165,18 +168,18 @@ public class FunctionQuestionParseService {
     @Transactional
     public int insertTestCases(Long questionId, List<FunctionTestCaseDto> testCases) {
         if (questionId == null) {
-            throw new IllegalArgumentException("题目 ID 不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
         }
         if (testCases == null || testCases.isEmpty()) {
-            throw new IllegalArgumentException("测试用例不能为空");
+            throw new BizException(QuestionErrorCode.TESTCASE_REQUIRED);
         }
 
         Question question = questionMapper.selectById(questionId);
         if (question == null) {
-            throw new IllegalArgumentException("题目不存在");
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
         if (question.getQuestionType() != QuestionType.FUNCTION) {
-            throw new IllegalArgumentException("该题目不是函数模式");
+            throw new BizException(QuestionErrorCode.NOT_FUNCTION_QUESTION);
         }
 
         FunctionConfig functionConfig = functionConfigMapper.selectOne(
@@ -185,7 +188,7 @@ public class FunctionQuestionParseService {
                         .last("LIMIT 1")
         );
         if (functionConfig == null) {
-            throw new IllegalStateException("函数配置不存在");
+            throw new BizException(QuestionErrorCode.FUNCTION_CONFIG_NOT_FOUND);
         }
         FunctionTestCase lastTestCase = functionTestCaseMapper.selectOne(
                 new LambdaQueryWrapper<FunctionTestCase>()
@@ -201,7 +204,7 @@ public class FunctionQuestionParseService {
 
         for (FunctionTestCaseDto testCaseDto : testCases) {
             if (testCaseDto == null) {
-                throw new IllegalArgumentException("测试用例不能为空");
+                throw new BizException(QuestionErrorCode.TESTCASE_REQUIRED);
             }
             FunctionSampleVo normalizedCase = caseDataConverter.normalize(
                     new FunctionSampleVo(testCaseDto.getInput(), testCaseDto.getOutput()),
@@ -226,7 +229,7 @@ public class FunctionQuestionParseService {
         try {
             functionTestCaseMapper.insert(entities);
         } catch (DuplicateKeyException exception) {
-            throw new IllegalArgumentException("测试用例已存在", exception);
+            throw new BizException(QuestionErrorCode.TESTCASE_DUPLICATED, exception);
         }
         return entities.size();
     }
@@ -235,7 +238,7 @@ public class FunctionQuestionParseService {
     public FunctionParseVo fromLeetCode(String titleSlug)
             throws IOException, InterruptedException {
         if (titleSlug == null || titleSlug.isBlank()) {
-            throw new IllegalArgumentException("titleSlug 不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_URL_REQUIRED);
         }
 
         String normalizedSlug = normalizeTitleSlug(titleSlug);
@@ -295,7 +298,7 @@ public class FunctionQuestionParseService {
         JsonNode question = root.path("data").path("question");
         if (question.isMissingNode() || question.isNull()) {
             log.warn("LeetCode 未找到题目, titleSlug={}, response={}", normalizedSlug, response.body());
-            throw new IllegalArgumentException("未找到题目: " + normalizedSlug);
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
         log.info("LeetCode 题目解析成功, titleSlug={}, title={}", normalizedSlug, text(question, "title"));
         return parseQuestion(question);
@@ -309,11 +312,11 @@ public class FunctionQuestionParseService {
                 value = uri.getPath();
             }
         } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("LeetCode 链接格式错误", exception);
+            throw new BizException(QuestionErrorCode.QUESTION_URL_INVALID, exception);
         }
 
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("LeetCode 题目地址不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_URL_REQUIRED);
         }
         value = value.replaceAll("/+$", "");
         int separator = value.lastIndexOf('/');
@@ -322,7 +325,7 @@ public class FunctionQuestionParseService {
         }
         value = value.trim();
         if (!value.matches("[A-Za-z0-9][A-Za-z0-9-]*")) {
-            throw new IllegalArgumentException("无法从 LeetCode 地址中解析 titleSlug");
+            throw new BizException(QuestionErrorCode.QUESTION_URL_INVALID);
         }
         return value;
     }
@@ -358,7 +361,7 @@ public class FunctionQuestionParseService {
 
     private String findJavaSnippet(JsonNode snippets) {
         if (!snippets.isArray()) {
-            throw new IllegalArgumentException("题目没有代码模板");
+            throw new BizException(QuestionErrorCode.JAVA_TEMPLATE_MISSING);
         }
         for (JsonNode snippet : snippets) {
             String langSlug = text(snippet, "langSlug");
@@ -368,7 +371,7 @@ public class FunctionQuestionParseService {
                 return text(snippet, "code");
             }
         }
-        throw new IllegalArgumentException("题目没有 Java 代码模板");
+        throw new BizException(QuestionErrorCode.JAVA_TEMPLATE_MISSING);
     }
 
     private String parseTags(JsonNode topicTags) {
@@ -434,7 +437,7 @@ public class FunctionQuestionParseService {
 
         Matcher methodMatcher = JAVA_METHOD_PATTERN.matcher(code);
         if (!methodMatcher.find()) {
-            throw new IllegalArgumentException("无法解析 Java 函数签名");
+            throw new BizException(QuestionErrorCode.FUNCTION_SIGNATURE_PARSE_FAILED);
         }
         result.setOutputType(methodMatcher.group(1).trim());
         result.setMethodName(methodMatcher.group(2).trim());
@@ -480,7 +483,8 @@ public class FunctionQuestionParseService {
             String normalized = parameter.trim();
             int separator = normalized.lastIndexOf(' ');
             if (separator <= 0 || separator == normalized.length() - 1) {
-                throw new IllegalArgumentException("无法解析参数: " + normalized);
+                log.warn("无法解析函数参数声明: {}", normalized);
+                throw new BizException(QuestionErrorCode.FUNCTION_PARAM_PARSE_FAILED);
             }
             definitions.add(new ParameterDefinition(
                     normalized.substring(0, separator).trim(),
@@ -494,7 +498,7 @@ public class FunctionQuestionParseService {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (IOException exception) {
-            throw new IllegalStateException("参数配置序列化失败", exception);
+            throw new BizException(CommonErrorCode.INTERNAL_ERROR, exception);
         }
     }
 

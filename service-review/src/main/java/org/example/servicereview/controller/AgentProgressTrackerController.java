@@ -2,8 +2,10 @@ package org.example.servicereview.controller;
 
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicereview.dto.ProgressTrackerDto;
 import org.example.servicereview.entry.ProgressTracker;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.example.servicereview.service.ProgressTrackerService;
 import org.example.servicereview.vo.ProgressBatchCreateVo;
 import org.example.servicereview.vo.ProgressBatchDeleteVo;
@@ -74,7 +76,7 @@ public class AgentProgressTrackerController {
             case "day" -> progressTrackerService.calendarDay(anchor);
             case "week" -> progressTrackerService.calendarWeek(anchor);
             case "month" -> progressTrackerService.calendarMonth(anchor);
-            default -> throw new IllegalArgumentException("range 仅支持 day / week / month");
+            default -> throw new BizException(ReviewErrorCode.CALENDAR_RANGE_INVALID);
         };
         return Result.success(result);
     }

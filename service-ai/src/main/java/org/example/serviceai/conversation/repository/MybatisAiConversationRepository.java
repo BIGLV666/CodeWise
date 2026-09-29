@@ -8,8 +8,11 @@ import org.example.serviceai.conversation.vo.HomeConversationVo;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.entry.MessageStatus;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.mapper.ConversationMapper;
 import org.example.serviceai.mapper.MessageMapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -38,14 +41,14 @@ public class MybatisAiConversationRepository implements AiConversationRepository
     public Message appendMessage(Long conversationId, Message message) {
         Conversation conversation = conversationMapper.selectById(conversationId);
         if(conversation==null){
-            throw new IllegalArgumentException("该会话不存在");
+            throw new BizException(AiErrorCode.CONVERSATION_NOT_FOUND);
         }
         if(!conversation.getUserId().equals(message.getUserId())){
-            throw new IllegalArgumentException("无权操作他人记忆");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         int r= messageMapper.insert(message);
         if(r==0){
-            throw new IllegalArgumentException("添加失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         return message;
     }

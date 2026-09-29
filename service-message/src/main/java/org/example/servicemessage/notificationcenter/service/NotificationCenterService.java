@@ -1,5 +1,7 @@
 package org.example.servicemessage.notificationcenter.service;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -64,7 +66,7 @@ public class NotificationCenterService {
                 ownedNotification(notificationId)
         );
         if (notification == null) {
-            throw new IllegalArgumentException("通知不存在或已删除");
+            throw new BizException(MessageErrorCode.NOTIFICATION_NOT_FOUND);
         }
         if (notification.getIsRead() == 0) {
             notificationCenterMapper.update(null,
@@ -86,7 +88,7 @@ public class NotificationCenterService {
                         .eq(NotificationCenter::getIsDeleted, 0)
                         .set(NotificationCenter::getIsRead, 1));
         if (updated == 0) {
-            throw new IllegalArgumentException("通知不存在或已删除");
+            throw new BizException(MessageErrorCode.NOTIFICATION_NOT_FOUND);
         }
     }
 
@@ -108,7 +110,7 @@ public class NotificationCenterService {
                         .eq(NotificationCenter::getIsDeleted, 0)
                         .set(NotificationCenter::getIsDeleted, 1));
         if (updated == 0) {
-            throw new IllegalArgumentException("通知不存在或已删除");
+            throw new BizException(MessageErrorCode.NOTIFICATION_NOT_FOUND);
         }
     }
 
@@ -130,14 +132,14 @@ public class NotificationCenterService {
         try {
             return objectMapper.readTree(extraData);
         } catch (JsonProcessingException e) {
-            throw new IllegalStateException("通知扩展数据格式错误", e);
+            throw new BizException(MessageErrorCode.NOTIFICATION_EXT_DATA_INVALID, e);
         }
     }
 
     private Long currentUserId() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("请登录后查看通知");
+            throw new BizException(MessageErrorCode.LOGIN_REQUIRED_TO_VIEW);
         }
         return userId;
     }

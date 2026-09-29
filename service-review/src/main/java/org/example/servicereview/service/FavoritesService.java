@@ -4,9 +4,12 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.example.servicereview.dto.AgentFavoriteCreateDto;
 import org.example.servicereview.dto.AgentFavoriteMoveDto;
 import org.example.servicereview.dto.AgentFavoriteUpdateDto;
@@ -46,7 +49,7 @@ public class FavoritesService {
 
     public List<Favorites> getAllFavoritesByUserId() {
         if(UserContext.getUserId()==null){
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         return favoritesMapper.selectList(new QueryWrapper<Favorites>().eq("user_id",UserContext.getUserId()));
     }
@@ -59,10 +62,10 @@ public class FavoritesService {
     public List<QuestionDto> getAllFavoritesByUserId(Long favoriteId) {
        Favorites favorites = favoritesMapper.selectById(favoriteId);
        if(favorites == null) {
-        throw new IllegalArgumentException("未找到该收藏");
+        throw new BizException(ReviewErrorCode.FAVORITE_NOT_FOUND);
        }
        if(!favorites.getUserId().equals(UserContext.getUserId())) {
-        throw new IllegalArgumentException("该收藏不是您的收藏");
+        throw new BizException(CommonErrorCode.NO_PERMISSION);
        }
        List<Long> questionIds = favorites.getQuestionIds();
        if(questionIds.isEmpty()) {
@@ -70,7 +73,7 @@ public class FavoritesService {
        }
        Result<List<QuestionDto>> questionDtoBodys= questionFeignClient.getFavorites(questionIds);
        if(!questionDtoBodys.getCode().equals(200)) {
-           throw new RuntimeException(questionDtoBodys.getMessage());
+           throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
        }
        // 懒删除不存在的问题
        List<QuestionDto> questionDtos = questionDtoBodys.getData();
@@ -102,7 +105,7 @@ public class FavoritesService {
      */
     public void createFavorites(String favoritesName,String requestId){
         if(Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.REQUEST_ID_KEY+requestId,requestId,3, TimeUnit.MINUTES))) {
-            throw new IllegalArgumentException("该收藏已创建");
+            throw new BizException(ReviewErrorCode.RESOURCE_ALREADY_CREATED, "收藏夹");
         }
         Favorites favorites = Favorites.builder()
                 .favoritesName(favoritesName)
@@ -132,17 +135,17 @@ public class FavoritesService {
     public String insertQuestionId(Long questionId,Long favoriteId) {
         Favorites favorites = favoritesMapper.selectById(favoriteId);
         if(favorites == null) {
-            throw new IllegalArgumentException("未找到该收藏");
+            throw new BizException(ReviewErrorCode.FAVORITE_NOT_FOUND);
         }
         if(!favorites.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("该收藏不是您的收藏");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         if(favorites.getQuestionIds().contains(questionId)) {
-            throw new IllegalArgumentException("该收藏已存在该问题");
+            throw new BizException(ReviewErrorCode.QUESTION_ALREADY_IN_FAVORITE);
         }
         Result<QuestionDto> questionDtoBody = questionFeignClient.getQuestionInfo(questionId);
         if(!questionDtoBody.getCode().equals(200)) {
-            throw new RuntimeException(questionDtoBody.getMessage());
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         QuestionDto questionDto = questionDtoBody.getData();
         List<Long>questionIds=favorites.getQuestionIds();
@@ -160,13 +163,13 @@ public class FavoritesService {
      public String deleteQuestionId(Long questionId,Long favoriteId) {
         Favorites favorites = favoritesMapper.selectById(favoriteId);
         if(favorites == null) {
-            throw new IllegalArgumentException("未找到该收藏");
+            throw new BizException(ReviewErrorCode.FAVORITE_NOT_FOUND);
         }
         if(!favorites.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("该收藏不是您的收藏");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         if(!favorites.getQuestionIds().contains(questionId)) {
-            throw new IllegalArgumentException("该收藏不存在该问题");
+            throw new BizException(ReviewErrorCode.QUESTION_NOT_IN_FAVORITE);
         }
         List<Long>questionIds=favorites.getQuestionIds();
         questionIds.remove(questionId);
@@ -182,10 +185,10 @@ public class FavoritesService {
     public String deleteFavorites(Long favoriteId) {
         Favorites favorites = favoritesMapper.selectById(favoriteId);
         if(favorites == null) {
-            throw new IllegalArgumentException("未找到该收藏");
+            throw new BizException(ReviewErrorCode.FAVORITE_NOT_FOUND);
         }
         if(!favorites.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("该收藏不是您的收藏");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         favoritesMapper.deleteById(favoriteId);
         return "success";
@@ -201,10 +204,10 @@ public class FavoritesService {
         StringBuilder sb=new StringBuilder();
         Favorites favorites=favoritesMapper.selectById(receiveDto.getFavoritesId());
         if(favorites == null) {
-            throw new IllegalArgumentException("未找到该收藏");
+            throw new BizException(ReviewErrorCode.FAVORITE_NOT_FOUND);
         }
         if(!favorites.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("该收藏不是您的收藏");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         if(receiveDto.getFavoritesName() != null) {
             count++;
@@ -243,7 +246,7 @@ public class FavoritesService {
      */
     public List<FavoriteFolderVo> listFavoriteFolderVos() {
         if(UserContext.getUserId()==null){
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         return favoritesMapper.selectList(new QueryWrapper<Favorites>().eq("user_id",UserContext.getUserId()))
                 .stream().map(this::toFolderVo).toList();
@@ -267,7 +270,7 @@ public class FavoritesService {
         }
         Result<List<QuestionBriefDto>> briefResult = questionFeignClient.getFavoritesBrief(questionIds);
         if(!briefResult.getCode().equals(200)) {
-            throw new RuntimeException(briefResult.getMessage());
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         List<QuestionBriefDto> briefs = briefResult.getData();
         if(briefs.isEmpty()) {
@@ -300,16 +303,16 @@ public class FavoritesService {
      */
     public FavoriteFolderVo createFavoritesAgent(AgentFavoriteCreateDto dto) {
         if(UserContext.getUserId()==null){
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         if(dto == null || dto.getRequestId()==null || dto.getRequestId().isBlank()){
-            throw new IllegalArgumentException("requestId 不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         String name = normalizeText(dto.getFavoritesName(), "收藏夹名称", true);
         String type = normalizeText(dto.getFavoritesType(), "收藏夹类型", false);
         String content = normalizeText(dto.getFavoritesContent(), "收藏夹简介", false);
         if(Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.REQUEST_ID_KEY+dto.getRequestId(),dto.getRequestId(),3, TimeUnit.MINUTES))) {
-            throw new IllegalArgumentException("该收藏已创建");
+            throw new BizException(ReviewErrorCode.RESOURCE_ALREADY_CREATED, "收藏夹");
         }
         Favorites favorites = Favorites.builder()
                 .favoritesName(name)
@@ -335,14 +338,14 @@ public class FavoritesService {
      */
     public FavoriteFolderVo updateFavoritesMeta(AgentFavoriteUpdateDto dto) {
         if(dto == null || dto.getFavoritesId()==null){
-            throw new IllegalArgumentException("favoritesId 不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         Favorites favorites = requireOwnedFavorite(dto.getFavoritesId());
         String name = normalizeText(dto.getFavoritesName(), "收藏夹名称", false);
         String type = normalizeText(dto.getFavoritesType(), "收藏夹类型", false);
         String content = normalizeText(dto.getFavoritesContent(), "收藏夹简介", false);
         if(name == null && type == null && content == null) {
-            throw new IllegalArgumentException("未提供任何需要更新的字段");
+            throw new BizException(ReviewErrorCode.NO_UPDATE_FIELDS);
         }
         if(name != null) favorites.setFavoritesName(name);
         if(type != null) favorites.setFavoritesType(type);
@@ -374,7 +377,7 @@ public class FavoritesService {
         if(!candidates.isEmpty()) {
             Result<List<QuestionBriefDto>> briefResult = questionFeignClient.getFavoritesBrief(candidates);
             if(!briefResult.getCode().equals(200)) {
-                throw new RuntimeException(briefResult.getMessage());
+                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
             }
             Map<Long, QuestionBriefDto> briefMap = new HashMap<>();
             for(QuestionBriefDto brief : briefResult.getData()) {
@@ -445,21 +448,21 @@ public class FavoritesService {
     @Transactional
     public FavoriteMoveResultVo moveQuestions(Long fromFavoriteId, Long toFavoriteId, List<Long> inputIds) {
         if(fromFavoriteId == null || toFavoriteId == null) {
-            throw new IllegalArgumentException("源收藏夹与目标收藏夹不能为空");
+            throw new BizException(ReviewErrorCode.FAVORITE_MOVE_TARGET_MISSING);
         }
         if(fromFavoriteId.equals(toFavoriteId)) {
-            throw new IllegalArgumentException("源收藏夹与目标收藏夹相同");
+            throw new BizException(ReviewErrorCode.FAVORITE_MOVE_SAME_FOLDER);
         }
         // 行锁：固定主键升序加锁避免交叉死锁；随后在同一事务内读取实体（行已被当前事务锁定）
         favoritesMapper.lockByIdsForUpdate(fromFavoriteId, toFavoriteId);
         Favorites from = favoritesMapper.selectById(fromFavoriteId);
         Favorites to = favoritesMapper.selectById(toFavoriteId);
         if(from == null || to == null) {
-            throw new IllegalArgumentException("未找到该收藏");
+            throw new BizException(ReviewErrorCode.FAVORITE_NOT_FOUND);
         }
         Long userId = UserContext.getUserId();
         if(!from.getUserId().equals(userId) || !to.getUserId().equals(userId)) {
-            throw new IllegalArgumentException("该收藏不是您的收藏");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         List<Long> distinct = distinctInput(inputIds);
         List<Long> source = from.getQuestionIds();
@@ -488,7 +491,7 @@ public class FavoritesService {
      */
     public List<FavoriteLocationVo> locateQuestions(List<Long> inputIds) {
         if(UserContext.getUserId()==null){
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         List<Long> distinct = distinctInput(inputIds);
         List<Favorites> folders = favoritesMapper.selectList(new QueryWrapper<Favorites>().eq("user_id",UserContext.getUserId()));
@@ -513,14 +516,14 @@ public class FavoritesService {
     /** 校验收藏归属（agent 专用方法共用）；网页端旧方法保持原实现不动。 */
     private Favorites requireOwnedFavorite(Long favoriteId) {
         if(UserContext.getUserId()==null){
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         Favorites favorites = favoritesMapper.selectById(favoriteId);
         if(favorites == null) {
-            throw new IllegalArgumentException("未找到该收藏");
+            throw new BizException(ReviewErrorCode.FAVORITE_NOT_FOUND);
         }
         if(!favorites.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("该收藏不是您的收藏");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         return favorites;
     }
@@ -530,14 +533,14 @@ public class FavoritesService {
         List<Long> distinct = inputIds == null ? Collections.emptyList()
                 : inputIds.stream().filter(Objects::nonNull).distinct().toList();
         if(distinct.isEmpty()) {
-            throw new IllegalArgumentException("题目 ID 列表不能为空");
+            throw new BizException(ReviewErrorCode.QUESTION_LIST_EMPTY);
         }
         if(distinct.size() > MAX_BATCH_SIZE) {
-            throw new IllegalArgumentException("单次最多操作 " + MAX_BATCH_SIZE + " 道题目");
+            throw new BizException(ReviewErrorCode.QUESTION_BATCH_LIMIT, MAX_BATCH_SIZE);
         }
         for(Long id : distinct) {
             if(id <= 0) {
-                throw new IllegalArgumentException("题目 ID 必须为正整数");
+                throw new BizException(ReviewErrorCode.QUESTION_ID_INVALID);
             }
         }
         return distinct;
@@ -547,19 +550,19 @@ public class FavoritesService {
     private String normalizeText(String value, String label, boolean required) {
         if(value == null) {
             if(required) {
-                throw new IllegalArgumentException(label + "不能为空");
+                throw new BizException(ReviewErrorCode.FIELD_REQUIRED, label);
             }
             return null;
         }
         String trimmed = value.trim();
         if(trimmed.isEmpty()) {
             if(required) {
-                throw new IllegalArgumentException(label + "不能为空");
+                throw new BizException(ReviewErrorCode.FIELD_REQUIRED, label);
             }
             return null;
         }
         if(trimmed.length() > 255) {
-            throw new IllegalArgumentException(label + "长度不能超过 255 字符");
+            throw new BizException(ReviewErrorCode.FIELD_TOO_LONG, label, 255);
         }
         return trimmed;
     }

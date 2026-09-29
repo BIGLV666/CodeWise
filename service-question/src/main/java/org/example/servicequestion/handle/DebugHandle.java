@@ -3,12 +3,15 @@ package org.example.servicequestion.handle;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.RedisDto.JudgeReturnRecordDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicequestion.MQ.MessageHandler;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.service.FunctionTestCaseGenerationService;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -43,7 +46,7 @@ public class DebugHandle implements MessageHandler {
         try{
             if(uuid==null||uuid.equals("")){
                 log.info("未找到该记录{}",uuid);
-                throw new RuntimeException("未找到该记录");
+                throw new BizException(QuestionErrorCode.DEBUG_RECORD_NOT_FOUND);
             }
             if(Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.QUESTION_SUCCESS_KEY + uuid, "pending", 5, TimeUnit.MINUTES)))
             {
@@ -52,7 +55,7 @@ public class DebugHandle implements MessageHandler {
             }
             List<JudgeReturnRecordDto> ress= (List<JudgeReturnRecordDto>) redisTemplate.opsForHash().get(RedisContext.JUDGE_RESULT_KEY,uuid);
             if(ress==null||ress.isEmpty()){
-                throw new RuntimeException("判题结果为空");
+                throw new BizException(QuestionErrorCode.JUDGE_SERVICE_UNAVAILABLE);
             }
             if (functionTestCaseGenerationService.isGenerationTask(uuid)) {
                 try {
@@ -82,7 +85,7 @@ public class DebugHandle implements MessageHandler {
 
         }catch (Exception e){
             channel.basicNack(taskId,false,false);
-            throw new RuntimeException(e);
+            throw new BizException(CommonErrorCode.MESSAGE_PARSE_FAILED, e);
         }
     }
 }

@@ -1,5 +1,7 @@
 package org.example.servicereview.handler;
 
+import org.example.serviceapi.exception.BizException;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -44,7 +46,7 @@ public class NoteContentHandlerRegistry {
                 : type.trim().toUpperCase(Locale.ROOT);
         NoteContentHandler handler = handlers.get(key);
         if (handler == null) {
-            throw new IllegalArgumentException("不支持的内容类型：" + type);
+            throw new BizException(ReviewErrorCode.NOTE_CONTENT_TYPE_UNSUPPORTED);
         }
         return handler;
     }

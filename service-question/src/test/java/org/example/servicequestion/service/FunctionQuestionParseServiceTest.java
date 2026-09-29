@@ -1,11 +1,13 @@
 package org.example.servicequestion.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicequestion.dto.FunctionTestCaseDto;
 import org.example.servicequestion.entry.FunctionConfig;
 import org.example.servicequestion.entry.FunctionTestCase;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.enums.QuestionType;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.FunctionConfigMapper;
 import org.example.servicequestion.mapper.FunctionTestCaseMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
@@ -96,7 +98,7 @@ class FunctionQuestionParseServiceTest {
         FunctionTestCaseDto testCase = new FunctionTestCaseDto();
         testCase.setInput("1");
         testCase.setOutput("2");
-        assertThrows(IllegalArgumentException.class, () -> service.insertTestCases(1L, List.of(testCase)));
+        assertThrows(BizException.class, () -> service.insertTestCases(1L, List.of(testCase)));
         verify(functionTestCaseMapper, never()).insert(anyCollection());
     }
 
@@ -130,11 +132,11 @@ class FunctionQuestionParseServiceTest {
         testCase.setInput("1");
         testCase.setOutput("2");
 
-        IllegalArgumentException exception = assertThrows(
-                IllegalArgumentException.class,
+        BizException exception = assertThrows(
+                BizException.class,
                 () -> service.insertTestCases(1L, List.of(testCase))
         );
-        assertEquals("测试用例已存在", exception.getMessage());
+        assertEquals(QuestionErrorCode.TESTCASE_DUPLICATED.getCode(), exception.getCode());
     }
 
     @Test

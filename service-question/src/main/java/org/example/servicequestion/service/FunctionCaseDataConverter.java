@@ -3,6 +3,9 @@ package org.example.servicequestion.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.ErrorCode;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.vo.FunctionSampleVo;
 import org.springframework.stereotype.Component;
 
@@ -23,7 +26,7 @@ public class FunctionCaseDataConverter {
             String outputType
     ) {
         if (sample == null) {
-            throw new IllegalArgumentException("函数测试用例不能为空");
+            throw new BizException(QuestionErrorCode.TESTCASE_REQUIRED);
         }
         return new FunctionSampleVo(
                 normalizeInput(sample.getInput(), parameterConfig),
@@ -32,20 +35,18 @@ public class FunctionCaseDataConverter {
     }
 
     public String normalizeInput(String input, String parameterConfig) {
-        JsonNode parameters = readJson(parameterConfig, "函数参数配置格式错误");
+        JsonNode parameters = readJson(parameterConfig, QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID);
         if (!parameters.isArray()) {
-            throw new IllegalArgumentException("函数参数配置必须是数组");
+            throw new BizException(QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID);
         }
 
         String source = input == null ? "" : input;
         String[] values = source.split("\\R", -1);
         if (values.length != parameters.size()) {
-            throw new IllegalArgumentException(
-                    "测试输入参数数量不匹配，期望 "
-                            + parameters.size()
-                            + " 个，实际 "
-                            + values.length
-                            + " 个"
+            throw new BizException(
+                    QuestionErrorCode.TESTCASE_INPUT_COUNT_MISMATCH,
+                    parameters.size(),
+                    values.length
             );
         }
 
@@ -84,9 +85,6 @@ public class FunctionCaseDataConverter {
     }
 
     private boolean isStringType(String type) {
-        Deque <Character>a=new LinkedList<>();
-        StringBuilder b=new StringBuilder();
-
         return "String".equals(type)
                 || "char".equals(type)
                 || "Character".equals(type);
@@ -94,14 +92,14 @@ public class FunctionCaseDataConverter {
     }
 
 
-    private JsonNode readJson(String value, String message) {
+    private JsonNode readJson(String value, ErrorCode errorCode) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(message);
+            throw new BizException(errorCode);
         }
         try {
             return objectMapper.readTree(value);
         } catch (JsonProcessingException exception) {
-            throw new IllegalArgumentException(message, exception);
+            throw new BizException(errorCode, exception);
         }
     }
 }

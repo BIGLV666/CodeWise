@@ -4,10 +4,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.dto.AiTaskChangesDto;
 import org.example.serviceai.dto.AiTaskDto;
 import org.example.serviceai.dto.AiTaskRootDto;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.vo.AiTaskVo;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.enums.WebSocketQueueName;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.dto.WebsocketSendDto;
@@ -338,7 +340,7 @@ public class AiAdviceTaskService {
                 int length = Objects.requireNonNullElse(change.getRangeLength(), -1);
                 int end = start + length;
                 if (start < 0 || length < 0 || end > codeBuilder.length()) {
-                    throw new IllegalArgumentException("代码变更范围无效，version=" + change.getVersion());
+                    throw new BizException(AiErrorCode.CODE_CHANGE_RANGE_INVALID);
                 }
                 codeBuilder.replace(start, end, Objects.toString(change.getText(), ""));
             }

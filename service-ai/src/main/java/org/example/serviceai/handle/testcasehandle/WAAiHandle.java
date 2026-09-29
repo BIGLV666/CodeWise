@@ -11,6 +11,7 @@ import org.example.serviceai.entry.ConsumedEvent;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.entry.MessageStatus;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.service.AIService;
 import org.example.serviceai.service.ConsumedEventService;
 import org.example.serviceapi.dto.Result;
@@ -20,6 +21,7 @@ import org.example.serviceapi.dto.judge.JudgeContextDto;
 import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.serviceapi.enums.BusinessType;
 import org.example.serviceapi.enums.NotificationCenterType;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.event.EnvelopeCodec;
@@ -83,8 +85,7 @@ public class WAAiHandle implements AiMessageHandler {
      *
      * @param message     UTF-8 消息体字符串（信封或裸格式）
      * @param amqpMessage 原始 AMQP 消息
-     * @throws IllegalArgumentException 载荷非法（毒消息，分发器直接死信）
-     * @throws RuntimeException         业务失败（分发器延迟重试或死信）
+     * @throws BizException 载荷缺必要键（毒消息，分发器直接死信）或业务失败（分发器延迟重试/死信）
      */
     @Override
     public void handle(String message, org.springframework.amqp.core.Message amqpMessage) throws Exception {
@@ -100,13 +101,13 @@ public class WAAiHandle implements AiMessageHandler {
         }
         // 消息瘦身后以 judgeRecordId 作为拉取判题上下文的必要键，缺失按毒消息死信
         if (aiAdviceWADto == null || aiAdviceWADto.getJudgeRecordId() == null) {
-            throw new IllegalArgumentException("WA 建议消息缺少必要键 judgeRecordId: " + abbreviate(body));
+            throw new BizException(AiErrorCode.ADVICE_PAYLOAD_INVALID);
         }
 
         String eventId = resolveEventId(body, aiAdviceWADto);
         // 裸格式缺 messageId 时无幂等键可用，按毒消息死信（避免 claim(null) 空转重试）
         if (eventId == null || eventId.isBlank()) {
-            throw new IllegalArgumentException("WA 建议消息缺少幂等键 eventId/messageId: " + abbreviate(body));
+            throw new BizException(AiErrorCode.ADVICE_PAYLOAD_INVALID);
         }
 
         // 幂等认领：COMPLETED 真重复直接放行（分发器 ACK）
@@ -147,8 +148,7 @@ public class WAAiHandle implements AiMessageHandler {
                 || judgeContextResult.getCode() == null
                 || judgeContextResult.getCode() != 200
                 || judgeContextResult.getData() == null) {
-            throw new IllegalStateException(
-                    "拉取判题上下文失败, judgeRecordId=" + aiAdviceWADto.getJudgeRecordId());
+            throw new BizException(AiErrorCode.JUDGE_CONTEXT_FETCH_FAILED);
         }
         JudgeContextDto judgeContext = judgeContextResult.getData();
 
@@ -171,13 +171,13 @@ public class WAAiHandle implements AiMessageHandler {
         int r = aiConversationRepository.save(conversation);
         if (r == 0) {
             // 插入失败（非唯一键冲突）：上抛交分发器重试
-            throw new IllegalStateException("根会话创建失败: messageId=" + aiAdviceWADto.getMessageId());
+            throw new BizException(AiErrorCode.CONVERSATION_CREATE_FAILED);
         }
         if (r == -1) {
             // 已存在根会话：复用既有会话追问一次（带事件级防重）
             Conversation conversation1 = aiConversationRepository.findByUserIdAndQuestionId(aiAdviceWADto.getUserId(), aiAdviceWADto.getQuestionId());
             if (conversation1 == null) {
-                throw new IllegalStateException("已存在根会话，但未能查询到会话记录");
+                throw new BizException(AiErrorCode.CONVERSATION_NOT_FOUND);
             }
             Long reusable = findReusableFollowUpAssistant(event, conversation1);
             if (reusable != null) {
@@ -270,7 +270,7 @@ public class WAAiHandle implements AiMessageHandler {
         try {
             adviceMessageId = Long.parseLong(resultRef);
         } catch (NumberFormatException exception) {
-            throw new IllegalStateException("结果引用格式非法: eventId=" + eventId + ", resultRef=" + resultRef);
+            throw new BizException(AiErrorCode.ADVICE_RESULT_REF_INVALID, exception);
         }
         Message advice = aiConversationRepository.getMessage(adviceMessageId);
         if (advice == null) {
@@ -322,7 +322,7 @@ public class WAAiHandle implements AiMessageHandler {
         try{
         notificationDto.setExtraData(objectMapper.writeValueAsString(notificationAiAdviceDto));
         }catch (Exception e){
-            throw new RuntimeException(e);
+            throw new BizException(AiErrorCode.NOTIFICATION_BUILD_FAILED, e);
         }
         rabbitTemplate.convertAndSend(
                 MqContexts.NOTIFICATION_EXCHANGE,

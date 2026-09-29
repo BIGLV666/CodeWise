@@ -1,5 +1,7 @@
 package org.example.servicereview.handler;
 
+import org.example.serviceapi.exception.BizException;
+
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,8 +24,8 @@ class MarkdownNoteContentHandlerTest {
 
     @Test
     void validate_blank_throws() {
-        assertThrows(IllegalArgumentException.class, () -> handler.validate(null));
-        assertThrows(IllegalArgumentException.class, () -> handler.validate("   "));
+        assertThrows(BizException.class, () -> handler.validate(null));
+        assertThrows(BizException.class, () -> handler.validate("   "));
     }
 
     @Test
@@ -34,7 +36,7 @@ class MarkdownNoteContentHandlerTest {
     @Test
     void validate_oversize_throws() {
         String tooLong = "a".repeat(MarkdownNoteContentHandler.MAX_CONTENT_LENGTH + 1);
-        assertThrows(IllegalArgumentException.class, () -> handler.validate(tooLong));
+        assertThrows(BizException.class, () -> handler.validate(tooLong));
     }
 
     @Test

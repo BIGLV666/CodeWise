@@ -3,8 +3,10 @@ package org.example.servicejudge.judge.container;
 import com.github.dockerjava.api.DockerClient;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.judge.LanguageSpec;
 import org.example.servicejudge.vo.DockersStatusVo;
 import org.junit.jupiter.api.AfterEach;
@@ -115,12 +117,13 @@ class ContainerPoolManagerTest {
                 0
         );
 
-        IllegalStateException exception = assertThrows(
-                IllegalStateException.class,
+        BizException exception = assertThrows(
+                BizException.class,
                 () -> poolManager.removeDocker("JAVA", "java-busy")
         );
 
-        assertEquals("容器正在使用，不能删除", exception.getMessage());
+        assertEquals(JudgeErrorCode.CONTAINER_IN_USE.getCode(), exception.getCode());
+        assertEquals("该判题环境正在执行任务，请等待其空闲后再删除", exception.getMessage());
     }
 
     @Test

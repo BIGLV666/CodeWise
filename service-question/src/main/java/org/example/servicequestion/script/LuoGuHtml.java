@@ -2,7 +2,9 @@ package org.example.servicequestion.script;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicequestion.entry.Question;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -325,7 +327,7 @@ public class LuoGuHtml {
         Matcher matcher = pattern.matcher(html);
 
         if (!matcher.find()) {
-            throw new RuntimeException("未找到 _feInjection 数据");
+            throw new BizException(QuestionErrorCode.QUESTION_FILE_UNRECOGNIZED);
         }
 
         String encodedJson = matcher.group(1);

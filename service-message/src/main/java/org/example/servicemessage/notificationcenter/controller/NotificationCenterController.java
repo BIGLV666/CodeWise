@@ -1,5 +1,7 @@
 package org.example.servicemessage.notificationcenter.controller;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.dto.Result;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.enums.NotificationCenterType;
@@ -75,7 +77,7 @@ public class NotificationCenterController {
 
     private void validatePageSize(Integer pageSize) {
         if (pageSize == null || pageSize < 1 || pageSize > 100) {
-            throw new IllegalArgumentException("pageSize 必须在 1 到 100 之间");
+            throw new BizException(MessageErrorCode.PAGE_SIZE_INVALID);
         }
     }
 }

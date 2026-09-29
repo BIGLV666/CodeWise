@@ -1,5 +1,7 @@
 package org.example.servicereview.handler;
 
+import org.example.serviceapi.exception.BizException;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -29,7 +31,7 @@ class NoteContentHandlerRegistryTest {
 
     @Test
     void resolve_unknownType_throws() {
-        assertThrows(IllegalArgumentException.class, () -> registry.resolve("IMAGE"));
+        assertThrows(BizException.class, () -> registry.resolve("IMAGE"));
     }
 
     @Test

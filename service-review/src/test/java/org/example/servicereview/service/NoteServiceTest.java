@@ -1,5 +1,7 @@
 package org.example.servicereview.service;
 
+import org.example.serviceapi.exception.BizException;
+
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.NoteCreateDto;
 import org.example.servicereview.dto.NoteUpdateDto;
@@ -121,14 +123,14 @@ class NoteServiceTest {
 
     @Test
     void listNotes_negativeFolderId_throws() {
-        assertThrows(IllegalArgumentException.class, () -> service.listNotes(-1L, null, 20));
+        assertThrows(BizException.class, () -> service.listNotes(-1L, null, 20));
         verify(noteMapper, never()).selectPageByCursor(any(), any(), anyBoolean(), any(), anyInt());
     }
 
     @Test
     void getDetail_notOwner_throws() {
         when(noteMapper.selectById(NOTE_ID)).thenReturn(note(NOTE_ID, OTHER_USER_ID, null, "t", "c"));
-        assertThrows(IllegalArgumentException.class, () -> service.getDetail(NOTE_ID));
+        assertThrows(BizException.class, () -> service.getDetail(NOTE_ID));
     }
 
     @Test
@@ -154,7 +156,7 @@ class NoteServiceTest {
         NoteCreateDto dto = new NoteCreateDto();
         dto.setContent("正文");
         dto.setType("IMAGE");
-        assertThrows(IllegalArgumentException.class, () -> service.createNote(dto));
+        assertThrows(BizException.class, () -> service.createNote(dto));
         verify(noteMapper, never()).insert(any(Note.class));
     }
 
@@ -162,7 +164,7 @@ class NoteServiceTest {
     void createNote_blankContent_throws() {
         NoteCreateDto dto = new NoteCreateDto();
         dto.setContent("   ");
-        assertThrows(IllegalArgumentException.class, () -> service.createNote(dto));
+        assertThrows(BizException.class, () -> service.createNote(dto));
         verify(noteMapper, never()).insert(any(Note.class));
     }
 
@@ -174,7 +176,7 @@ class NoteServiceTest {
         NoteCreateDto dto = new NoteCreateDto();
         dto.setFolderId(FOLDER_A);
         dto.setContent("正文");
-        assertThrows(IllegalArgumentException.class, () -> service.createNote(dto));
+        assertThrows(BizException.class, () -> service.createNote(dto));
         verify(noteMapper, never()).insert(any(Note.class));
     }
 
@@ -217,7 +219,7 @@ class NoteServiceTest {
     void updateNote_noFields_throws() {
         when(noteMapper.selectById(NOTE_ID)).thenReturn(note(NOTE_ID, USER_ID, null, "t", "c"));
 
-        assertThrows(IllegalArgumentException.class, () -> service.updateNote(NOTE_ID, new NoteUpdateDto()));
+        assertThrows(BizException.class, () -> service.updateNote(NOTE_ID, new NoteUpdateDto()));
         verify(noteMapper, never()).updateById(any(Note.class));
     }
 
@@ -259,7 +261,7 @@ class NoteServiceTest {
     void deleteNote_notOwner_throws() {
         when(noteMapper.selectById(NOTE_ID)).thenReturn(note(NOTE_ID, OTHER_USER_ID, null, "t", "c"));
 
-        assertThrows(IllegalArgumentException.class, () -> service.deleteNote(NOTE_ID));
+        assertThrows(BizException.class, () -> service.deleteNote(NOTE_ID));
         verify(noteMapper, never()).deleteById(anyLong());
     }
 

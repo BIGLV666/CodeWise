@@ -1,5 +1,7 @@
 package org.example.servicereview.service;
 
+import org.example.serviceapi.exception.BizException;
+
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.feign.QuestionFeignClient;
@@ -117,16 +119,16 @@ class ProgressTrackerAgentOpsTest {
 
     @Test
     void batchCreate_empty_or_overLimit_throws() {
-        assertThrows(IllegalArgumentException.class, () -> progressTrackerService.batchCreate(List.of()));
+        assertThrows(BizException.class, () -> progressTrackerService.batchCreate(List.of()));
         List<ProgressTrackerDto> tooMany = java.util.stream.IntStream.range(0, 201)
                 .mapToObj(i -> dto((long) i, LocalDate.now().plusDays(i)))
                 .toList();
-        assertThrows(IllegalArgumentException.class, () -> progressTrackerService.batchCreate(tooMany));
+        assertThrows(BizException.class, () -> progressTrackerService.batchCreate(tooMany));
     }
 
     @Test
     void batchCreate_pastDate_throws() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> progressTrackerService.batchCreate(List.of(dto(1L, LocalDate.now().minusDays(1)))));
     }
 
@@ -146,7 +148,7 @@ class ProgressTrackerAgentOpsTest {
 
     @Test
     void batchDelete_empty_throws() {
-        assertThrows(IllegalArgumentException.class, () -> progressTrackerService.batchDelete(List.of()));
+        assertThrows(BizException.class, () -> progressTrackerService.batchDelete(List.of()));
     }
 
     // ---------- active 列表（瘦身 + 标题回填） ----------
@@ -179,7 +181,9 @@ class ProgressTrackerAgentOpsTest {
         LocalDate monday = today.with(DayOfWeek.MONDAY);
         ProgressTracker done = plan(1L, 11L, ProgressTrackerStatus.COMPLETED.getCode(), monday, USER_ID);
         done.setSummaryContent("这道题理解了滑动窗口");
-        ProgressTracker expired = plan(2L, 22L, ProgressTrackerStatus.EXPIRED.getCode(), monday.plusDays(1), USER_ID);
+        // 过期样本用「昨天」：beginTime 恒早于今天，懒刷新后仍保持 EXPIRED，测试不受运行星期影响
+        // （若用 monday.plusDays(1)，逢周二运行时该日期恰为今天，会被懒刷成进行中）
+        ProgressTracker expired = plan(2L, 22L, ProgressTrackerStatus.EXPIRED.getCode(), today.minusDays(1), USER_ID);
         when(progressTrackerMapper.selectList(any())).thenReturn(List.of(done, expired));
         when(questionFeignClient.getFavoritesBrief(anyList())).thenReturn(Result.success(List.of(brief(11L, "题11", 2))));
 

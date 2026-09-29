@@ -1,9 +1,12 @@
 package org.example.servicejudge.service.failure;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicejudge.entry.FailureSubmit;
 import org.example.servicejudge.enums.FailureSubmitStatus;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.mapper.FailureSubmitMapper;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
@@ -41,10 +44,10 @@ public class FailureSubmitService {
     public void retry(Long failureId) {
         FailureSubmit failureSubmit = failureSubmitMapper.selectById(failureId);
         if (failureSubmit == null) {
-            throw new IllegalArgumentException("未找到该任务");
+            throw new BizException(JudgeErrorCode.JUDGE_TASK_NOT_FOUND);
         }
         if (!Objects.equals(failureSubmit.getStatus(), FailureSubmitStatus.PENDING.getValue())) {
-            throw new IllegalArgumentException("当前任务不是待重试状态");
+            throw new BizException(JudgeErrorCode.DUPLICATE_RETRY_REQUEST);
         }
 
         rabbitTemplate.convertAndSend(
@@ -61,10 +64,10 @@ public class FailureSubmitService {
      */
     public List<FailureSubmit> getRecordsByStatus(Integer status) {
         if (status == null) {
-            throw new IllegalArgumentException("状态不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         if (!SUPPORTED_STATUSES.contains(status)) {
-            throw new IllegalArgumentException("非法状态");
+            throw new BizException(JudgeErrorCode.FAILURE_STATUS_INVALID);
         }
         return failureSubmitMapper.selectList(
                 new QueryWrapper<FailureSubmit>().eq("status", status));

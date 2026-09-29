@@ -1,8 +1,10 @@
 package org.example.serviceuser.service;
 
 import io.github.biglv666.apigovernance.async.event.AsyncEvent;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.service.EmailService;
 import org.example.serviceuser.entry.User;
+import org.example.serviceuser.exception.UserErrorCode;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -115,7 +117,8 @@ public class UserMailService {
             ClassPathResource resource = new ClassPathResource(path);
             return resource.getContentAsString(StandardCharsets.UTF_8);
         } catch (Exception ex) {
-            throw new IllegalStateException("Failed to load email template: " + path, ex);
+            // 模板路径等细节只进日志，用户仅看到通用文案
+            throw new BizException(UserErrorCode.MAIL_TEMPLATE_UNAVAILABLE, ex);
         }
     }
 

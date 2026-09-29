@@ -1,6 +1,8 @@
 package org.example.servicequestion.vo;
 
 import lombok.Data;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import lombok.NoArgsConstructor;
 import org.example.servicequestion.entry.FunctionConfig;
 import org.example.servicequestion.entry.Question;
@@ -58,7 +60,7 @@ public class QuestionVo {
      */
     public QuestionVo(Question question, FunctionConfig functionConfig) {
         if (question == null) {
-            throw new IllegalArgumentException("题目信息不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
 
         this.questionId = question.getQuestionId();

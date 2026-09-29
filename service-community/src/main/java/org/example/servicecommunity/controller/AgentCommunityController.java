@@ -2,11 +2,14 @@ package org.example.servicecommunity.controller;
 
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommunity.Dto.AgentCommentCreateDto;
 import org.example.servicecommunity.Dto.AgentLikeRequestDto;
 import org.example.servicecommunity.Dto.AgentPostCreateDto;
 import org.example.servicecommunity.Dto.AgentPostUpdateDto;
 import org.example.servicecommunity.enums.PostType;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.service.AgentCommunityService;
 import org.example.servicecommunity.service.CommentService;
 import org.example.servicecommunity.service.HostPostService;
@@ -69,7 +72,7 @@ public class AgentCommunityController {
         boolean descending = switch (order == null ? "" : order.toLowerCase()) {
             case "latest" -> true;
             case "oldest" -> false;
-            default -> throw new IllegalArgumentException("order 仅支持 latest / oldest");
+            default -> throw new BizException(CommunityErrorCode.POST_ORDER_INVALID);
         };
         return Result.success(agentCommunityService.listPublicPosts(lastId, pageSize, descending));
     }
@@ -95,7 +98,7 @@ public class AgentCommunityController {
         boolean hasKeyword = keyword != null && !keyword.isBlank();
         boolean hasTag = tag != null && !tag.isBlank();
         if (hasKeyword == hasTag) {
-            throw new IllegalArgumentException("keyword 与 tag 必须且只能提供一个");
+            throw new BizException(CommunityErrorCode.SEARCH_FILTER_CONFLICT);
         }
         List<HomePostVo> posts = hasKeyword
                 ? postService.searchPostsByTitle(keyword, limit)
@@ -180,12 +183,12 @@ public class AgentCommunityController {
     @RateLimit(limit = 60, window = 60)
     public Result<AgentLikeResultVo> setLikeState(@RequestBody AgentLikeRequestDto dto) {
         if (dto == null || dto.getAction() == null) {
-            throw new IllegalArgumentException("action 不能为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         boolean wantLiked = switch (dto.getAction().toLowerCase()) {
             case "like" -> true;
             case "unlike" -> false;
-            default -> throw new IllegalArgumentException("action 仅支持 like / unlike");
+            default -> throw new BizException(CommunityErrorCode.LIKE_ACTION_INVALID);
         };
         PostType targetType = AgentCommunityService.parseTargetType(dto.getTargetType());
         return Result.success(agentCommunityService.setLikeState(targetType, dto.getTargetId(), wantLiked));

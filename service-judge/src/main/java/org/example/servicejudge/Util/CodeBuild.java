@@ -3,6 +3,8 @@ package org.example.servicejudge.Util;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.servicejudge.exception.JudgeErrorCode;
 
 import java.util.*;
 import java.util.regex.Pattern;
@@ -97,9 +99,7 @@ public class CodeBuild {
 
 
             default ->
-                    throw new IllegalArgumentException(
-                            "暂不支持的参数类型: " + type
-                    );
+                    throw new BizException(JudgeErrorCode.FUNCTION_PARAM_TYPE_UNSUPPORTED);
         };
 
     }

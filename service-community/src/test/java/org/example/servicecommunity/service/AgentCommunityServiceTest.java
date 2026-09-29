@@ -1,5 +1,6 @@
 package org.example.servicecommunity.service;
 
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.AgentCommentCreateDto;
 import org.example.servicecommunity.Dto.AgentPostCreateDto;
@@ -116,9 +117,9 @@ class AgentCommunityServiceTest {
 
     @Test
     void listPublicPosts_pageSizeInvalid_throws() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> agentCommunityService.listPublicPosts(null, 101, true));
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> agentCommunityService.listPublicPosts(null, 0, true));
     }
 
@@ -159,13 +160,13 @@ class AgentCommunityServiceTest {
         AgentPostCreateDto noRequestId = new AgentPostCreateDto();
         noRequestId.setPostTitle("标题");
         noRequestId.setPostContent("正文");
-        assertThrows(IllegalArgumentException.class, () -> agentCommunityService.createPost(noRequestId));
+        assertThrows(BizException.class, () -> agentCommunityService.createPost(noRequestId));
 
         AgentPostCreateDto overLong = new AgentPostCreateDto();
         overLong.setPostTitle("标题");
         overLong.setPostContent("长".repeat(AgentCommunityService.MAX_POST_CONTENT + 1));
         overLong.setRequestId("uuid-1");
-        assertThrows(IllegalArgumentException.class, () -> agentCommunityService.createPost(overLong));
+        assertThrows(BizException.class, () -> agentCommunityService.createPost(overLong));
     }
 
     // ---------- 评论（幂等显式化） ----------
@@ -242,14 +243,14 @@ class AgentCommunityServiceTest {
     void setLikeState_unauthenticated_throws() {
         UserContext.clear();
         when(likeRecordMapper.selectCount(any())).thenReturn(0L);
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> agentCommunityService.setLikeState(PostType.POST, 11L, true));
         verify(likeRecordService, never()).PostLike(org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void setLikeState_solutionRejected() {
-        assertThrows(IllegalArgumentException.class,
+        assertThrows(BizException.class,
                 () -> agentCommunityService.setLikeState(PostType.SOLUTION, 31L, true));
         verifyNoInteractions(likeRecordService);
     }
@@ -260,8 +261,8 @@ class AgentCommunityServiceTest {
         assertEquals(PostType.COMMENT, AgentCommunityService.parseTargetType("COMMENT"));
         // SOLUTION 是合法枚举（解析层放行），点赞入口在 setLikeState 里拒绝
         assertEquals(PostType.SOLUTION, AgentCommunityService.parseTargetType("solution"));
-        assertThrows(IllegalArgumentException.class, () -> AgentCommunityService.parseTargetType(null));
-        assertThrows(IllegalArgumentException.class, () -> AgentCommunityService.parseTargetType("abc"));
+        assertThrows(BizException.class, () -> AgentCommunityService.parseTargetType(null));
+        assertThrows(BizException.class, () -> AgentCommunityService.parseTargetType("abc"));
     }
 
     // ---------- 我的内容（瘦身截断） ----------

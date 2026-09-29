@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.RedisDto.RedisContext;
@@ -19,6 +21,7 @@ import org.example.servicereview.dto.UpdateReviewDto;
 import org.example.servicereview.entry.Review;
 import org.example.servicereview.entry.ReviewConfig;
 import org.example.servicereview.entry.ReviewRecord;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.example.servicereview.mapper.ReviewConfigMapper;
 import org.example.servicereview.mapper.ReviewMapper;
 import org.example.servicereview.mapper.ReviewRecordMapper;
@@ -84,10 +87,10 @@ public class ReviewService {
                     .createTime(LocalDateTime.now()).updateTime(LocalDateTime.now()).build();
             int r= reviewMapper.insert(review);
             if(r!=1){
-                throw new IllegalArgumentException("添加失败请稍后重试");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
         }catch (DuplicateKeyException e){
-            throw new IllegalArgumentException("该题目已在您的复习计划");
+            throw new BizException(ReviewErrorCode.REVIEW_ALREADY_PLANNED, e);
         }
     }
 
@@ -111,11 +114,11 @@ public class ReviewService {
      *
      * @param reviewConfigDto 复习配置修改请求，允许部分字段为空，为空表示不修改该字段
      * @return 新建或更新后的复习配置
-     * @throws IllegalArgumentException 当请求对象为空时抛出
+     * @throws BizException 当请求对象为空时抛出
      */
     public ReviewConfig updateReviewConfig(ReviewConfigDto reviewConfigDto){
         if (reviewConfigDto == null) {
-            throw new IllegalArgumentException("复习配置不能为空");
+            throw new BizException(ReviewErrorCode.FIELD_REQUIRED, "复习配置");
         }
         validateReviewConfig(reviewConfigDto);
 
@@ -165,35 +168,35 @@ public class ReviewService {
 
     private void validateReviewConfig(ReviewConfigDto config) {
         if (config.getReviewCount() != null && config.getReviewCount() < 0) {
-            throw new IllegalArgumentException("每日复习数量不能小于 0");
+            throw new BizException(ReviewErrorCode.REVIEW_COUNT_INVALID);
         }
         if (config.getEnableAutoReview() != null
                 && config.getEnableAutoReview() != 0
                 && config.getEnableAutoReview() != 1) {
-            throw new IllegalArgumentException("是否自动复习只能是 0 或 1");
+            throw new BizException(ReviewErrorCode.REVIEW_SWITCH_INVALID);
         }
         if (config.getCountCompileError() != null
                 && config.getCountCompileError() != 0
                 && config.getCountCompileError() != 1) {
-            throw new IllegalArgumentException("是否统计编译错误只能是 0 或 1");
+            throw new BizException(ReviewErrorCode.REVIEW_SWITCH_INVALID);
         }
         if (config.getMinEasinessFactor() != null
                 && config.getMinEasinessFactor().compareTo(new BigDecimal("1.30")) < 0) {
-            throw new IllegalArgumentException("最低难度因子不能小于 1.3");
+            throw new BizException(ReviewErrorCode.REVIEW_MIN_EF_INVALID);
         }
         if (config.getInitialEasinessFactor() != null
                 && config.getMinEasinessFactor() != null
                 && config.getInitialEasinessFactor().compareTo(config.getMinEasinessFactor()) < 0) {
-            throw new IllegalArgumentException("初始难度因子不能小于最低难度因子");
+            throw new BizException(ReviewErrorCode.REVIEW_EF_ORDER_INVALID);
         }
         if (config.getMasteredIntervalDays() != null && config.getMasteredIntervalDays() <= 0) {
-            throw new IllegalArgumentException("掌握间隔天数必须大于 0");
+            throw new BizException(ReviewErrorCode.REVIEW_MASTERED_DAYS_INVALID);
         }
     }
 
     private void validateReviewConfigValues(ReviewConfig config) {
         if (config.getInitialEasinessFactor().compareTo(config.getMinEasinessFactor()) < 0) {
-            throw new IllegalArgumentException("初始难度因子不能小于最低难度因子");
+            throw new BizException(ReviewErrorCode.REVIEW_EF_ORDER_INVALID);
         }
     }
 
@@ -227,7 +230,7 @@ public class ReviewService {
             }
             Result<List<QuestionDto>>questionDtoResult= questionFeignClient.getFavorites(questionIds);
         if(questionDtoResult.getCode()!=200){
-            throw new IllegalArgumentException(questionDtoResult.getMessage());
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         map.put("questions",questionDtoResult.getData());
         return map;
@@ -248,7 +251,7 @@ public class ReviewService {
 
         Result<List<QuestionDto>>questionDtoResult= questionFeignClient.getFavorites(questionIds);
         if(questionDtoResult.getCode()!=200){
-            throw new IllegalArgumentException(questionDtoResult.getMessage());
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
 
 
@@ -272,7 +275,7 @@ public class ReviewService {
         try{
             int r=reviewRecordMapper.insert(record);
             if(r==0){
-                throw new IllegalArgumentException("获取今天记录失败请稍后重试");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
         } catch (DuplicateKeyException e){
             log.warn("今日复习记录已被并发创建, userId: {}", UserContext.getUserId());
@@ -292,7 +295,7 @@ public class ReviewService {
                 }
                 Result<List<QuestionDto>> concurrentResult= questionFeignClient.getFavorites(concurrentQuestionIds);
                 if(concurrentResult.getCode()!=200){
-                    throw new IllegalArgumentException(concurrentResult.getMessage());
+                    throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
                 }
                 map.put("questions",concurrentResult.getData());
                 return map;
@@ -427,7 +430,7 @@ public class ReviewService {
         RLock lock = redissonClient.getLock(lockKey);
         boolean locked = lock.tryLock(3, TimeUnit.SECONDS);
         if (!locked) {
-            throw new IllegalStateException("复习记录正在更新，请稍后重试");
+            throw new BizException(ReviewErrorCode.REVIEW_UPDATE_BUSY);
         }
         try {
             Boolean updated = transactionTemplate.execute(status -> updateReviewState(dto, quality, reviewConfig, eventId));
@@ -483,13 +486,13 @@ public class ReviewService {
                 .eq("user_id", dto.getUserId())
                 .eq("question_id", dto.getQuestionId()));
         if (review == null) {
-            throw new IllegalArgumentException("未找到对应的复习记录");
+            throw new BizException(ReviewErrorCode.REVIEW_RECORD_NOT_FOUND);
         }
         // calculateNextReviewInterval 原地修改并返回同一对象，更新前的状态需先留底用于 0→1 判定
         Integer previousStatus = review.getStatus();
         Review calculated = calculateNextReviewInterval(review, quality, reviewConfig);
         if (reviewMapper.updateById(calculated) == 0) {
-            throw new RuntimeException("更新复习记录失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         publishMasteredIfFirstTransition(previousStatus, calculated);
         updateTodayReviewRecord(dto, todayRecord, pending, completed);
@@ -567,7 +570,7 @@ public class ReviewService {
 
         int updateResult = reviewRecordMapper.updateById(todayRecord);
         if (updateResult == 0) {
-            throw new RuntimeException("更新今日复习记录失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
     }
 
@@ -698,14 +701,14 @@ public class ReviewService {
      * @param quality 本次复习质量评分，范围 0~5
      * @param reviewConfig 用户复习配置；为空时使用默认 EF 和掌握阈值
      * @return 已在内存中更新后的 Review 对象，调用方负责持久化
-     * @throws IllegalArgumentException 当 review 为空或 quality 不在 0~5 范围内时抛出
+     * @throws BizException 当 review 为空或 quality 不在 0~5 范围内时抛出
      */
     public Review calculateNextReviewInterval(Review review, Integer quality, ReviewConfig reviewConfig) {
         if (review == null) {
-            throw new IllegalArgumentException("复习记录不能为空");
+            throw new BizException(ReviewErrorCode.FIELD_REQUIRED, "复习记录");
         }
         if (quality == null || quality < 0 || quality > 5) {
-            throw new IllegalArgumentException("quality 必须在 0 到 5 之间");
+            throw new BizException(ReviewErrorCode.REVIEW_QUALITY_INVALID);
         }
         LocalDateTime now = LocalDateTime.now();
         BigDecimal initialEf = reviewConfig != null && reviewConfig.getInitialEasinessFactor() != null
@@ -832,7 +835,7 @@ public class ReviewService {
     public ReviewRecordVo getRecordById(Long id){
         ReviewRecord reviewRecord = reviewRecordMapper.selectById(id);
         if(reviewRecord==null){
-            throw new IllegalArgumentException("未找到该日的复习计划");
+            throw new BizException(ReviewErrorCode.REVIEW_DAY_NOT_FOUND);
         }
         ReviewRecordVo reviewRecordVo=new ReviewRecordVo(reviewRecord);
         List<Long>allQuestionIds=new ArrayList<>();
@@ -841,7 +844,7 @@ public class ReviewService {
         reviewRecordVo.setAllQuestionIds(allQuestionIds);
         Result<List<QuestionDto>>result= questionFeignClient.getFavorites(allQuestionIds);
         if(!result.getCode().equals(200)){
-            throw new IllegalArgumentException("获取题目信息失败");
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         Map<Long,String>map=new HashMap<>();
         for(QuestionDto questionDto:result.getData()){
@@ -900,15 +903,15 @@ public class ReviewService {
         }
         Review review = reviewMapper.selectById(reviewId);
         if(review==null){
-            throw new IllegalArgumentException("未找到该题目的复习计划");
+            throw new BizException(ReviewErrorCode.REVIEW_ITEM_NOT_FOUND);
         }
         if(!review.getUserId().equals(UserContext.getUserId())){
-            throw new IllegalArgumentException("无权操作他人复习记录");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         ReviewRecord reviewRecord = reviewRecordMapper.getTodayRecord(UserContext.getUserId());
         if(reviewRecord!=null){
             if(reviewRecord.getPendingReviewQuestionIds().contains(review.getQuestionId())||reviewRecord.getCompletedReviewQuestionIds().contains(review.getQuestionId())){
-                throw new IllegalArgumentException("该题目在今日复习计划暂不支持更改");
+                throw new BizException(ReviewErrorCode.REVIEW_TODAY_LOCKED);
             }
         }
         LocalDateTime now = LocalDateTime.now();
@@ -918,23 +921,23 @@ public class ReviewService {
 
         if(updateReviewDto.getStatus()!=null&&(updateReviewDto.getStatus()==0||updateReviewDto.getStatus()==2)){
             if(review.getStatus()==1){
-                throw new IllegalArgumentException("该题目已掌握");
+                throw new BizException(ReviewErrorCode.REVIEW_ALREADY_MASTERED);
             }
 
             review.setStatus(updateReviewDto.getStatus());
         }else {
-            throw new IllegalArgumentException("未知状态");
+            throw new BizException(ReviewErrorCode.REVIEW_STATUS_INVALID);
         }
 
         if(updateReviewDto.getWeight()!=null&&(updateReviewDto.getWeight() == 0 || updateReviewDto.getWeight() == 1)){
             review.setWeight(updateReviewDto.getWeight());
         }else {
-            throw new IllegalArgumentException("未知权重");
+            throw new BizException(ReviewErrorCode.REVIEW_WEIGHT_INVALID);
         }
 
         int r=reviewMapper.updateById(review);
         if(r==0){
-            throw new IllegalArgumentException("更新失败请稍后重试");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         return review;
 
@@ -948,11 +951,11 @@ public class ReviewService {
 
     public void deleteReview(Long reviewId) {
         if(reviewId==null){
-            throw new IllegalArgumentException("复习为空");
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
         }
         int r=reviewMapper.delete(new QueryWrapper<Review>().eq("review_id",reviewId).eq("user_id",UserContext.getUserId()));
         if(r==0){
-            throw new IllegalArgumentException("删除失败");
+            throw new BizException(ReviewErrorCode.REVIEW_ITEM_NOT_FOUND);
         }
 
     }
@@ -961,12 +964,12 @@ public class ReviewService {
 
     public ReviewRecordVo getReviewRecordByDay(LocalDate day) {
         if(day==null){
-            throw new IllegalArgumentException("日期为空");
+            throw new BizException(ReviewErrorCode.REVIEW_DATE_MISSING);
         }
 
         ReviewRecord record=reviewRecordMapper.selectOne(new QueryWrapper<ReviewRecord>().eq("review_date",day).eq("user_id",UserContext.getUserId()));
         if(record==null){
-            throw new IllegalArgumentException("未找到当天复习计划");
+            throw new BizException(ReviewErrorCode.REVIEW_DAY_NOT_FOUND);
         }
         ReviewRecordVo reviewRecordVo=new ReviewRecordVo(record);
         List<Long>allQuestionIds=new ArrayList<>();
@@ -975,7 +978,7 @@ public class ReviewService {
         reviewRecordVo.setAllQuestionIds(allQuestionIds);
         Result<List<QuestionDto>>result= questionFeignClient.getFavorites(allQuestionIds);
         if(!result.getCode().equals(200)){
-            throw new IllegalArgumentException("获取题目信息失败");
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         Map<Long,String>map=new HashMap<>();
         for(QuestionDto questionDto:result.getData()){

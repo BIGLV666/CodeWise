@@ -7,10 +7,13 @@ import io.github.biglv666.apigovernance.async.event.AsyncPhase;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicecommon.until.UserContext;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.entry.User;
+import org.example.serviceuser.exception.UserErrorCode;
 import org.example.serviceuser.mapper.UserMapper;
 import org.example.serviceuser.until.JwtUntil;
 import org.example.serviceuser.until.PasswordEncoding;
@@ -23,6 +26,7 @@ import org.springframework.stereotype.Service;
 import java.security.SecureRandom;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -51,6 +55,8 @@ public class UserService {
     /** 单个验证码允许的最大试错次数，超过后作废，避免被暴力枚举。 */
     private final static long MAX_VERIFY_ATTEMPTS = 5;
     private final static SecureRandom SECURE_RANDOM = new SecureRandom();
+    /** 封禁提示中的解封时间展示格式，避免把 LocalDateTime 原始值透给用户。 */
+    private final static DateTimeFormatter BAN_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     /**
      * 验证码使用场景。注册、验证码登录、找回密码各自独立存储，
@@ -87,7 +93,7 @@ public class UserService {
         Boolean allowed = redisTemplate.opsForValue()
                 .setIfAbsent(cooldownKey(scene, account), "1", SEND_COOLDOWN_SECONDS, TimeUnit.SECONDS);
         if (!Boolean.TRUE.equals(allowed)) {
-            throw new RuntimeException("验证码发送过于频繁，请稍后再试");
+            throw new BizException(UserErrorCode.CODE_SEND_TOO_FREQUENT);
         }
     }
 
@@ -107,7 +113,7 @@ public class UserService {
         String key = codeKey(scene, account);
         Map<String, Object> payload = (Map<String, Object>) redisTemplate.opsForValue().get(key);
         if (payload == null) {
-            throw new RuntimeException("验证码已过期或未找到验证码");
+            throw new BizException(UserErrorCode.CODE_EXPIRED);
         }
         String expected = String.valueOf(payload.get("code"));
         if (code == null || !expected.equals(code.trim())) {
@@ -119,9 +125,9 @@ public class UserService {
             if (attempts != null && attempts >= MAX_VERIFY_ATTEMPTS) {
                 redisTemplate.delete(key);
                 redisTemplate.delete(attemptKey);
-                throw new RuntimeException("验证码错误次数过多，请重新获取验证码");
+                throw new BizException(UserErrorCode.CODE_TOO_MANY_ATTEMPTS);
             }
-            throw new RuntimeException("验证码错误");
+            throw new BizException(UserErrorCode.CODE_INCORRECT);
         }
         redisTemplate.delete(key);
         redisTemplate.delete(attemptKey(scene, account));
@@ -131,7 +137,10 @@ public class UserService {
     /** 账号是否处于封禁状态，status 可能为 null，不能直接拆箱比较。 */
     private void ensureNotBanned(User user) {
         if (user.getStatus() != null && user.getStatus() == 0) {
-            throw new RuntimeException("用户被封禁,解封时间为" + user.getBanTime());
+            String unbanInfo = user.getBanTime() == null
+                    ? "解封时间待定，请联系管理员"
+                    : "预计解封时间为 " + user.getBanTime().format(BAN_TIME_FORMATTER);
+            throw new BizException(UserErrorCode.ACCOUNT_BANNED, unbanInfo);
         }
     }
 
@@ -139,16 +148,14 @@ public class UserService {
     public Map<String,Object> login(String username, String password){
         QueryWrapper<User> queryWrapper = new QueryWrapper<User>();
         if(username==null||password==null){
-            throw new IllegalArgumentException("用户名不为空");
+            throw new BizException(UserErrorCode.USERNAME_OR_PASSWORD_MISSING);
         }
         queryWrapper.eq("user_name",username);
 
         User user=userMapper.selectOne(queryWrapper);
-        if(user==null){
-            throw new RuntimeException("未找到该用户");
-        }
-        if(!PasswordEncoding.matches(password,user.getPassword())){
-            throw new RuntimeException("密码错误");
+        // 账号不存在与密码错误返回同一文案，避免枚举有效账号
+        if(user==null || !PasswordEncoding.matches(password,user.getPassword())){
+            throw new BizException(UserErrorCode.LOGIN_FAILED);
         }
         ensureNotBanned(user);
 
@@ -168,16 +175,14 @@ public class UserService {
     public  Map<String,Object>emailLogin(String email,String password){
         QueryWrapper<User> queryWrapper = new QueryWrapper<User>();
         if(email==null||password==null){
-            throw new IllegalArgumentException("邮箱或密码不为空");
+            throw new BizException(UserErrorCode.EMAIL_OR_PASSWORD_MISSING);
         }
         queryWrapper.eq("email",email);
 
         User user=userMapper.selectOne(queryWrapper);
-        if(user==null){
-            throw new RuntimeException("未找到该用户");
-        }
-        if(!PasswordEncoding.matches(password,user.getPassword())){
-            throw new RuntimeException("密码错误");
+        // 账号不存在与密码错误返回同一文案，避免枚举有效账号
+        if(user==null || !PasswordEncoding.matches(password,user.getPassword())){
+            throw new BizException(UserErrorCode.LOGIN_FAILED);
         }
         ensureNotBanned(user);
 
@@ -205,11 +210,11 @@ public class UserService {
      */
     public String getEmailCode(String email){
         if (email == null || email.isBlank()) {
-            throw new IllegalArgumentException("邮箱不能为空");
+            throw new BizException(UserErrorCode.EMAIL_MISSING);
         }
         User user=userMapper.selectOne(new QueryWrapper<User>().eq("email",email));
         if (user==null){
-            throw new IllegalArgumentException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         ensureNotBanned(user);
         ensureSendAllowed(CodeScene.LOGIN, email);
@@ -229,7 +234,7 @@ public class UserService {
         Object cachedUserId = payload.get("userId");
         User user = cachedUserId == null ? null : userMapper.selectById(Long.valueOf(String.valueOf(cachedUserId)));
         if(user==null){
-            throw new RuntimeException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         ensureNotBanned(user);
 
@@ -251,11 +256,11 @@ public class UserService {
         System.out.println(UserContext.getIp());
         User user = userMapper.selectOne(new QueryWrapper<User>().eq("user_name",username));
         if(user!=null){
-            throw new RuntimeException("用户名已存在");
+            throw new BizException(UserErrorCode.USERNAME_TAKEN);
         }
         user=userMapper.selectOne(new QueryWrapper<User>().eq("email",email));
         if(user!=null){
-            throw new RuntimeException("该邮箱已注册请直接登录");
+            throw new BizException(UserErrorCode.EMAIL_TAKEN);
         }
         ensureSendAllowed(CodeScene.REGISTER, email);
 
@@ -283,22 +288,22 @@ public class UserService {
         try {
             userMapper.insert(user);
         } catch (DuplicateKeyException d) {
-            throw new RuntimeException("该邮箱或手机号已被注册");
+            throw new BizException(UserErrorCode.REGISTER_ACCOUNT_TAKEN, d);
         }
     }
     //修改密码
     public void updatePassword(String oldPassword,String newPassword){
         User user= userMapper.selectById(UserContext.getUserId());
         if(user==null){
-            throw new RuntimeException("未找到该用户，请确认用户名是否正确");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         if(!PasswordEncoding.matches(oldPassword,user.getPassword())){
-            throw new RuntimeException("密码错误");
+            throw new BizException(UserErrorCode.PASSWORD_INCORRECT);
         }
         user.setPassword(PasswordEncoding.encode(newPassword));
         int i=userMapper.updateById(user);
         if(i!=1){
-            throw new RuntimeException("密码修改失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
     }
     /**
@@ -308,7 +313,7 @@ public class UserService {
     public void updatePasswordForEmail(String email,String newPassword){
         User user= userMapper.selectOne(new QueryWrapper<User>().eq("email",email));
         if(user==null){
-            throw new RuntimeException("该用户不存在");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         ensureSendAllowed(CodeScene.RESET, email);
 
@@ -326,25 +331,25 @@ public class UserService {
      */
     public void updatePasswordForCode(String n, String code, String newPassword){
         if (newPassword == null || newPassword.length() < 6) {
-            throw new IllegalArgumentException("新密码长度不能少于6位");
+            throw new BizException(UserErrorCode.PASSWORD_TOO_SHORT, 6);
         }
         Map<String,Object> payload = consumeCode(CodeScene.RESET, n, code);
 
         Object cachedUserId = payload.get("userId");
         User user = cachedUserId == null ? null : userMapper.selectById(Long.valueOf(String.valueOf(cachedUserId)));
         if(user==null){
-            throw new RuntimeException("该用户不存在");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         user.setPassword(PasswordEncoding.encode(newPassword));
         int r=userMapper.updateById(user);
         if(r!=1){
-            throw new RuntimeException("修改失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
     }
     public UserDto getUserById(Long userId) {
         User user = userMapper.selectById(userId);
         if(user==null){
-            throw new RuntimeException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         return new UserDto(user);
 
@@ -399,24 +404,23 @@ public class UserService {
      * 该操作可逆，管理员可以通过解封操作恢复用户账号。
      * @param userId 冻结用户id
      * @param banTime 冻结时间，单位为天
-     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
      */
     public void banUser(Long userId,Integer banTime){
         LocalDateTime banUntil = LocalDateTime.now().plusDays(banTime);
         int userStatus = 0; // 0 表示封禁状态
         User user = userMapper.selectById(userId);
         if(user==null){
-            throw new IllegalArgumentException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         if(user.getStatus()==2){
-            throw new IllegalArgumentException("该用户已注销");
+            throw new BizException(UserErrorCode.USER_CANCELLED);
         }
         user.setStatus(userStatus);
         user.setUpdateTime(LocalDateTime.now());
         user.setBanTime(banUntil);
         int r=userMapper.updateById(user);
         if(r==0){
-            throw new IllegalArgumentException("修改状态失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         userMailService.sendBanMail(user);
 
@@ -430,20 +434,20 @@ public class UserService {
     public void deleteUser(){
         Long userId = UserContext.getUserId();
         if(userId==null){
-            throw new IllegalArgumentException("用户ID不能为空");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         User user = userMapper.selectById(userId);
         if(user==null){
-            throw new IllegalArgumentException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         if(user.getStatus()==2){
-            throw new IllegalArgumentException("该用户已注销");
+            throw new BizException(UserErrorCode.USER_CANCELLED);
         }
         user.setStatus(2);
         user.setUpdateTime(LocalDateTime.now());
         int r=userMapper.updateById(user);
         if(r==0){
-            throw new IllegalArgumentException("删除用户失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
     }
 
@@ -454,22 +458,21 @@ public class UserService {
      * 该操作可逆，用户可以通过找回密码或联系管理员解冻
      * @param banReason 冻结原因
      * @param password 用户密码，用于验证身份
-     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
      */
     public void freezeUser(String banReason,String password){
         if(banReason==null||banReason.isBlank()){
-            throw new IllegalArgumentException("冻结原因不能为空");
+            throw new BizException(UserErrorCode.FREEZE_REASON_MISSING);
         }
         if(password==null||password.isBlank()){
-            throw new IllegalArgumentException("密码不能为空");
+            throw new BizException(UserErrorCode.PASSWORD_MISSING);
         }
         Long userId = UserContext.getUserId();
         User user=userMapper.selectById(userId);
         if(user==null){
-            throw new IllegalArgumentException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         if(!PasswordEncoding.matches(password,user.getPassword())){
-            throw new IllegalArgumentException("密码错误");
+            throw new BizException(UserErrorCode.PASSWORD_INCORRECT);
         }
         user.setStatus(0);
 
@@ -478,7 +481,7 @@ public class UserService {
         user.setBanReason(banReason);
         int r=userMapper.updateById(user);
         if(r==0){
-            throw new IllegalArgumentException("冻结用户失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         userMailService.sendFreezeMail(user);
     }
@@ -488,16 +491,15 @@ public class UserService {
      * 用户冻结解除，需要管理员操作，设置 status 为 1，表示正常状态。
      * 仅允许管理员操作，用户无法直接解冻其他用户。
      * 该操作可逆，管理员可以通过冻结操作再次冻结用户账号。
-     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
      * @param userId 操作对象
      */
     public void unBanUser(Long userId){
         User user = userMapper.selectById(userId);
         if(user==null){
-            throw new IllegalArgumentException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         if(user.getStatus()!=0){
-            throw new IllegalArgumentException("该用户未被冻结");
+            throw new BizException(UserErrorCode.USER_NOT_FROZEN);
         }
         user.setStatus(1);
         user.setUpdateTime(LocalDateTime.now());
@@ -505,7 +507,7 @@ public class UserService {
         user.setBanReason(null);
         int r=userMapper.updateById(user);
         if(r==0){
-            throw new IllegalArgumentException("解封用户失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         userMailService.sendUnbanMail(user);
     }
@@ -514,13 +516,12 @@ public class UserService {
      * 获取被封禁的用户信息，返回 UserDto 对象。
      * 仅允许管理员操作，用户无法直接查询其他用户的封禁信息。
      * 不包含敏感信息，如密码、邮箱等。
-     * @throws IllegalArgumentException 如果参数不合法或操作失败，抛出异常
      * @param userId 查询对象
      */
     public UserDto getBanUser(Long userId) {
         User user = userMapper.selectById(userId);
         if(user==null){
-            throw new RuntimeException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         UserDto userDto = new UserDto(user);
         userDto.setEmail(null);

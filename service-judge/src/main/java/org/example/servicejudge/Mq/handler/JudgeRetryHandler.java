@@ -3,12 +3,15 @@ package org.example.servicejudge.Mq.handler;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.event.EventPublisher;
 import org.example.servicejudge.entry.FailureSubmit;
 import org.example.servicejudge.entry.JudgeRecord;
 import org.example.servicejudge.entry.SubmitRecord;
 import org.example.servicejudge.enums.FailureSubmitStatus;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.mapper.FailureSubmitMapper;
 import org.example.servicejudge.mapper.JudgeRecordMapper;
 import org.example.servicejudge.mapper.SubmitRecordMapper;
@@ -59,9 +62,10 @@ public class JudgeRetryHandler {
      * 消费重试消息并完成一次失败提交的补偿判题。
      *
      * @param failureId failure_submit.failure_submit_id
-     * @throws IOException           判题执行失败（已先登记 failure_submit=FAILURE）
-     * @throws IllegalStateException 记录抢占后查询为空、提交/题目缺失、状态异常等
-     *                               （已先登记 failure_submit=FAILURE）
+     * @throws IOException  判题执行失败（已先登记 failure_submit=FAILURE）
+     * @throws BizException 记录抢占后查询为空、提交/题目缺失、状态异常等
+     *                      （已先登记 failure_submit=FAILURE；仍为上抛语义，
+     *                      消费者据此 nack 进死信，控制流不变）
      */
     public void handle(Long failureId) throws IOException {
         if (failureSubmitMapper.updateStatusToRetry(failureId) != 1) {
@@ -73,12 +77,14 @@ public class JudgeRetryHandler {
         try {
             FailureSubmit failureSubmit = failureSubmitMapper.selectById(failureId);
             if (failureSubmit == null) {
-                throw new IllegalStateException("重试记录抢占后查询为空，failureId=" + failureId);
+                log.error("重试记录抢占后查询为空，failureId={}", failureId);
+                throw new BizException(JudgeErrorCode.JUDGE_TASK_NOT_FOUND);
             }
 
             SubmitRecord submitRecord = submitRecordMapper.selectById(failureSubmit.getSubmitRecordId());
             if (submitRecord == null) {
-                throw new IllegalStateException("提交记录不存在，submitId=" + failureSubmit.getSubmitRecordId());
+                log.error("提交记录不存在，submitId={}", failureSubmit.getSubmitRecordId());
+                throw new BizException(JudgeErrorCode.JUDGE_TASK_NOT_FOUND);
             }
             Long submissionId = submitRecord.getSubmitRecordId();
 
@@ -98,9 +104,9 @@ public class JudgeRetryHandler {
             }
 
             if (submitRecordMapper.updateRecordToJudge(submissionId) != 1) {
-                throw new IllegalStateException(
-                        "提交记录状态不是 pending，无法开始重试，submitId=" + submissionId
-                                + ", judgeStatus=" + submitRecord.getJudgeStatus());
+                log.warn("提交记录状态不是 pending，无法开始重试，submitId={}, judgeStatus={}",
+                        submissionId, submitRecord.getJudgeStatus());
+                throw new BizException(JudgeErrorCode.JUDGE_RETRY_NOT_ALLOWED);
             }
 
             // 判题 + 落库 + Outbox 结果回调事件（sendAiAdvice=false：重试流程不发 AI 建议）
@@ -124,7 +130,8 @@ public class JudgeRetryHandler {
             if (e instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
-            throw new IllegalStateException("判题重试处理失败: " + e.getMessage(), e);
+            // 非运行时异常统一包装：消息用枚举文案，原始原因只进 cause（日志/lastError）
+            throw new BizException(JudgeErrorCode.JUDGE_RETRY_FAILED, e);
         }
     }
 
@@ -144,7 +151,7 @@ public class JudgeRetryHandler {
      */
     private void publishQuestionResult(JudgeRecord judgeRecord) {
         if (judgeRecord == null || judgeRecord.getJudgeRecordId() == null) {
-            throw new IllegalStateException("判题结果为空或未生成判题记录");
+            throw new BizException(JudgeErrorCode.JUDGE_ENV_UNAVAILABLE);
         }
         eventPublisher.publish(
                 MqContexts.Question_EXCHANGE,
@@ -158,7 +165,8 @@ public class JudgeRetryHandler {
      */
     private void markRetrySuccess(Long failureId) {
         if (failureSubmitMapper.updateStatus(failureId, FailureSubmitStatus.SUCCESS.getValue()) != 1) {
-            throw new IllegalStateException("修改失败提交状态失败，failureId=" + failureId);
+            log.error("修改失败提交状态失败，failureId={}", failureId);
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
     }
 

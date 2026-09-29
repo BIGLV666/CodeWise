@@ -3,8 +3,10 @@ package org.example.serviceai.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateRequest;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateResponse;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -83,41 +85,41 @@ public class FunctionArtifactService {
             }
             return objectMapper.readTree(json);
         } catch (JsonProcessingException exception) {
-            throw new IllegalStateException("AI 返回的源码结果不是合法 JSON", exception);
+            throw new BizException(AiErrorCode.AI_RESULT_PARSE_FAILED, exception);
         }
     }
 
     private String requiredText(JsonNode root, String field) {
         String value = root.path(field).asText("").trim();
         if (value.isEmpty()) {
-            throw new IllegalStateException("AI 返回结果缺少 " + field);
+            throw new BizException(AiErrorCode.AI_RESULT_INCOMPLETE);
         }
         return value;
     }
 
     private void validate(FunctionArtifactGenerateRequest request) {
         if (request == null || safe(request.getDescription()).isBlank()) {
-            throw new IllegalArgumentException("题目描述不能为空");
+            throw new BizException(AiErrorCode.ARTIFACT_DESC_REQUIRED);
         }
         if (safe(request.getParameterConfig()).isBlank()
                 || safe(request.getMethodName()).isBlank()
                 || safe(request.getOutputType()).isBlank()) {
-            throw new IllegalArgumentException("函数签名信息不完整");
+            throw new BizException(AiErrorCode.FUNCTION_SIGNATURE_INCOMPLETE);
         }
     }
 
     private void validateCode(FunctionArtifactGenerateResponse result) {
         if (!result.getGeneratorCode().contains("class Generator")
                 || !result.getStandardAnswerCode().contains("class Main")) {
-            throw new IllegalStateException("AI 返回的源码不符合执行契约");
+            throw new BizException(AiErrorCode.GENERATED_CODE_INVALID);
         }
         if (!(result.getGeneratorCode().contains("Random")
                 || result.getGeneratorCode().contains("SplittableRandom"))) {
-            throw new IllegalStateException("AI 返回的 Generator 未使用随机数生成器");
+            throw new BizException(AiErrorCode.GENERATED_CODE_INVALID);
         }
         if (!result.getGeneratorCode().contains("args[0]")
                 || !result.getGeneratorCode().contains("args[1]")) {
-            throw new IllegalStateException("AI 返回的 Generator 未接收 seed 和 count 参数");
+            throw new BizException(AiErrorCode.GENERATED_CODE_INVALID);
         }
     }
 

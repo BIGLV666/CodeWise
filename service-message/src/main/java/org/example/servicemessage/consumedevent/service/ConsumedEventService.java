@@ -1,5 +1,7 @@
 package org.example.servicemessage.consumedevent.service;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.example.servicemessage.consumedevent.entry.ConsumedEvent;
@@ -49,7 +51,7 @@ public class ConsumedEventService {
                     consumedEventMapper.insert(buildNewEvent(eventId, routingKey));
                     return ClaimResult.NEW;
                 } catch (DuplicateKeyException secondConflict) {
-                    throw new IllegalStateException("事件幂等行冲突且无法读取：" + eventId, secondConflict);
+                    throw new BizException(MessageErrorCode.EVENT_CLAIM_CONFLICT, secondConflict);
                 }
             }
             if (existing.getStatus() == ConsumedEventStatus.COMPLETED) {

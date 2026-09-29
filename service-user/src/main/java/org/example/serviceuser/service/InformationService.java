@@ -1,9 +1,12 @@
 package org.example.serviceuser.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.until.UserContext;
 import org.example.serviceuser.dto.UserDto;
 import org.example.serviceuser.entry.User;
+import org.example.serviceuser.exception.UserErrorCode;
 import org.example.serviceuser.mapper.UserMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +27,10 @@ public class InformationService {
     //修改个人简介
     public UserDto updateBio(String bio){
         if (bio == null) {
-            throw new IllegalArgumentException("个人简介不能为空");
+            throw new BizException(UserErrorCode.BIO_EMPTY);
         }
         if (bio.length() > 500) {
-            throw new IllegalArgumentException("个人简介不能超过500个字符");
+            throw new BizException(UserErrorCode.BIO_TOO_LONG, 500);
         }
 
         User user = getCurrentUserOrThrow();
@@ -35,39 +38,39 @@ public class InformationService {
         user.setUpdateTime(LocalDateTime.now());
         int i= userMapper.updateById(user);
         if(i!=1){
-            throw new RuntimeException("修改失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         return new UserDto(user);
     }
     public UserDto updateBirthday(String birthday) {
         if (birthday == null || birthday.isBlank()) {
-            throw new IllegalArgumentException("生日不能为空");
+            throw new BizException(UserErrorCode.BIRTHDAY_MISSING);
         }
         try {
             LocalDate parsedBirthday = LocalDate.parse(birthday);
             if(parsedBirthday.isAfter(LocalDate.now())) {
-                throw new IllegalArgumentException("出生日期不能晚于当天");
+                throw new BizException(UserErrorCode.BIRTHDAY_FUTURE);
             }
             User user = getCurrentUserOrThrow();
             user.setBirthday(parsedBirthday);
             user.setUpdateTime(LocalDateTime.now());
             int i = userMapper.updateById(user);
             if (i != 1) {
-                throw new RuntimeException("修改失败");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
             return new UserDto(user);
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException("生日格式错误，请使用 yyyy-MM-dd");
+            throw new BizException(UserErrorCode.BIRTHDAY_FORMAT_INVALID, e);
         }
     }
 
     public UserDto updateNickName(String nickName) {
             if (nickName == null || nickName.isBlank()) {
-                throw new IllegalArgumentException("昵称不能为空");
+                throw new BizException(UserErrorCode.NICKNAME_MISSING);
             }
             String trimmedNickName = nickName.trim();
             if (trimmedNickName.length() > 30) {
-                throw new IllegalArgumentException("昵称不能超过30个字符");
+                throw new BizException(UserErrorCode.NICKNAME_TOO_LONG, 30);
             }
 
             User user = getCurrentUserOrThrow();
@@ -75,14 +78,14 @@ public class InformationService {
             user.setUpdateTime(LocalDateTime.now());
             int i = userMapper.updateById(user);
             if (i != 1) {
-                throw new RuntimeException("修改失败");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
             return new UserDto(user);
     }
 
     public String updateAvatar(String avatar) {
         if (avatar == null || avatar.isBlank()) {
-            throw new IllegalArgumentException("头像地址不能为空");
+            throw new BizException(UserErrorCode.AVATAR_MISSING);
         }
         User user = getCurrentUserOrThrow();
         String oldAvatar=user.getAvatarUrl();
@@ -90,7 +93,7 @@ public class InformationService {
         user.setAvatarUrl(avatar);
         int i = userMapper.updateById(user);
         if(i!=1){
-            throw new RuntimeException("修改失败");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         return  oldAvatar;
     }
@@ -98,7 +101,7 @@ public class InformationService {
     private Long getCurrentUserIdOrThrow() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("用户未登录或请求头缺少用户信息");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         return userId;
     }
@@ -106,7 +109,7 @@ public class InformationService {
     private User getCurrentUserOrThrow() {
         User user = userMapper.selectById(getCurrentUserIdOrThrow());
         if(user==null){
-            throw new RuntimeException("未找到该用户");
+            throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
         return user;
     }

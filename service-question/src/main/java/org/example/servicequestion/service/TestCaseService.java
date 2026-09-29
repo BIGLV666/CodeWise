@@ -3,11 +3,14 @@ package org.example.servicequestion.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.InsertTestCaseDto;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.TestCase;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.TestCaseMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,13 +52,13 @@ public class TestCaseService {
         if (insert > 0) {
             return testCase;
         }
-        throw new RuntimeException("添加测试用例失败");
+        throw new BizException(QuestionErrorCode.TESTCASE_SAVE_FAILED);
     }
 
     public TestCase getTestCaseById(Long caseId) {
         TestCase testCase = testCaseMapper.selectById(caseId);
         if (testCase == null) {
-            throw new RuntimeException("测试用例不存在");
+            throw new BizException(QuestionErrorCode.TESTCASE_NOT_FOUND);
         }
         checkQuestionPermission(testCase.getQuestionId());
         return testCase;
@@ -72,9 +75,9 @@ public class TestCaseService {
     public TestCase updateTestCase(InsertTestCaseDto dto, Long caseId) {
         TestCase existing = testCaseMapper.selectById(caseId);
         if (existing == null) {
-            throw new RuntimeException("测试用例不存在");
+            throw new BizException(QuestionErrorCode.TESTCASE_NOT_FOUND);
         }
-        checkQuestionPermission(existing.getQuestionId(), "无权修改该测试用例");
+        checkQuestionPermission(existing.getQuestionId());
         if (dto.getInputData() != null) {
             existing.setInputData(dto.getInputData());
         }
@@ -103,41 +106,40 @@ public class TestCaseService {
         if (update > 0) {
             return existing;
         }
-        throw new RuntimeException("更新测试用例失败");
+        throw new BizException(QuestionErrorCode.TESTCASE_UPDATE_FAILED);
     }
 
     @Transactional
     public void deleteTestCase(Long caseId) {
         TestCase testCase = testCaseMapper.selectById(caseId);
         if (testCase == null) {
-            throw new RuntimeException("测试用例不存在");
+            throw new BizException(QuestionErrorCode.TESTCASE_NOT_FOUND);
         }
         checkQuestionPermission(testCase.getQuestionId());
         int delete = testCaseMapper.deleteById(caseId);
         if (delete <= 0) {
-            throw new RuntimeException("删除测试用例失败");
+            throw new BizException(QuestionErrorCode.TESTCASE_DELETE_FAILED);
         }
     }
 
     private void checkQuestionPermission(Long questionId) {
-        checkQuestionPermission(questionId, "无权操作该题目的测试用例");
-    }
-
-    private void checkQuestionPermission(Long questionId, String denyMessage) {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new RuntimeException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         Question question = questionMapper.selectById(questionId);
         if (question == null) {
-            throw new RuntimeException("题目不存在");
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
         Result<UserDto> userResult = userFeignClient.getUserInfo(userId);
-        if (userResult.getCode() != 200 || userResult.getData() == null) {
-            throw new RuntimeException("未找到用户");
+        if (userResult.getCode() != 200) {
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+        }
+        if (userResult.getData() == null) {
+            throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
         }
         if (!userId.equals(question.getCreateUserId()) && !userResult.getData().getRoleId().equals(2)) {
-            throw new RuntimeException(denyMessage);
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
     }
 }

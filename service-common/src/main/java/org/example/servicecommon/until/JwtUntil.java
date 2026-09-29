@@ -4,6 +4,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
+import org.example.servicecommon.exception.InfraErrorCode;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +27,8 @@ public class JwtUntil {
 
     public JwtUntil(String secret, long expirationMillis) {
         if (secret == null || secret.isBlank()) {
-            throw new IllegalArgumentException("jwt.secret 未配置（建议经环境变量 JWT_SECRET 注入）");
+            throw new IllegalArgumentException(String.format(
+                    InfraErrorCode.CONFIG_MISSING.getMessage(), "jwt.secret（经环境变量 JWT_SECRET 注入）"));
         }
         this.secret = secret;
         this.expirationMillis = expirationMillis;

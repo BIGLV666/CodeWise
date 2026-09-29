@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
@@ -16,6 +18,7 @@ import org.example.servicequestion.entry.FunctionConfig;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.enums.QuestionType;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.FunctionConfigMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
@@ -24,6 +27,7 @@ import org.example.servicequestion.vo.QuestionVo;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,8 +79,7 @@ public class QuestionService {
                 } catch (Exception e) {
 
                     log.error("获取总数失败{}",e.getMessage());
-                    //throw new RuntimeException(e);
-                    throw new IllegalStateException("获取题目总数失败，请稍后重试");
+                    throw new BizException(QuestionErrorCode.QUESTION_TOTAL_QUERY_FAILED, e);
                 } finally {
                     lock.unlock();
                 }
@@ -91,7 +94,7 @@ public class QuestionService {
     public Question addQuestion(InsertQuestionDto insertQuestionDto) {
         Long userId= UserContext.getUserId();
         if(userId==null){
-            throw new RuntimeException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         String LockKey=LOCK_ADD_QUESTION+userId;
         RLock lock=redissonClient.getLock(LockKey);
@@ -99,7 +102,7 @@ public class QuestionService {
 
             boolean locked = lock.tryLock(3, 10, TimeUnit.SECONDS);
             if(!locked){
-                throw new RuntimeException("请勿频繁操作");
+                throw new BizException(CommonErrorCode.RATE_LIMITED);
             }
             Question question = new Question(insertQuestionDto);
             question.setStatus(3);
@@ -112,9 +115,15 @@ public class QuestionService {
             if (insert > 0) {
                 return question;
             }
-            throw new RuntimeException("添加失败");
+            throw new BizException(QuestionErrorCode.QUESTION_SAVE_FAILED);
+        } catch (BizException e) {
+            throw e;
+        } catch (DuplicateKeyException e) {
+            // contentHash 唯一约束冲突：同一题目重复创建，原始 SQL 只进日志
+            log.warn("重复创建题目, userId={}", userId, e);
+            throw new BizException(CommonErrorCode.DUPLICATE_RESOURCE, e);
         } catch (Exception e) {
-            throw new RuntimeException(e.getMessage());
+            throw new BizException(CommonErrorCode.INTERNAL_ERROR, e);
         }finally {
             if(lock.isHeldByCurrentThread()){
                 lock.unlock();
@@ -126,7 +135,7 @@ public class QuestionService {
     public QuestionVo getQuestionById(Long questionId) {
         Question question = questionMapper.selectById(questionId);
         if(question==null){
-            throw new RuntimeException("题目不存在");
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
 
 
@@ -134,20 +143,21 @@ public class QuestionService {
         if(question.getStatus().equals(3)){
             Result<UserDto>userDtoResult=userFeignClient.getUserInfo(UserContext.getUserId());
             if(userDtoResult.getCode()!=200){
-                throw new RuntimeException(userDtoResult.getMessage());
+                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
             }
             if(userDtoResult.getData()==null){
-                throw new RuntimeException("未找到用户");
+                throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
             }
             if(!UserContext.getUserId().equals(question.getCreateUserId())&&!userDtoResult.getData().getRoleId().equals(2)){
-                throw new RuntimeException("无权查看该题目");
+                // 私密题仅创建者与管理员可见
+                throw new BizException(CommonErrorCode.CONTENT_RESTRICTED);
             }
         }
         if(question.getStatus().equals(0)){
-            throw new RuntimeException("题目已下架");
+            throw new BizException(QuestionErrorCode.QUESTION_OFF_SHELF);
         }
         if(question.getStatus().equals(2)){
-            throw new RuntimeException("题目审核中");
+            throw new BizException(QuestionErrorCode.QUESTION_UNDER_REVIEW);
         }
 
 
@@ -178,15 +188,15 @@ public class QuestionService {
      */
     public List<AgentQuestionDetailVo> getQuestionDetailsBatch(List<Long> inputIds) {
         if(UserContext.getUserId()==null){
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         List<Long> distinct = inputIds == null ? Collections.emptyList()
                 : inputIds.stream().filter(Objects::nonNull).distinct().toList();
         if(distinct.isEmpty()){
-            throw new IllegalArgumentException("题目 ID 列表不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_LIST_REQUIRED);
         }
         if(distinct.size() > AGENT_DETAIL_BATCH_MAX){
-            throw new IllegalArgumentException("单次最多查询 " + AGENT_DETAIL_BATCH_MAX + " 道题目详情");
+            throw new BizException(QuestionErrorCode.QUESTION_BATCH_LIMIT_EXCEEDED, AGENT_DETAIL_BATCH_MAX);
         }
         Map<Long, Question> questions = new HashMap<>();
         for(Question question : questionMapper.selectList(new LambdaQueryWrapper<Question>()
@@ -202,8 +212,11 @@ public class QuestionService {
         boolean isAdmin = false;
         if(needRoleCheck){
             Result<UserDto> userDtoResult = userFeignClient.getUserInfo(userId);
-            if(userDtoResult.getCode()!=200 || userDtoResult.getData()==null){
-                throw new RuntimeException(userDtoResult.getCode()!=200 ? userDtoResult.getMessage() : "未找到用户");
+            if(userDtoResult.getCode()!=200){
+                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+            }
+            if(userDtoResult.getData()==null){
+                throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
             }
             isAdmin = Integer.valueOf(2).equals(userDtoResult.getData().getRoleId());
         }
@@ -239,14 +252,14 @@ public class QuestionService {
     public Question updateQuestion(InsertQuestionDto insertQuestionDto,Long questionId) {
         Result<UserDto> userDto=userFeignClient.getUserInfo(UserContext.getUserId());
         if(Objects.isNull(userDto)){
-            throw new RuntimeException("用户不存在");
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         Question updatequestion= questionMapper.selectById(questionId);
         if(Objects.isNull(updatequestion)){
-            throw new RuntimeException("未找到该题目");
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
         if(!updatequestion.getCreateUserId().equals(UserContext.getUserId())&&!userDto.getData().getRoleId().equals(2)){
-            throw new RuntimeException("无权修改");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         updatequestion.setTitle(insertQuestionDto.getTitle());
         updatequestion.setDescription(insertQuestionDto.getDescription());
@@ -264,22 +277,29 @@ public class QuestionService {
         if (update > 0) {
             return updatequestion;
         }
-        throw new RuntimeException("更新失败");
+        throw new BizException(QuestionErrorCode.QUESTION_UPDATE_FAILED);
     }
 
     @Transactional
     public void deleteQuestion(Long questionId) {
         Result<UserDto> userDto= userFeignClient.getUserInfo(UserContext.getUserId());
         if(userDto.getCode()!=200){
-            throw new RuntimeException(userDto.getMessage());
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
-        if(!Objects.equals(userDto.getData().getUserId(), UserContext.getUserId().toString())&&!userDto.getData().getRoleId().equals(2)){
-                throw  new RuntimeException("无资格删除非己题目");
+        if(userDto.getData()==null){
+            throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
+        }
+        Question question= questionMapper.selectById(questionId);
+        if(Objects.isNull(question)){
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
+        }
+        if(!Objects.equals(question.getCreateUserId(), UserContext.getUserId())&&!userDto.getData().getRoleId().equals(2)){
+                throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
 
         int delete = questionMapper.deleteById(questionId);
         if (delete <= 0) {
-            throw new RuntimeException("删除失败");
+            throw new BizException(QuestionErrorCode.QUESTION_DELETE_FAILED);
         }
     }
 

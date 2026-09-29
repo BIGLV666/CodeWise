@@ -1,5 +1,7 @@
 package org.example.servicemessage.email.emailService;
 
+import org.example.servicemessage.exception.MessageErrorCode;
+import org.example.serviceapi.exception.BizException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import jakarta.mail.MessagingException;
@@ -100,7 +102,7 @@ public class EmailService implements MessageHandler {
     private void sendMail(EmailMessage message) throws MessagingException {
         if (mailSender == null) {
             // SMTP 未配置：按文档承诺降级为不可用，而非启动失败；异常走调用方的失败留存链路
-            throw new IllegalStateException("SMTP 未配置（spring.mail.host 缺失），邮件发送不可用");
+            throw new BizException(MessageErrorCode.MAIL_NOT_CONFIGURED);
         }
         log.info("收到邮件任务，收件人: {}", message.getTo());
         MimeMessage mail = mailSender.createMimeMessage();

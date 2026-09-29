@@ -1,6 +1,7 @@
 package org.example.serviceapi.dto;
 
 import lombok.Data;
+import org.example.serviceapi.exception.ErrorCode;
 
 @Data
 public class Result<T> {
@@ -37,6 +38,21 @@ public class Result<T> {
         Result<T>result=new Result<>();
         result.setMessage(message);
         result.setCode(400);
+        return result;
+    }
+
+    /** 业务错误：HTTP 仍为 200，由 code 表达失败类型（见 CommonErrorCode 编码规则）。 */
+    public static <T>Result<T> error(ErrorCode errorCode){
+        Result<T>result=new Result<>();
+        result.setCode(errorCode.getCode());
+        result.setMessage(errorCode.getMessage());
+        return result;
+    }
+
+    public static <T>Result<T> error(ErrorCode errorCode, Object... args){
+        Result<T>result=new Result<>();
+        result.setCode(errorCode.getCode());
+        result.setMessage(String.format(errorCode.getMessage(), args));
         return result;
     }
 }

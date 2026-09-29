@@ -7,6 +7,7 @@ import org.example.serviceai.entry.Message;
 import org.example.serviceai.entry.MessageStatus;
 import org.example.serviceai.service.AIService;
 import org.example.serviceai.service.UserAiService;
+import org.example.serviceapi.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -246,30 +247,30 @@ class AdviceConversationServiceTest {
     }
 
     @Test
-    void askThrowsIllegalStateWhenConversationMissing() {
+    void askThrowsBizExceptionWhenConversationMissing() {
         when(aiConversationRepository.get(1L)).thenReturn(null);
 
-        assertThrows(IllegalStateException.class,
+        assertThrows(BizException.class,
                 () -> service.ask(10L, 1L, "why", "code", Role.USER));
     }
 
     @Test
-    void askThrowsIllegalStateForForeignConversation() {
-        assertThrows(IllegalStateException.class,
+    void askThrowsBizExceptionForForeignConversation() {
+        assertThrows(BizException.class,
                 () -> service.ask(99L, 1L, "why", "code", Role.USER));
     }
 
     @Test
-    void askStreamThrowsIllegalStateWhenConversationMissing() {
+    void askStreamThrowsBizExceptionWhenConversationMissing() {
         when(aiConversationRepository.get(1L)).thenReturn(null);
 
-        assertThrows(IllegalStateException.class, () -> service.askStream(
+        assertThrows(BizException.class, () -> service.askStream(
                 10L, 1L, "why", "code", Role.USER, null, null, chunk -> { }));
     }
 
     @Test
-    void askStreamThrowsIllegalStateForForeignConversation() {
-        assertThrows(IllegalStateException.class, () -> service.askStream(
+    void askStreamThrowsBizExceptionForForeignConversation() {
+        assertThrows(BizException.class, () -> service.askStream(
                 99L, 1L, "why", "code", Role.USER, null, null, chunk -> { }));
     }
 
@@ -293,10 +294,10 @@ class AdviceConversationServiceTest {
     }
 
     @Test
-    void askReuseThrowsIllegalStateWhenRowMissing() {
+    void askReuseThrowsBizExceptionWhenRowMissing() {
         when(aiConversationRepository.getMessage(77L)).thenReturn(null);
 
-        assertThrows(IllegalStateException.class,
+        assertThrows(BizException.class,
                 () -> service.ask(10L, 1L, "why", "code", Role.SYSTEM, 77L));
     }
 

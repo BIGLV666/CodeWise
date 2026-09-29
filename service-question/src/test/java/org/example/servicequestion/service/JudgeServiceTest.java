@@ -1,11 +1,13 @@
 package org.example.servicequestion.service;
 
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
 import org.example.servicequestion.entry.SubmitRecord;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -93,9 +95,9 @@ class JudgeServiceTest {
         getCodeDto.setLanguage("Python");
         getCodeDto.setQuestionId(5L);
 
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+        BizException exception = assertThrows(BizException.class,
                 () -> judgeService.judge(getCodeDto));
-        assertEquals("提交场景不能为空", exception.getMessage());
+        assertEquals(QuestionErrorCode.SUBMIT_SCENE_REQUIRED.getCode(), exception.getCode());
         verifyNoInteractions(submitRecordMapper);
     }
 

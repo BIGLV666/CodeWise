@@ -2,13 +2,17 @@ package org.example.servicequestion.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateRequest;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateResponse;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.AiArtifactFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.FunctionDto;
 import org.example.servicequestion.dto.FunctionTestCaseDto;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.vo.FunctionParseVo;
 import org.example.servicequestion.vo.LeetCodeArtifactTaskVo;
 import org.springframework.beans.BeanUtils;
@@ -29,6 +33,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Service
 public class LeetCodeArtifactImportService {
     private final Map<String, LeetCodeArtifactTaskVo> tasks = new ConcurrentHashMap<>();
@@ -72,7 +77,7 @@ public class LeetCodeArtifactImportService {
         Long userId = UserContext.getUserId();
         permissionService.requireAdmin(userId);
         if (titleSlug == null || titleSlug.isBlank()) {
-            throw new IllegalArgumentException("titleSlug 不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_URL_REQUIRED);
         }
 
         String taskId = UUID.randomUUID().toString();
@@ -93,7 +98,7 @@ public class LeetCodeArtifactImportService {
             Files.createDirectories(taskDirectory);
             writeStatus(taskDirectory, task);
         } catch (IOException exception) {
-            throw new IllegalStateException("生成任务目录创建失败", exception);
+            throw new BizException(QuestionErrorCode.ARTIFACT_WORKSPACE_FAILED, exception);
         }
         taskExecutor.execute(() -> execute(taskId, titleSlug.trim()));
         return task;
@@ -186,7 +191,10 @@ public class LeetCodeArtifactImportService {
                 request
         );
         if (response == null || response.getCode() != 200 || response.getData() == null) {
-            throw new IllegalStateException(response == null ? "AI 服务无响应" : response.getMessage());
+            // 下游原始报错只进日志，不透传文案
+            String downstream = response == null ? "null" : response.getMessage();
+            log.warn("函数产物生成下游失败: {}", downstream);
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         return response.getData();
     }
@@ -199,7 +207,7 @@ public class LeetCodeArtifactImportService {
         List<FunctionTestCaseDto> result = new ArrayList<>(validatedCases.size());
         for (InternalJavaArtifactJudge.ValidatedCase validatedCase : validatedCases) {
             if (validatedCase.input().size() != parameters.size()) {
-                throw new IllegalStateException("AI 生成的输入参数数量与函数签名不一致");
+                throw new BizException(QuestionErrorCode.ARTIFACT_DATA_INVALID);
             }
             List<String> values = new ArrayList<>(parameters.size());
             for (int index = 0; index < parameters.size(); index++) {
@@ -229,7 +237,7 @@ public class LeetCodeArtifactImportService {
         try {
             return objectMapper.readTree(value);
         } catch (IOException exception) {
-            throw new IllegalArgumentException("函数参数配置格式错误", exception);
+            throw new BizException(QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID, exception);
         }
     }
 
@@ -304,16 +312,16 @@ public class LeetCodeArtifactImportService {
 
     private LeetCodeArtifactTaskVo loadTaskFromFile(String taskId) {
         if (taskId == null || !taskId.matches("[0-9a-fA-F-]{36}")) {
-            throw new IllegalArgumentException("任务 ID 格式错误");
+            throw new BizException(QuestionErrorCode.TASK_ID_INVALID);
         }
         Path statusPath = artifactRoot.resolve(taskId).normalize().resolve("status.json");
         if (!statusPath.startsWith(artifactRoot) || !Files.isRegularFile(statusPath)) {
-            throw new IllegalArgumentException("任务不存在");
+            throw new BizException(QuestionErrorCode.GENERATION_TASK_NOT_FOUND);
         }
         try {
             return objectMapper.readValue(statusPath.toFile(), LeetCodeArtifactTaskVo.class);
         } catch (IOException exception) {
-            throw new IllegalStateException("任务状态读取失败", exception);
+            throw new BizException(QuestionErrorCode.ARTIFACT_STATUS_READ_FAILED, exception);
         }
     }
 

@@ -4,7 +4,9 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.config.NikoApiGpt;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -61,11 +63,11 @@ public class NikoApiGptService implements CallAi {
             int responseLength = readStream(connection, "Niko API", onChunk);
             log.info("Niko API stream completed, responseLength={}", responseLength);
         } catch (AiProviderHttpException exception) {
-            log.warn("Niko API request rejected: {}", exception.getMessage());
+            log.warn("Niko API request rejected: {}", exception.getDiagnostic());
             throw exception;
         } catch (Exception exception) {
             log.error("Niko API stream failed: {}", exception.getMessage(), exception);
-            throw new RuntimeException("Niko API 流式调用失败", exception);
+            throw new BizException(AiErrorCode.PROVIDER_CALL_FAILED, exception);
         } finally {
             if (connection != null) {
                 connection.disconnect();

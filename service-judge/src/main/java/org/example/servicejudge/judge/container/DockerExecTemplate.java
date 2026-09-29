@@ -8,6 +8,8 @@ import com.github.dockerjava.api.model.HostConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.example.serviceapi.exception.BizException;
+import org.example.servicejudge.exception.JudgeErrorCode;
 import org.example.servicejudge.judge.LanguageSpec;
 import org.springframework.stereotype.Component;
 
@@ -162,7 +164,9 @@ public class DockerExecTemplate {
                             Files.copy(file, tos);
                             tos.closeArchiveEntry();
                         } catch (IOException e) {
-                            throw new RuntimeException(e);
+                            // 工作区打包失败属于判题执行环境故障：原始 IO 细节只进日志（cause），
+                            // 上抛仍是 RuntimeException，调用方的重试/降级控制流不变
+                            throw new BizException(JudgeErrorCode.JUDGE_EXECUTION_FAILED, e);
                         }
                     });
             tos.finish();

@@ -8,9 +8,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.dto.UserAiConfigDto;
 import org.example.serviceai.entry.UserAiConfig;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.mapper.UserAiConfigMapper;
 import org.example.serviceai.vo.HomeUserConfigVo;
 import org.example.serviceai.vo.UserAiConfigVo;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -66,12 +69,12 @@ public class UserAiService {
             String modelName
     ) {
         if (userId == null) {
-            throw new SecurityException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         UserAiConfig config = requireOwnedConfig(configId, userId);
         String selectedModel = normalizeModelName(modelName);
         if (config.getModelNames() == null || !config.getModelNames().contains(selectedModel)) {
-            throw new IllegalArgumentException("所选模型不属于该配置");
+            throw new BizException(AiErrorCode.MODEL_NOT_IN_CONFIG);
         }
 
         HttpURLConnection connection = null;
@@ -92,12 +95,15 @@ public class UserAiService {
                     configId, selectedModel, responseLength);
         } catch (AiProviderHttpException exception) {
             log.warn("Custom AI request rejected, configId={}, model={}, error={}",
-                    configId, selectedModel, exception.getMessage());
+                    configId, selectedModel, exception.getDiagnostic());
+            throw exception;
+        } catch (BizException exception) {
+            // 已是分类后的业务异常：原样上抛，避免被兜底分支重包成通用失败
             throw exception;
         } catch (Exception exception) {
             log.error("Custom AI stream failed, configId={}, model={}",
                     configId, selectedModel, exception);
-            throw new IllegalStateException("自定义 AI 服务调用失败: " + exception.getMessage(), exception);
+            throw new BizException(AiErrorCode.MODEL_UNRESPONSIVE, exception);
         } finally {
             if (connection != null) {
                 connection.disconnect();
@@ -124,10 +130,10 @@ public class UserAiService {
                 .build();
         try {
             if (userAiConfigMapper.insert(config) != 1) {
-                throw new IllegalStateException("自定义 AI 配置保存失败");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
         } catch (DuplicateKeyException exception) {
-            throw new IllegalArgumentException("分组名称已存在", exception);
+            throw new BizException(AiErrorCode.GROUP_NAME_DUPLICATED, exception);
         }
         return toDetailVo(config);
     }
@@ -146,10 +152,10 @@ public class UserAiService {
         config.setUpdateTime(LocalDateTime.now());
         try {
             if (userAiConfigMapper.updateById(config) != 1) {
-                throw new IllegalStateException("自定义 AI 配置更新失败");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
         } catch (DuplicateKeyException exception) {
-            throw new IllegalArgumentException("分组名称已存在", exception);
+            throw new BizException(AiErrorCode.GROUP_NAME_DUPLICATED, exception);
         }
         return toDetailVo(config);
     }
@@ -162,7 +168,7 @@ public class UserAiService {
                         .eq(UserAiConfig::getUserId, userId)
         );
         if (deleted != 1) {
-            throw new IllegalArgumentException("配置不存在或无权删除");
+            throw new BizException(AiErrorCode.CONFIG_NOT_ACCESSIBLE);
         }
     }
 
@@ -196,16 +202,16 @@ public class UserAiService {
             if (response.statusCode() >= 300 && response.statusCode() < 400) {
                 validateRedirect(normalizedBaseUrl + "/models",
                         response.headers().firstValue("Location").orElse(null));
-                throw new IllegalStateException("模型列表请求不允许重定向");
+                throw new BizException(AiErrorCode.AI_URL_INVALID);
             }
             if (response.statusCode() == 401 || response.statusCode() == 403) {
-                throw new IllegalArgumentException("API Key 无效或没有读取模型列表的权限");
+                throw new BizException(AiErrorCode.PROVIDER_KEY_INVALID);
             }
             if (response.statusCode() == 429) {
-                throw new IllegalStateException("AI 服务请求过于频繁，请稍后重试");
+                throw new BizException(AiErrorCode.PROVIDER_QUOTA_EXCEEDED);
             }
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("获取模型列表失败，HTTP " + response.statusCode());
+                throw new BizException(AiErrorCode.FETCH_MODELS_FAILED);
             }
 
             JsonNode data = objectMapper.readTree(response.body()).path("data");
@@ -219,13 +225,14 @@ public class UserAiService {
                 }
             }
             if (models.isEmpty()) {
-                throw new IllegalStateException("AI 服务未返回可用模型");
+                throw new BizException(AiErrorCode.NO_AVAILABLE_MODEL);
             }
             return models.stream().distinct().limit(MAX_MODELS).toList();
-        } catch (IllegalArgumentException | IllegalStateException exception) {
+        } catch (BizException exception) {
+            // 已分类的业务异常原样透出，避免被下面的兜底分支重包
             throw exception;
         } catch (Exception exception) {
-            throw new IllegalStateException("获取模型列表失败: " + exception.getMessage(), exception);
+            throw new BizException(AiErrorCode.FETCH_MODELS_FAILED, exception);
         }
     }
 
@@ -279,11 +286,11 @@ public class UserAiService {
         try {
             statusCode = connection.getResponseCode();
         } catch (Exception exception) {
-            throw new IllegalStateException("无法读取 AI 服务响应状态", exception);
+            throw new BizException(AiErrorCode.PROVIDER_CALL_FAILED, exception);
         }
         if (statusCode >= 300 && statusCode < 400) {
             validateRedirect(sourceUrl, connection.getHeaderField("Location"));
-            throw new IllegalStateException("自定义 AI 请求不允许重定向");
+            throw new BizException(AiErrorCode.AI_URL_INVALID);
         }
     }
 
@@ -311,7 +318,7 @@ public class UserAiService {
 
     private UserAiConfig requireOwnedConfig(Long configId, Long userId) {
         if (configId == null) {
-            throw new IllegalArgumentException("自定义 AI 配置 ID 不能为空");
+            throw new BizException(AiErrorCode.CONFIG_ID_REQUIRED);
         }
         UserAiConfig config = userAiConfigMapper.selectOne(
                 new LambdaQueryWrapper<UserAiConfig>()
@@ -320,7 +327,7 @@ public class UserAiService {
                         .last("LIMIT 1")
         );
         if (config == null) {
-            throw new SecurityException("配置不存在或无权访问");
+            throw new BizException(AiErrorCode.CONFIG_NOT_ACCESSIBLE);
         }
         return config;
     }
@@ -328,20 +335,20 @@ public class UserAiService {
     private Long requireUserId() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new SecurityException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         return userId;
     }
 
     private void validateConfig(UserAiConfigDto dto, boolean requireApiKey) {
         if (dto == null) {
-            throw new IllegalArgumentException("配置不能为空");
+            throw new BizException(AiErrorCode.CONFIG_CONTENT_REQUIRED);
         }
         if (dto.getGroupName() == null || dto.getGroupName().isBlank()) {
-            throw new IllegalArgumentException("分组名称不能为空");
+            throw new BizException(AiErrorCode.GROUP_NAME_REQUIRED);
         }
         if (dto.getGroupName().trim().length() > 64) {
-            throw new IllegalArgumentException("分组名称不能超过 64 个字符");
+            throw new BizException(AiErrorCode.GROUP_NAME_TOO_LONG, 64);
         }
         normalizeModels(dto.getModelNames());
         normalizeBaseUrl(dto.getAiUrl());
@@ -352,16 +359,16 @@ public class UserAiService {
 
     private void validateApiKey(String apiKey) {
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalArgumentException("API Key 不能为空");
+            throw new BizException(AiErrorCode.API_KEY_REQUIRED);
         }
         if (apiKey.trim().length() > MAX_API_KEY_LENGTH) {
-            throw new IllegalArgumentException("API Key 长度超过限制");
+            throw new BizException(AiErrorCode.API_KEY_TOO_LONG);
         }
     }
 
     private List<String> normalizeModels(List<String> modelNames) {
         if (modelNames == null || modelNames.isEmpty()) {
-            throw new IllegalArgumentException("至少选择一个模型");
+            throw new BizException(AiErrorCode.MODEL_AT_LEAST_ONE);
         }
         List<String> models = modelNames.stream()
                 .filter(model -> model != null && !model.isBlank())
@@ -369,35 +376,35 @@ public class UserAiService {
                 .distinct()
                 .toList();
         if (models.isEmpty()) {
-            throw new IllegalArgumentException("至少选择一个模型");
+            throw new BizException(AiErrorCode.MODEL_AT_LEAST_ONE);
         }
         if (models.size() > MAX_MODELS) {
-            throw new IllegalArgumentException("模型数量不能超过 " + MAX_MODELS);
+            throw new BizException(AiErrorCode.MODEL_TOO_MANY, MAX_MODELS);
         }
         return models;
     }
 
     private String normalizeModelName(String modelName) {
         if (modelName == null || modelName.isBlank()) {
-            throw new IllegalArgumentException("模型名称不能为空");
+            throw new BizException(AiErrorCode.MODEL_NAME_REQUIRED);
         }
         return modelName.trim();
     }
 
     private String normalizeBaseUrl(String baseUrl) {
         if (baseUrl == null || baseUrl.isBlank()) {
-            throw new IllegalArgumentException("API 地址不能为空");
+            throw new BizException(AiErrorCode.AI_URL_REQUIRED);
         }
         try {
             URI uri = URI.create(baseUrl.trim());
             if (!"https".equalsIgnoreCase(uri.getScheme())) {
-                throw new IllegalArgumentException("自定义 AI 地址必须使用 HTTPS");
+                throw new BizException(AiErrorCode.AI_URL_HTTPS_REQUIRED);
             }
             if (uri.getUserInfo() != null || uri.getHost() == null) {
-                throw new IllegalArgumentException("API 地址格式不正确");
+                throw new BizException(AiErrorCode.AI_URL_INVALID);
             }
             if (uri.getQuery() != null || uri.getFragment() != null) {
-                throw new IllegalArgumentException("API 地址不能包含查询参数或片段");
+                throw new BizException(AiErrorCode.AI_URL_NO_QUERY);
             }
             validateResolvedHost(uri.getHost());
             String normalized = uri.toString();
@@ -411,10 +418,13 @@ public class UserAiService {
                 );
             }
             return normalized;
-        } catch (IllegalArgumentException exception) {
+        } catch (BizException exception) {
+            // 已分类的地址错误原样透出
             throw exception;
+        } catch (IllegalArgumentException exception) {
+            throw new BizException(AiErrorCode.AI_URL_INVALID, exception);
         } catch (Exception exception) {
-            throw new IllegalArgumentException("API 地址无法解析", exception);
+            throw new BizException(AiErrorCode.AI_URL_INVALID, exception);
         }
     }
 
@@ -427,21 +437,21 @@ public class UserAiService {
         try {
             uri = URI.create(endpoint);
         } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("API 地址格式不正确", exception);
+            throw new BizException(AiErrorCode.AI_URL_INVALID, exception);
         }
         if (!"https".equalsIgnoreCase(uri.getScheme())
                 || uri.getHost() == null
                 || uri.getUserInfo() != null
                 || uri.getQuery() != null
                 || uri.getFragment() != null) {
-            throw new IllegalArgumentException("自定义 AI 地址必须是无查询参数的 HTTPS 地址");
+            throw new BizException(AiErrorCode.AI_URL_INVALID);
         }
         validateResolvedHost(uri.getHost());
     }
 
     private void validateRedirect(String sourceUrl, String location) {
         if (location == null || location.isBlank()) {
-            throw new IllegalStateException("AI 服务返回了无效重定向");
+            throw new BizException(AiErrorCode.AI_URL_INVALID);
         }
         URI source = URI.create(sourceUrl);
         URI target = source.resolve(location);
@@ -452,17 +462,17 @@ public class UserAiService {
         try {
             InetAddress[] addresses = InetAddress.getAllByName(host);
             if (addresses.length == 0) {
-                throw new IllegalArgumentException("API 地址无法解析");
+                throw new BizException(AiErrorCode.AI_URL_UNRESOLVED);
             }
             for (InetAddress address : addresses) {
                 if (isBlockedAddress(address)) {
-                    throw new IllegalArgumentException("不允许访问本机或内网 AI 地址");
+                    throw new BizException(AiErrorCode.AI_URL_INTERNAL_FORBIDDEN);
                 }
             }
-        } catch (IllegalArgumentException exception) {
+        } catch (BizException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new IllegalArgumentException("API 地址无法解析", exception);
+            throw new BizException(AiErrorCode.AI_URL_UNRESOLVED, exception);
         }
     }
 

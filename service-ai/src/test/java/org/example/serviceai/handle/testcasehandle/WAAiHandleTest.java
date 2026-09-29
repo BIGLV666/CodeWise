@@ -8,11 +8,13 @@ import org.example.serviceai.entry.ConsumedEvent;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.MessageStatus;
 import org.example.serviceai.entry.Message;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.service.AIService;
 import org.example.serviceai.service.ConsumedEventService;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.serviceapi.dto.judge.JudgeContextDto;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicecommon.config.MqContexts;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -186,7 +189,10 @@ class WAAiHandleTest {
     void missingJudgeRecordIdIsPoisonMessage() {
         String body = "{\"userId\":10,\"questionId\":20}";
 
-        assertThrows(IllegalArgumentException.class, () -> handler.handle(body, amqpMessageOf(body)));
+        BizException exception = assertThrows(BizException.class,
+                () -> handler.handle(body, amqpMessageOf(body)));
+        // 毒消息码：分发器据此直接死信，不重试
+        assertEquals(AiErrorCode.ADVICE_PAYLOAD_INVALID, exception.getErrorCode());
         verifyNoInteractions(questionFeignClient, aiService, rabbitTemplate);
     }
 
@@ -335,7 +341,9 @@ class WAAiHandleTest {
         // 裸格式缺 messageId：无幂等键可用，按毒消息死信（不 claim）
         String body = "{\"userId\":10,\"judgeRecordId\":30}";
 
-        assertThrows(IllegalArgumentException.class, () -> handler.handle(body, amqpMessageOf(body)));
+        BizException exception = assertThrows(BizException.class,
+                () -> handler.handle(body, amqpMessageOf(body)));
+        assertEquals(AiErrorCode.ADVICE_PAYLOAD_INVALID, exception.getErrorCode());
         verify(consumedEventService, never()).claim(anyString(), anyString());
     }
 

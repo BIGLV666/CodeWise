@@ -5,10 +5,13 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.PostDto;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
@@ -60,10 +63,10 @@ public class PostService {
     @Transactional
     public Post createPost(PostDto postDto, String uuid) {
         if (postDto.getPostTitle() == null || postDto.getPostContent() == null) {
-            throw new IllegalArgumentException("post title and content can not be null");
+            throw new BizException(CommunityErrorCode.POST_TITLE_CONTENT_EMPTY);
         }
         if (postDto.getPostTitle().length() > 200) {
-            throw new IllegalArgumentException("post title is too long");
+            throw new BizException(CommunityErrorCode.POST_TITLE_TOO_LONG, 200);
         }
         if (Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(RedisContext.REQUEST_ID_KEY + uuid, "pending", 3, TimeUnit.MINUTES))) {
             log.info("duplicate post request");
@@ -84,7 +87,7 @@ public class PostService {
                 .build();
         int r1 = postMapper.insert(post);
         if (r1 == 0) {
-            throw new IllegalArgumentException("create post failed");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
 
         List<Tags> tags = new ArrayList<>();
@@ -99,7 +102,7 @@ public class PostService {
             int r2 = tagsMapper.batchInsert(tags);
             if (r2 == 0) {
                 log.info("add post tags failed");
-                throw new IllegalArgumentException("create post failed");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
         }
         // 待审核帖子不进热榜，审核通过时再入榜（见 PostCheckService#checkPost）
@@ -171,7 +174,7 @@ public class PostService {
     public PostVo getPostById(Long postId) {
         Post post = (Post) redisTemplate.opsForHash().get(RedisContext.POST_KEY,postId.toString());
         if(post != null) {
-            post.setLikeCount(Long.parseLong(redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId)==null? String.valueOf(0L) : redisTemplate.opsForHash().get(RedisContext.LIKE_COMMENT_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId).toString())+post.getLikeCount());
+            post.setLikeCount(Long.parseLong(redisTemplate.opsForHash().get(RedisContext.LIKE_POST_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId)==null? String.valueOf(0L) : redisTemplate.opsForHash().get(RedisContext.LIKE_POST_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId).toString())+post.getLikeCount());
             Long r= likeRecordMapper.selectCount(new QueryWrapper<LikeRecord>().eq("user_id",UserContext.getUserId()).eq("post_id",post.getPostId()).eq("type","POST"));
             PostVo postvo = new PostVo(post);
             postvo.setIsLike(r != 0);
@@ -181,11 +184,12 @@ public class PostService {
         wrapper.eq(Post::getPostId, postId);
         post = postMapper.selectOne(wrapper);
         if (post == null) {
-            throw new IllegalArgumentException("post not found");
+            throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
         }
         if (!PostStatus.isVisible(post.getStatus())
                 && !Objects.equals(post.getUserId(), UserContext.getUserId())) {
-            throw new IllegalArgumentException("post not found");
+            // 非作者不可见：按不存在处理，不泄漏隐藏内容的存在性
+            throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
         }
 
         List<Tags> tags = tagsMapper.selectList(new LambdaQueryWrapper<Tags>()
@@ -247,7 +251,7 @@ public class PostService {
     }
 
     public List<HomePostVo> searchPostsByTitle(String keyword, Integer limit) {
-        String normalizedKeyword = validateSearchValue(keyword, "keyword");
+        String normalizedKeyword = validateSearchValue(keyword);
         List<Post> posts = postMapper.selectList(new LambdaQueryWrapper<Post>()
                 .eq(Post::getStatus, 1)
                 .like(Post::getPostTitle, normalizedKeyword)
@@ -257,7 +261,7 @@ public class PostService {
     }
 
     public List<HomePostVo> searchPostsByTag(String tag, Integer limit) {
-        String normalizedTag = validateSearchValue(tag, "tag");
+        String normalizedTag = validateSearchValue(tag);
         List<Tags> tags = tagsMapper.selectList(new LambdaQueryWrapper<Tags>()
                 .eq(Tags::getTagName, normalizedTag)
                 .eq(Tags::getType, PostType.POST)
@@ -274,13 +278,13 @@ public class PostService {
         return toHomePostVos(posts);
     }
 
-    private String validateSearchValue(String value, String fieldName) {
+    private String validateSearchValue(String value) {
         if (value == null || value.trim().isEmpty()) {
-            throw new IllegalArgumentException(fieldName + " can not be blank");
+            throw new BizException(CommunityErrorCode.SEARCH_VALUE_EMPTY);
         }
         String normalized = value.trim();
         if (normalized.length() > 50) {
-            throw new IllegalArgumentException(fieldName + " is too long");
+            throw new BizException(CommunityErrorCode.SEARCH_VALUE_TOO_LONG, 50);
         }
         return normalized;
     }
@@ -318,19 +322,19 @@ public class PostService {
     public PostVo updatePost(Long postId, PostVo postDto) {
         if (postDto == null || postDto.getPostTitle() == null || postDto.getPostTitle().trim().isEmpty()
                 || postDto.getPostContent() == null || postDto.getPostContent().trim().isEmpty()) {
-            throw new IllegalArgumentException("post title and content can not be blank");
+            throw new BizException(CommunityErrorCode.POST_TITLE_CONTENT_EMPTY);
         }
         String postTitle = postDto.getPostTitle().trim();
         if (postTitle.length() > 200) {
-            throw new IllegalArgumentException("post title is too long");
+            throw new BizException(CommunityErrorCode.POST_TITLE_TOO_LONG, 200);
         }
 
         Post post = postMapper.selectById(postId);
         if (post == null) {
-            throw new IllegalArgumentException("post not found");
+            throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
         }
         if (!post.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("no permission to update this post");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
 
         List<Tags> tags = new ArrayList<>();
@@ -341,7 +345,7 @@ public class PostService {
                 }
                 String normalizedTag = tagName.trim();
                 if (normalizedTag.length() >= 20) {
-                    throw new IllegalArgumentException("tag is too long");
+                    throw new BizException(CommunityErrorCode.TAG_TOO_LONG, 20);
                 }
                 boolean duplicated = tags.stream().anyMatch(tag -> tag.getTagName().equals(normalizedTag));
                 if (!duplicated) {
@@ -356,7 +360,7 @@ public class PostService {
         if (!tags.isEmpty()) {
             int r = tagsMapper.batchInsert(tags);
             if (r != tags.size()) {
-                throw new IllegalArgumentException("add post tags failed");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
         }
 
@@ -367,7 +371,7 @@ public class PostService {
         post.setUpdateTime(LocalDateTime.now());
         int r1 = postMapper.updateById(post);
         if (r1 == 0) {
-            throw new IllegalArgumentException("update post failed");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         redisTemplate.opsForHash().delete(RedisContext.POST_ID_KEY, post.getPostId().toString());
         redisTemplate.opsForHash().delete(RedisContext.POST_KEY, post.getPostId().toString(), post.getPostId().toString());
@@ -380,10 +384,10 @@ public class PostService {
     public void deletePostById(Long postId) {
         Post post = postMapper.selectById(postId);
         if (post == null) {
-            throw new IllegalArgumentException("post not found");
+            throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
         }
         if (!post.getUserId().equals(UserContext.getUserId())) {
-            throw new IllegalArgumentException("no permission to delete this post");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
 
         List<Comment> comments = commentMapper.selectList(new QueryWrapper<Comment>()
@@ -392,7 +396,7 @@ public class PostService {
         List<Long> commentIds = comments.stream().map(Comment::getCommentId).toList();
         int result = postMapper.deleteById(postId);
         if (result == 0) {
-            throw new IllegalArgumentException("delete post failed");
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
         redisTemplate.opsForZSet().remove(RedisContext.HOST_POST_KEY, postId.toString());
         redisTemplate.opsForHash().delete(RedisContext.POST_ID_KEY, postId.toString());

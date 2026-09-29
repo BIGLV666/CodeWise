@@ -2,8 +2,11 @@ package org.example.servicequestion.service;
 
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicequestion.entry.Question;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.springframework.stereotype.Service;
 
@@ -25,46 +28,46 @@ public class QuestionPermissionService {
 
     public Question requireOwnerOrAdmin(Long questionId, Long userId) {
         if (userId == null) {
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         if (questionId == null) {
-            throw new IllegalArgumentException("题目 ID 不能为空");
+            throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
         }
 
         Question question = questionMapper.selectById(questionId);
         if (question == null) {
-            throw new IllegalArgumentException("题目不存在");
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
 
         Result<UserDto> userResult = userFeignClient.getUserInfo(userId);
         UserDto user = userResult == null ? null : userResult.getData();
         if (userResult == null || userResult.getCode() != 200 || user == null) {
-            throw new IllegalStateException("用户信息校验失败");
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         if (!Integer.valueOf(1).equals(user.getStatus())) {
-            throw new IllegalStateException("当前账号不可用");
+            throw new BizException(QuestionErrorCode.ACCOUNT_UNAVAILABLE);
         }
         if (!userId.equals(question.getCreateUserId())
                 && !ADMIN_ROLE_ID.equals(user.getRoleId())) {
-            throw new SecurityException("仅题目创建者或管理员可以生成测试用例");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         return question;
     }
 
     public void requireAdmin(Long userId) {
         if (userId == null) {
-            throw new SecurityException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         Result<UserDto> userResult = userFeignClient.getUserInfo(userId);
         UserDto user = userResult == null ? null : userResult.getData();
         if (userResult == null || userResult.getCode() != 200 || user == null) {
-            throw new IllegalStateException("用户信息校验失败");
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         if (!Integer.valueOf(1).equals(user.getStatus())) {
-            throw new SecurityException("当前账号不可用");
+            throw new BizException(QuestionErrorCode.ACCOUNT_UNAVAILABLE);
         }
         if (!ADMIN_ROLE_ID.equals(user.getRoleId())) {
-            throw new SecurityException("仅管理员可以使用 AI 对拍入库功能");
+            throw new BizException(CommonErrorCode.ADMIN_ONLY);
         }
     }
 }

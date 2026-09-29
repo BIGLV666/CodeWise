@@ -5,7 +5,9 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.config.QwenConfig;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -97,7 +99,7 @@ public class QwenService implements CallAi {
 
         } catch (Exception e) {
             log.error("❌ Qwen 调用失败: {}", e.getMessage(), e);
-            throw new RuntimeException("Qwen 调用失败: " + e.getMessage(), e);
+            throw new BizException(AiErrorCode.PROVIDER_CALL_FAILED, e);
         }
     }
 

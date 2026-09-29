@@ -1,5 +1,7 @@
 package org.example.servicereview.handler;
 
+import org.example.serviceapi.exception.BizException;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.springframework.stereotype.Component;
 
 /**
@@ -25,10 +27,10 @@ public class MarkdownNoteContentHandler implements NoteContentHandler {
     @Override
     public void validate(String content) {
         if (content == null || content.isBlank()) {
-            throw new IllegalArgumentException("笔记内容不能为空");
+            throw new BizException(ReviewErrorCode.NOTE_CONTENT_EMPTY);
         }
         if (content.length() > MAX_CONTENT_LENGTH) {
-            throw new IllegalArgumentException("笔记内容过长，最多 " + MAX_CONTENT_LENGTH + " 字符");
+            throw new BizException(ReviewErrorCode.NOTE_CONTENT_TOO_LONG, MAX_CONTENT_LENGTH);
         }
     }
 

@@ -1,12 +1,15 @@
 package org.example.servicereview.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicereview.dto.NoteCreateDto;
 import org.example.servicereview.dto.NoteUpdateDto;
 import org.example.servicereview.entry.Note;
 import org.example.servicereview.entry.NoteFolder;
+import org.example.servicereview.exception.ReviewErrorCode;
 import org.example.servicereview.handler.NoteContentHandler;
 import org.example.servicereview.handler.NoteContentHandlerRegistry;
 import org.example.servicereview.mapper.NoteFolderMapper;
@@ -65,7 +68,7 @@ public class NoteService {
         boolean uncategorized = false;
         if (folderId != null) {
             if (folderId < 0) {
-                throw new IllegalArgumentException("文件夹 ID 不合法");
+                throw new BizException(ReviewErrorCode.NOTE_FOLDER_ID_INVALID);
             }
             if (folderId == 0L) {
                 uncategorized = true;
@@ -102,7 +105,7 @@ public class NoteService {
     public NoteDetailVo createNote(NoteCreateDto dto) {
         Long userId = requireLogin();
         if (dto == null || dto.getContent() == null || dto.getContent().isBlank()) {
-            throw new IllegalArgumentException("笔记内容不能为空");
+            throw new BizException(ReviewErrorCode.NOTE_CONTENT_EMPTY);
         }
         NoteContentHandler handler = registry.resolve(dto.getType());
         handler.validate(dto.getContent());
@@ -129,7 +132,7 @@ public class NoteService {
     public NoteDetailVo updateNote(Long noteId, NoteUpdateDto dto) {
         Note note = requireOwnedNote(noteId);
         if (dto == null) {
-            throw new IllegalArgumentException("未提供任何需要更新的字段");
+            throw new BizException(ReviewErrorCode.NO_UPDATE_FIELDS);
         }
         NoteContentHandler handler = registry.resolve(note.getContentType());
         boolean updated = false;
@@ -143,7 +146,7 @@ public class NoteService {
             updated = true;
         }
         if (!updated) {
-            throw new IllegalArgumentException("未提供任何需要更新的字段");
+            throw new BizException(ReviewErrorCode.NO_UPDATE_FIELDS);
         }
         note.setUpdateTime(LocalDateTime.now());
         noteMapper.updateById(note);
@@ -176,7 +179,7 @@ public class NoteService {
     private Long requireLogin() {
         Long userId = UserContext.getUserId();
         if (userId == null) {
-            throw new IllegalArgumentException("请登录后操作");
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         return userId;
     }
@@ -186,10 +189,10 @@ public class NoteService {
         Long userId = requireLogin();
         Note note = noteMapper.selectById(noteId);
         if (note == null) {
-            throw new IllegalArgumentException("笔记不存在");
+            throw new BizException(ReviewErrorCode.NOTE_NOT_FOUND);
         }
         if (!userId.equals(note.getUserId())) {
-            throw new IllegalArgumentException("无权操作该笔记");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         return note;
     }
@@ -198,7 +201,7 @@ public class NoteService {
     private void requireOwnedFolder(Long folderId) {
         NoteFolder folder = noteFolderMapper.selectById(folderId);
         if (folder == null || !UserContext.getUserId().equals(folder.getUserId())) {
-            throw new IllegalArgumentException("文件夹不存在或无权访问");
+            throw new BizException(ReviewErrorCode.NOTE_FOLDER_NOT_FOUND);
         }
     }
 
@@ -211,7 +214,7 @@ public class NoteService {
             return null;
         }
         if (folderId < 0) {
-            throw new IllegalArgumentException("文件夹 ID 不合法");
+            throw new BizException(ReviewErrorCode.NOTE_FOLDER_ID_INVALID);
         }
         requireOwnedFolder(folderId);
         return folderId;
@@ -232,7 +235,7 @@ public class NoteService {
         if (title != null && !title.trim().isEmpty()) {
             String trimmed = title.trim();
             if (trimmed.length() > 255) {
-                throw new IllegalArgumentException("笔记标题长度不能超过 255 字符");
+                throw new BizException(ReviewErrorCode.FIELD_TOO_LONG, "笔记标题", 255);
             }
             return trimmed;
         }
@@ -248,7 +251,7 @@ public class NoteService {
             return DEFAULT_PAGE_SIZE;
         }
         if (size <= 0) {
-            throw new IllegalArgumentException("分页大小必须为正整数");
+            throw new BizException(ReviewErrorCode.PAGE_SIZE_INVALID);
         }
         return Math.min(size, MAX_PAGE_SIZE);
     }
@@ -260,7 +263,7 @@ public class NoteService {
         }
         if (Boolean.FALSE.equals(redisTemplate.opsForValue().setIfAbsent(
                 RedisContext.REQUEST_ID_KEY + requestId, requestId, 3, TimeUnit.MINUTES))) {
-            throw new IllegalArgumentException("该" + subject + "已创建，请勿重复提交");
+            throw new BizException(ReviewErrorCode.RESOURCE_ALREADY_CREATED, subject);
         }
     }
 

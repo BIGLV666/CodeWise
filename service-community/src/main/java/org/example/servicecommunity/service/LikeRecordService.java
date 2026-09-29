@@ -9,12 +9,15 @@ import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.enums.BusinessType;
 import org.example.serviceapi.enums.NotificationCenterType;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.LikeTargetMetaDto;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.LikeRecord;
 import org.example.servicecommunity.entry.Post;
@@ -29,7 +32,9 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 
 import java.util.concurrent.CompletableFuture;
@@ -56,6 +61,11 @@ public class LikeRecordService {
     private SolutionMapper solutionMapper;
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    @Qualifier("communityLikeNotifyExecutor")
+    private ThreadPoolTaskExecutor likeNotifyExecutor;
+
     private final String LIKE="like";
     public boolean PostLike(Long postId){
         String key= "post-like--" + postId + "--" + UserContext.getUserId();
@@ -64,7 +74,7 @@ public class LikeRecordService {
         try{
             boolean tryLock = lock.tryLock(2, 10, TimeUnit.SECONDS);
             if (!tryLock){
-                throw new IllegalArgumentException("操作过于频繁请稍后重试");
+                throw new BizException(CommonErrorCode.RATE_LIMITED);
             }
             int r = likeRecordMapper.delete(new QueryWrapper<LikeRecord>().eq("post_id",postId).eq("user_id",UserContext.getUserId()).eq("type","POST"));
             if(r==0){
@@ -109,12 +119,10 @@ public class LikeRecordService {
                                 MqContexts.NOTIFICATION_LIKE_ROUTING_KEY,
                                 notificationDto
                         );
-                    }).exceptionally(exception -> {
+                    }, likeNotifyExecutor).exceptionally(exception -> {
                         log.error("点赞通知异步任务失败，type=POST，targetId={}", postId, exception);
                         return null;
                     });
-
-
 
                 return true;
             }else {
@@ -127,9 +135,12 @@ public class LikeRecordService {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("点赞操作被中断", e);
+            throw new BizException(CommunityErrorCode.OPERATION_INTERRUPTED, e);
         } catch (Exception e){
-            throw new IllegalArgumentException("修改失败");
+            if (e instanceof BizException) {
+                throw (BizException) e;
+            }
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED, e);
         }
         finally {
             if(lock.isHeldByCurrentThread()){
@@ -144,7 +155,7 @@ public class LikeRecordService {
         try{
             boolean tryLock = lock.tryLock(2, 10, TimeUnit.SECONDS);
             if (!tryLock){
-                throw new IllegalArgumentException("操作过于频繁请稍后重试");
+                throw new BizException(CommonErrorCode.RATE_LIMITED);
             }
             int r = likeRecordMapper.delete(new QueryWrapper<LikeRecord>().eq("post_id",postId).eq("user_id",UserContext.getUserId()).eq("type","COMMENT"));
             if(r==0){
@@ -184,7 +195,7 @@ public class LikeRecordService {
                             MqContexts.NOTIFICATION_LIKE_ROUTING_KEY,
                             notificationDto
                     );
-                }).exceptionally(exception -> {
+                }, likeNotifyExecutor).exceptionally(exception -> {
                     log.error("点赞通知异步任务失败，type=COMMENT，targetId={}", postId, exception);
                     return null;
                 });
@@ -198,7 +209,7 @@ public class LikeRecordService {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("点赞操作被中断", e);
+            throw new BizException(CommunityErrorCode.OPERATION_INTERRUPTED, e);
         } catch (Exception e){
             throw e;
             //throw new IllegalArgumentException("修改失败");
@@ -221,7 +232,7 @@ public class LikeRecordService {
         try {
             boolean tryLock = lock.tryLock(2, 10, TimeUnit.SECONDS);
             if (!tryLock){
-                throw new IllegalArgumentException("操作过于频繁，请稍后重试");
+                throw new BizException(CommonErrorCode.RATE_LIMITED);
             }
             int r = likeRecordMapper.delete(new QueryWrapper<LikeRecord>().eq("post_id",postId).eq("user_id",UserContext.getUserId()).eq("type", PostType.SOLUTION));
                 if(r==0){
@@ -265,7 +276,7 @@ public class LikeRecordService {
                                 MqContexts.NOTIFICATION_LIKE_ROUTING_KEY,
                                 notificationDto
                         );
-                    }).exceptionally(exception -> {
+                    }, likeNotifyExecutor).exceptionally(exception -> {
                         log.error("点赞通知异步任务失败，type=SOLUTION，targetId={}", postId, exception);
                         return null;
                     });
@@ -279,7 +290,7 @@ public class LikeRecordService {
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("点赞操作被中断", e);
+                throw new BizException(CommunityErrorCode.OPERATION_INTERRUPTED, e);
             } catch (Exception e){
             throw e;
         }finally {
@@ -330,7 +341,7 @@ public class LikeRecordService {
             return loadLikeTargetMeta(targetId, businessType);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("获取点赞目标信息被中断", e);
+            throw new BizException(CommunityErrorCode.OPERATION_INTERRUPTED, e);
         } finally {
             if (locked && lock.isHeldByCurrentThread()) {
                 lock.unlock();
@@ -343,14 +354,14 @@ public class LikeRecordService {
             case POST -> {
                 Post post = postMapper.selectById(targetId);
                 if (post == null) {
-                    throw new IllegalArgumentException("帖子不存在");
+                    throw new BizException(CommunityErrorCode.POST_NOT_FOUND);
                 }
                 yield new LikeTargetMetaDto(post.getUserId(), post.getPostId(), PostType.POST, null, null);
             }
             case COMMENT -> {
                 Comment comment = commentMapper.selectById(targetId);
                 if (comment == null) {
-                    throw new IllegalArgumentException("评论不存在");
+                    throw new BizException(CommunityErrorCode.COMMENT_NOT_FOUND);
                 }
                 PostType rootType = comment.getType() == null ? PostType.POST : comment.getType();
                 Long rootCommentId = comment.getRootCommentId();
@@ -361,7 +372,7 @@ public class LikeRecordService {
                 if (rootType == PostType.SOLUTION) {
                     Solution solution = solutionMapper.selectById(comment.getPostId());
                     if (solution == null) {
-                        throw new IllegalArgumentException("评论所属题解不存在");
+                        throw new BizException(CommunityErrorCode.COMMENT_SOLUTION_NOT_FOUND);
                     }
                     questionId = solution.getQuestionId();
                 }
@@ -372,20 +383,20 @@ public class LikeRecordService {
             case SOLUTION -> {
                 Solution solution = solutionMapper.selectById(targetId);
                 if (solution == null) {
-                    throw new IllegalArgumentException("题解不存在");
+                    throw new BizException(CommunityErrorCode.SOLUTION_NOT_FOUND);
                 }
                 yield new LikeTargetMetaDto(
                         solution.getSolutionUserId(), solution.getSolutionId(), PostType.SOLUTION,
                         null, solution.getQuestionId()
                 );
             }
-            default -> throw new IllegalArgumentException("不支持的点赞业务类型：" + businessType);
+            default -> throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         };
     }
 
     private NotificationLikeDto buildNotificationLikeDto(UserDto actor, LikeTargetMetaDto targetMeta) {
         if (actor == null) {
-            throw new IllegalArgumentException("未找到点赞用户信息");
+            throw new BizException(CommunityErrorCode.LIKE_USER_INFO_MISSING);
         }
         NotificationLikeDto dto = new NotificationLikeDto();
         dto.setUserId(actor.getUserId());
@@ -406,7 +417,7 @@ public class LikeRecordService {
             case POST -> RedisContext.POST_AND_USER_ID_KEY;
             case COMMENT -> RedisContext.COMMENT_AND_USER_ID;
             case SOLUTION -> RedisContext.SOLUTION_AND_USER_ID;
-            default -> throw new IllegalArgumentException("不支持的点赞业务类型：" + businessType);
+            default -> throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         };
     }
 }

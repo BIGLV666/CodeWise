@@ -3,9 +3,11 @@ package org.example.servicecommunity.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommunity.entry.Post;
 import org.example.servicecommunity.enums.PostStatus;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.mapper.PostMapper;
 import org.example.servicecommunity.vo.HomePostVo;
 import org.redisson.api.RLock;
@@ -158,7 +160,7 @@ public class HostPostService {
                     )
             );
             if (!Long.valueOf(1L).equals(swapped)) {
-                throw new IllegalStateException("热门帖子排行榜原子切换失败");
+                throw new BizException(CommunityErrorCode.RANKING_UNAVAILABLE);
             }
             log.info("热门帖子排行榜重建完成，posts={}, rankingKey={}",
                     allPosts.size(), RedisContext.HOST_POST_KEY);
@@ -213,7 +215,7 @@ public class HostPostService {
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new IllegalStateException("hot post ranking initialization interrupted", e);
+                throw new BizException(CommunityErrorCode.RANKING_UNAVAILABLE, e);
             } finally {
                 if (locked && lock.isHeldByCurrentThread()) {
                     lock.unlock();

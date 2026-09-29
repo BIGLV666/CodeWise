@@ -3,6 +3,8 @@ package org.example.serviceai.serviceQuestion;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import org.example.serviceai.exception.AiErrorCode;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.dto.TestMessage;
 
 import java.util.ArrayList;
@@ -25,7 +27,7 @@ public class TestCaseParser {
 
         try {
             if (aiResponse == null || aiResponse.trim().isEmpty()) {
-                throw new RuntimeException("AI响应内容为空");
+                throw new BizException(AiErrorCode.MODEL_EMPTY_RESPONSE);
             }
 
             String jsonContent = extractAndCleanJson(aiResponse);
@@ -88,7 +90,9 @@ public class TestCaseParser {
         } catch (Exception e) {
             System.err.println("解析测试用例JSON失败，原始响应前500字符: " +
                     (aiResponse.length() > 500 ? aiResponse.substring(0, 500) : aiResponse));
-            throw new RuntimeException("解析测试用例JSON失败: " + e.getMessage(), e);
+            throw e instanceof BizException bizException
+                    ? bizException
+                    : new BizException(AiErrorCode.AI_RESULT_PARSE_FAILED, e);
         }
 
         return testMessages;
@@ -99,7 +103,7 @@ public class TestCaseParser {
      */
     private static String extractAndCleanJson(String aiResponse) {
         if (aiResponse == null || aiResponse.trim().isEmpty()) {
-            throw new RuntimeException("AI响应内容为空");
+            throw new BizException(AiErrorCode.MODEL_EMPTY_RESPONSE);
         }
 
         String text = aiResponse;
@@ -179,7 +183,7 @@ public class TestCaseParser {
                     } catch (Exception ignored) {
                     }
                 }
-                throw new RuntimeException("无法提取有效的JSON内容: " + e.getMessage());
+                throw new BizException(AiErrorCode.AI_RESULT_PARSE_FAILED, e);
             }
         }
     }

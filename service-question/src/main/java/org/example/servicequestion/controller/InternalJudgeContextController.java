@@ -3,11 +3,14 @@ package org.example.servicequestion.controller;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.judge.JudgeContextDto;
 import org.example.serviceapi.dto.user.UserDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.JudgeRecordMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
@@ -60,7 +63,7 @@ public class InternalJudgeContextController {
      *
      * <p>鉴权规则见类注释：无用户上下文视为系统内部调用放行；
      * 携带用户上下文时必须是管理员（roleId==2），非管理员抛出
-     * {@link IllegalArgumentException}，由全局异常处理器转为错误 Result。</p>
+     * {@link BizException}，由全局异常处理器转为错误 Result。</p>
      *
      * @param judgeRecordId 判题记录 ID
      * @return 判题上下文；任一关联记录缺失时返回 {@code Result.error}（不抛堆栈）
@@ -70,22 +73,22 @@ public class InternalJudgeContextController {
         checkInternalOrAdmin();
 
         if (judgeRecordId == null) {
-            return Result.error("判题记录 ID 不能为空");
+            return Result.error(CommonErrorCode.PARAM_MISSING);
         }
 
         JudgeRecord judgeRecord = judgeRecordMapper.selectById(judgeRecordId);
         if (judgeRecord == null) {
-            return Result.error("判题记录不存在: " + judgeRecordId);
+            return Result.error(QuestionErrorCode.JUDGE_RECORD_NOT_FOUND);
         }
 
         SubmitRecord submitRecord = submitRecordMapper.selectById(judgeRecord.getSubmitRecordId());
         if (submitRecord == null) {
-            return Result.error("提交记录不存在: " + judgeRecord.getSubmitRecordId());
+            return Result.error(QuestionErrorCode.SUBMIT_RECORD_NOT_FOUND);
         }
 
         Question question = questionMapper.selectById(submitRecord.getQuestionId());
         if (question == null) {
-            return Result.error("题目不存在: " + submitRecord.getQuestionId());
+            return Result.error(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
 
         JudgeContextDto context = JudgeContextDto.builder()
@@ -116,10 +119,10 @@ public class InternalJudgeContextController {
         }
         Result<UserDto> response = userFeignClient.getUserInfo(userId);
         if (response == null || response.getData() == null) {
-            throw new IllegalArgumentException("用户不存在");
+            throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
         }
         if (!Objects.equals(response.getData().getRoleId(), ADMIN_ROLE_ID)) {
-            throw new IllegalArgumentException("无权查看判题上下文");
+            throw new BizException(CommonErrorCode.ADMIN_ONLY);
         }
     }
 }

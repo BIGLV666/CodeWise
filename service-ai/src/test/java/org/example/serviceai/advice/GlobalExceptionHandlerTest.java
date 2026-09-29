@@ -1,32 +1,46 @@
 package org.example.serviceai.advice;
 
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.service.AiProviderHttpException;
 import org.example.serviceapi.dto.Result;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class GlobalExceptionHandlerTest {
 
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
 
     @Test
-    void mapsProviderAuthenticationFailureToSafeMessage() {
-        Result<Void> result = handler.handleProviderException(
+    void mapsProviderAuthenticationFailureToKeyErrorCode() {
+        Result<?> result = handler.handleProviderException(
                 new AiProviderHttpException("custom", 403, "secret upstream body", null)
         );
 
-        assertEquals(400, result.getCode());
-        assertEquals("AI 服务认证失败，请检查 API Key 和模型权限", result.getMessage());
+        assertEquals(AiErrorCode.PROVIDER_KEY_INVALID.getCode(), result.getCode());
+        assertEquals(AiErrorCode.PROVIDER_KEY_INVALID.getMessage(), result.getMessage());
+        assertFalse(result.getMessage().contains("403"));
+        assertFalse(result.getMessage().contains("secret"));
     }
 
     @Test
-    void mapsProviderRateLimitTo429() {
-        Result<Void> result = handler.handleProviderException(
+    void mapsProviderRateLimitToQuotaErrorCode() {
+        Result<?> result = handler.handleProviderException(
                 new AiProviderHttpException("custom", 429, "quota exceeded", "30")
         );
 
-        assertEquals(429, result.getCode());
-        assertEquals("AI 服务请求过于频繁或额度不足，请稍后重试", result.getMessage());
+        assertEquals(AiErrorCode.PROVIDER_QUOTA_EXCEEDED.getCode(), result.getCode());
+        assertEquals(AiErrorCode.PROVIDER_QUOTA_EXCEEDED.getMessage(), result.getMessage());
+    }
+
+    @Test
+    void mapsOtherProviderFailureToCallFailed() {
+        Result<?> result = handler.handleProviderException(
+                new AiProviderHttpException("custom", 500, "boom", null)
+        );
+
+        assertEquals(AiErrorCode.PROVIDER_CALL_FAILED.getCode(), result.getCode());
+        assertEquals(AiErrorCode.PROVIDER_CALL_FAILED.getMessage(), result.getMessage());
     }
 }

@@ -1,6 +1,7 @@
 package org.example.servicequestion.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceapi.exception.BizException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.junit.jupiter.api.io.TempDir;
@@ -75,7 +76,7 @@ class InternalJavaArtifactJudgeTest {
     void readValidatedCasesRejectsWrongLineCount() throws Exception {
         writeCaseFiles(49);
 
-        assertThrows(IllegalStateException.class, () -> judge.readValidatedCases(tempDirectory));
+        assertThrows(BizException.class, () -> judge.readValidatedCases(tempDirectory));
     }
 
     @Test
@@ -87,7 +88,7 @@ class InternalJavaArtifactJudgeTest {
         }
         Files.writeString(tempDirectory.resolve("inputs.jsonl"), inputs.toString(), StandardCharsets.UTF_8);
 
-        assertThrows(IllegalStateException.class, () -> judge.readValidatedCases(tempDirectory));
+        assertThrows(BizException.class, () -> judge.readValidatedCases(tempDirectory));
     }
 
     /** 端到端沙箱验收：CODEWISE_DOCKER_IT=true 且本机 Docker 可用时执行。 */

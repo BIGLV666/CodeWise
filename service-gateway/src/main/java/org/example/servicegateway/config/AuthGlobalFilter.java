@@ -1,18 +1,23 @@
 package org.example.servicegateway.config;
 
 import io.jsonwebtoken.Claims;
+import org.example.servicegateway.exception.GatewayErrorCode;
 import org.example.servicegateway.until.JwtUntil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.Set;
 
@@ -165,8 +170,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             // 验证 Token
             if (token == null || token.isEmpty() || !jwtUtil.validateToken(token)) {
                 System.out.println("❌ WebSocket 认证失败: token无效");
-                exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-                return exchange.getResponse().setComplete();
+                return rejectUnauthorized(exchange);
             }
 
             Claims claims = jwtUtil.parseToken(token);
@@ -190,8 +194,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         // 5. 其他接口需要 Token
         String token = request.getHeaders().getFirst("Authorization");
         if (token == null || token.isEmpty()) {
-            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-            return exchange.getResponse().setComplete();
+            return rejectUnauthorized(exchange);
         }
 
         if (token.startsWith("Bearer ")) {
@@ -199,8 +202,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         }
 
         if (!jwtUtil.validateToken(token)) {
-            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-            return exchange.getResponse().setComplete();
+            return rejectUnauthorized(exchange);
         }
 
         Long userId = jwtUtil.getUserIdFromToken(token);
@@ -216,6 +218,21 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
         ServerWebExchange newExchange = exchange.mutate().request(newRequest).build();
         return chain.filter(newExchange);
+    }
+
+    /**
+     * 鉴权失败统一响应：HTTP 401 保留（前端据此跳登录），响应体与业务服务同构
+     * （{@code {code, message, data}}），文案取自 {@link GatewayErrorCode}，不带异常明细。
+     */
+    private Mono<Void> rejectUnauthorized(ServerWebExchange exchange) {
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.UNAUTHORIZED);
+        response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
+        byte[] bytes = ("{\"code\":" + GatewayErrorCode.LOGIN_REQUIRED.getCode()
+                + ",\"message\":\"" + GatewayErrorCode.LOGIN_REQUIRED.getMessage()
+                + "\",\"data\":null}").getBytes(StandardCharsets.UTF_8);
+        DataBuffer buffer = response.bufferFactory().wrap(bytes);
+        return response.writeWith(Mono.just(buffer));
     }
 
     @Override

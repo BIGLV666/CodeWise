@@ -10,10 +10,13 @@ import org.example.serviceapi.dto.notification.NotificationAppealDto;
 import org.example.serviceapi.dto.notification.NotificationDto;
 import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.enums.NotificationCenterType;
+import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicecommunity.Dto.AppealDto;
+import org.example.servicecommunity.exception.CommunityErrorCode;
 import org.example.servicecommunity.entry.Appeal;
 import org.example.servicecommunity.entry.Comment;
 import org.example.servicecommunity.entry.Post;
@@ -137,27 +140,27 @@ public class AppealService {
             appeal= new Appeal(dto);
         }
         if(appeal.getStatus()!=null&&appeal.getStatus()==0){
-            throw new IllegalArgumentException("请耐心等待审核不要重复提交");
+            throw new BizException(CommunityErrorCode.APPEAL_ALREADY_PENDING);
         }
         if (appeal.getPostType() == null) {
-            throw new IllegalArgumentException("不存在的类型");
+            throw new BizException(CommunityErrorCode.CONTENT_TYPE_INVALID);
         }
         Object postBody = getPost(appeal.getPostId(), appeal.getPostType());
         if (postBody == null) {
-            throw new IllegalArgumentException("未找到相关内容");
+            throw new BizException(CommunityErrorCode.APPEAL_TARGET_NOT_FOUND);
         }
         Integer s = getstatus(appeal.getPostType(), postBody);
         if (s == null) {
-            throw new IllegalArgumentException("状态异常");
+            throw new BizException(CommonErrorCode.STATE_CONFLICT);
         }
         if (s != 2 && s != 3) {
-            throw new IllegalArgumentException("该状态无需申诉");
+            throw new BizException(CommunityErrorCode.APPEAL_NOT_APPEALABLE);
         }
         appeal.setReason(dto.getReason());
         Long ownerId = getOwnerId(appeal.getPostType(), postBody);
         Long currentUserId = UserContext.getUserId();
         if (ownerId == null || !ownerId.equals(currentUserId)) {
-            throw new IllegalArgumentException("只能申诉自己的内容");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
 
 
@@ -170,17 +173,20 @@ public class AppealService {
             }
             else{ r = appealMapper.insert(appeal);}
             if (r != 1) {
-                throw new IllegalArgumentException("提交失败");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
             }
 
             // 不再向管理员发送通知，管理员通过后台查询待处理申诉列表
 
         } catch (Exception e) {
+            if (e instanceof BizException) {
+                throw (BizException) e;
+            }
             if (e instanceof DuplicateKeyException) {
-                throw new IllegalArgumentException("该请求已存在请勿重复提交");
+                throw new BizException(CommonErrorCode.DUPLICATE_RESOURCE);
             } else {
                 log.error(e.getMessage(), e);
-                throw new IllegalArgumentException("提交失败请稍后重试");
+                throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED, e);
             }
         }
     }
@@ -251,16 +257,16 @@ public class AppealService {
      *
      * @param appealId 申诉 ID
      * @return 申诉详情（含关联内容标题）
-     * @throws IllegalArgumentException 申诉不存在，或该申诉不属于当前用户（防 IDOR）
+     * @throws BizException 申诉不存在，或该申诉不属于当前用户（防 IDOR）
      */
     public AppealVo getMyAppealDetail(Long appealId) {
         Appeal appeal = appealMapper.selectById(appealId);
         if (appeal == null) {
-            throw new IllegalArgumentException("申诉不存在");
+            throw new BizException(CommunityErrorCode.APPEAL_NOT_FOUND);
         }
         Long userId = UserContext.getUserId();
         if (userId == null || !userId.equals(appeal.getUserId())) {
-            throw new IllegalArgumentException("无权查看该申诉");
+            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         return toAppealVo(appeal, false);
     }
@@ -313,10 +319,10 @@ public class AppealService {
     public void handleAppeal(Long appealId, boolean pass, String adminReason) {
         Appeal appeal = appealMapper.selectById(appealId);
         if (appeal == null) {
-            throw new IllegalArgumentException("申诉不存在");
+            throw new BizException(CommunityErrorCode.APPEAL_NOT_FOUND);
         }
         if (appeal.getStatus() != 0) {
-            throw new IllegalArgumentException("该申诉已处理");
+            throw new BizException(CommunityErrorCode.APPEAL_ALREADY_HANDLED);
         }
 
         Long adminUserId = UserContext.getUserId();
@@ -325,7 +331,7 @@ public class AppealService {
             // 恢复内容
             Object post = getPost(appeal.getPostId(), appeal.getPostType());
             if (post == null) {
-                throw new IllegalArgumentException("内容不存在");
+                throw new BizException(CommunityErrorCode.APPEAL_TARGET_NOT_FOUND);
             }
 
             switch (appeal.getPostType()) {
@@ -369,7 +375,7 @@ public class AppealService {
             } catch (Exception e){
                 if (e instanceof DuplicateKeyException){}
                 else {
-                    throw new IllegalArgumentException("修改失败");
+                    throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED, e);
                 }
             }
             Object post = getPost(appeal.getPostId(), appeal.getPostType());
@@ -412,7 +418,7 @@ public class AppealService {
             log.info("申诉处理通知已登记 Outbox: appealId={}, passed={}", appeal.getAppealId(), passed);
         } catch (Exception e) {
             log.error("申诉处理通知登记失败（事务回滚）: appealId={}", appeal.getAppealId(), e);
-            throw new RuntimeException("申诉处理通知登记失败", e);
+            throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED, e);
         }
     }
 

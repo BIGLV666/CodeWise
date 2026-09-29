@@ -1,9 +1,11 @@
 package org.example.serviceai.controller;
 
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.service.FunctionArtifactService;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateRequest;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateResponse;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,7 +33,7 @@ public class FunctionArtifactController {
             @RequestBody FunctionArtifactGenerateRequest request
     ) {
         if (!internalToken.equals(requestToken)) {
-            throw new SecurityException("内部服务认证失败");
+            throw new BizException(AiErrorCode.INTERNAL_CALL_UNAUTHORIZED);
         }
         return Result.success(functionArtifactService.generate(request));
     }

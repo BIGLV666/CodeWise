@@ -3,12 +3,14 @@ package org.example.servicequestion.service;
 import lombok.NonNull;
 import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.question.TestMessage;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.entry.TestCase;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.outboxpro.core.OutboxProPublisher;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,7 +46,7 @@ public class JudgeService {
         Long questionId = getCodeDto.getQuestionId();
         String title=getCodeDto.getQuestionTitle();
         if(questionId == null) {
-            throw new IllegalArgumentException("题目不存在");
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
 
         String submitScene = getType(getCodeDto.getSubmitScene());
@@ -72,18 +74,19 @@ public class JudgeService {
      *
      * @param type 客户端提交的 submitScene（NORMAL/REVIEW/PLAN）
      * @return 归一化后的场景字符串
-     * @throws IllegalArgumentException 场景缺失或不在枚举内——缺失时必须返回明确业务错误，
+     * @throws BizException 场景缺失（SUBMIT_SCENE_REQUIRED）或不在枚举内
+     *         （SUBMIT_SCENE_UNSUPPORTED）——缺失时必须返回明确业务错误，
      *         不能进入 switch 触发 NPE（否则客户端漏传字段拿到 500 而非 400 语义）
      */
     private String getType(String type){
          if (type == null || type.isBlank()) {
-             throw new IllegalArgumentException("提交场景不能为空");
+             throw new BizException(QuestionErrorCode.SUBMIT_SCENE_REQUIRED);
          }
          return switch (type){
              case "REVIEW" -> "REVIEW";
              case "NORMAL" -> "NORMAL";
              case  "PLAN" -> "PLAN";
-             default -> throw new IllegalArgumentException("不支持的提交类型");
+             default -> throw new BizException(QuestionErrorCode.SUBMIT_SCENE_UNSUPPORTED);
          };
     }
 

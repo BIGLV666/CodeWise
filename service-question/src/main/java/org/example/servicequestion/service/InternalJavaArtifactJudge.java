@@ -2,6 +2,8 @@ package org.example.servicequestion.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceapi.exception.BizException;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -96,21 +98,19 @@ public class InternalJavaArtifactJudge {
                     "sh", "/workspace/validate.sh"
             ).redirectErrorStream(true).start();
         } catch (IOException exception) {
-            throw new IllegalStateException(
-                    "找不到 Docker 命令，请安装 Docker Desktop 或配置 codewise.function-artifact.docker-command",
-                    exception
-            );
+            // Docker 命令缺失等沙箱问题：细节留在 cause 日志，用户只见通用文案
+            throw new BizException(QuestionErrorCode.JUDGE_SERVICE_UNAVAILABLE, exception);
         }
 
         boolean completed = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
         if (!completed) {
             process.destroyForcibly();
-            throw new IllegalStateException("内部 Java 判题超时");
+            throw new BizException(QuestionErrorCode.JUDGE_SERVICE_UNAVAILABLE);
         }
         String log = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         Files.writeString(artifactDirectory.resolve("judge.log"), log, StandardCharsets.UTF_8);
         if (process.exitValue() != 0) {
-            throw new IllegalStateException("内部 Java 判题失败，详情见 judge.log");
+            throw new BizException(QuestionErrorCode.JUDGE_SERVICE_UNAVAILABLE);
         }
     }
 
@@ -119,7 +119,7 @@ public class InternalJavaArtifactJudge {
         List<String> inputs = Files.readAllLines(artifactDirectory.resolve("inputs.jsonl"), StandardCharsets.UTF_8);
         List<String> outputs = Files.readAllLines(artifactDirectory.resolve("outputs.jsonl"), StandardCharsets.UTF_8);
         if (inputs.size() != REQUIRED_CASE_COUNT || outputs.size() != REQUIRED_CASE_COUNT) {
-            throw new IllegalStateException("生成器和标准答案必须各产生恰好 50 行数据");
+            throw new BizException(QuestionErrorCode.ARTIFACT_DATA_INVALID);
         }
 
         List<ValidatedCase> cases = new ArrayList<>(REQUIRED_CASE_COUNT);
@@ -127,7 +127,7 @@ public class InternalJavaArtifactJudge {
             JsonNode input = objectMapper.readTree(inputs.get(index));
             JsonNode output = objectMapper.readTree(outputs.get(index));
             if (!input.isArray()) {
-                throw new IllegalStateException("第 " + (index + 1) + " 组输入不是 JSON 数组");
+                throw new BizException(QuestionErrorCode.ARTIFACT_DATA_INVALID);
             }
             cases.add(new ValidatedCase(input, output));
         }

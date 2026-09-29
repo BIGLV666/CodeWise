@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 
 from dto.Result import Result
+from util.error_codes import AgentErrorCode
 from service.Conversation import ConversationService
 from util.jwt import get_current_user_id, get_token_from_header
 
@@ -25,7 +26,10 @@ class AgentApi:
                 result.data = conversations
                 return result
        except LookupError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=404,
+                detail=AgentErrorCode.CONVERSATION_NOT_FOUND.message,
+            ) from exc
     @router.put("/conversation/{conversation_id}/name")
     def update_conversation_name(
         conversation_id: int,
@@ -38,7 +42,10 @@ class AgentApi:
                 conversation_service.update_conversation_name(conversation_id, user_id, new_name)
             return {"code": 200, "message": "success"}
         except LookupError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=404,
+                detail=AgentErrorCode.CONVERSATION_NOT_FOUND.message,
+            ) from exc
     @router.post("/conversation")
     def create_conversation(
         user_id: int = Depends(get_current_user_id),
@@ -58,7 +65,10 @@ class AgentApi:
                 conversation_service.delete_conversation(conversation_id, user_id)
             return {"code": 200, "message": "success"}
         except LookupError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=404,
+                detail=AgentErrorCode.CONVERSATION_NOT_FOUND.message,
+            ) from exc
     @router.get("/messages/{conversation_id}")
     def get_conversation_messages(
         conversation_id: int,

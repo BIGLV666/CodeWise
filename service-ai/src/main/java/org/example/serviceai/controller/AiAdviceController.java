@@ -8,8 +8,10 @@ import org.example.serviceai.conversation.service.AdviceConversationService;
 import org.example.serviceai.conversation.vo.HomeConversationVo;
 import org.example.serviceai.dto.AiTaskDto;
 import org.example.serviceai.entry.Message;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.service.AiAdviceTaskService;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -66,8 +68,8 @@ public class AiAdviceController {
                                                         .data(chunk)
                                         );
                                     } catch (IOException e) {
-                                        throw new RuntimeException(
-                                                "SSE 客户端已断开",
+                                        throw new BizException(
+                                                AiErrorCode.SSE_STREAM_INTERRUPTED,
                                                 e
                                         );
                                     }
@@ -124,30 +126,24 @@ public class AiAdviceController {
     }
 
     /**
-     * 把生成异常映射为对用户安全的提示文案。
+     * 把生成异常映射为推给前端的 SSE 错误事件文案。
      *
-     * <p>仅透出 {@link org.example.serviceai.service.AiProviderHttpException}
-     * 的分类信息（认证/限流/HTTP 状态码）；其余异常（含 Provider 名称、内部
-     * 根因、内部 URL）一律返回固定文案，避免内部细节泄漏到 SSE 载荷。</p>
+     * <p>文案一律来自错误码枚举（{@link BizException} 及其子类，含
+     * {@link org.example.serviceai.service.AiProviderHttpException}），只透出
+     * 分类后的中文提示；其余异常（含 Provider 名称、内部根因、内部 URL）
+     * 返回固定兜底文案，原始异常仅服务端留痕，避免内部细节泄漏到流载荷。</p>
      */
     String toUserMessage(Exception exception) {
         Throwable current = exception;
         while (current != null) {
-            if (current instanceof org.example.serviceai.service.AiProviderHttpException providerException) {
-                int statusCode = providerException.getStatusCode();
-                if (statusCode == 401 || statusCode == 403) {
-                    return "AI 服务认证失败，请检查 API Key 和模型权限";
-                }
-                if (statusCode == 429) {
-                    return "AI 服务请求过于频繁或额度不足，请稍后重试";
-                }
-                return "AI 服务调用失败，HTTP " + statusCode;
+            if (current instanceof BizException bizException) {
+                return bizException.getMessage();
             }
             current = current.getCause();
         }
         // 原始异常服务端留痕，客户端只见固定文案
         log.warn("SSE 生成失败（已脱敏）", exception);
-        return "AI 服务暂时不可用，请稍后重试";
+        return AiErrorCode.AI_SERVICE_NOT_READY.getMessage();
     }
     @GetMapping("/{conversationId}/messages")
     @RateLimit(limit = 100, window = 60)
