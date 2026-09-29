@@ -11,7 +11,7 @@
 | RabbitMQ | rabbitmq:3.13 | `rabbitmq-data` | 管理台 15672 仅映射宿主回环（`127.0.0.1:15672`），不对公网暴露 |
 | Nacos | nacos:2.3.2 standalone | `nacos-data` | 服务发现 + 可选配置中心，控制台仅映射宿主回环（`127.0.0.1:8848`） |
 | Mailpit | axllent/mailpit | 无（内存） | 开发/演示 SMTP 捕获，Web `127.0.0.1:8025`；真实 SMTP 经 `.env` 的 `SPRING_MAIL_*` 切换 |
-| Python Agent | codewise/codewise-agent | 无（状态在 codewise_ai 库） | FastAPI + Node dsh 运行时，nginx `/agentapi/` 反代，JWT 与网关同 `JWT_SECRET` |
+| Python Agent | codewise/codewise-agent | 无（会话状态在 codewise_ai 库；容器内 `data/` 的会话/token 文件不持久化，重建后自愈） | FastAPI + Node dsh 运行时，nginx `/agentapi/` 反代，JWT 与网关同 `JWT_SECRET` |
 | 函数产物 | service-question | `question-artifacts` | 容器内 `/app/data/function-artifacts` |
 | 用户上传 | service-user | `user-uploads` | 容器内 `/app/data/uploads`，经 Nginx `/uploads/` 反代 |
 | Docker daemon | judge + question | `/var/run/docker.sock` | **DooD**：判题沙箱运行在宿主 Docker 上 |
@@ -19,7 +19,7 @@
 ## 2. Docker daemon 访问（DooD）的安全边界
 
 - 挂载 `docker.sock` 等同授予容器宿主 root 等价权限。仅运行本项目自建可信镜像时风险可控；**生产建议改为独立判题节点**：judge 的 `docker.host` 指向远程 TLS endpoint（`DockerConfig` 强制 TLS 并拒绝明文 2375，需提供 `docker.tls-verify=true` + `docker.cert-path`）。
-- 判题沙箱容器自身已配置 network none / 内存 CPU PID 限制 / 只读根 / 非 root（uid 1000）/ 超时销毁重建，与本地开发一致（见 `docs/architecture-and-highlights.md`）。
+- 判题沙箱容器自身已配置 network none / 内存（256m）CPU（配额 1 核）PID（64）限制 / 非 root（uid 1000）+ capabilities 全清 + no-new-privileges + tmpfs `/tmp` / 超时销毁重建，与本地开发一致（见 `DockerExecTemplate.createContainer`；注意**未启用只读 rootfs**——新版 Moby/containerd 下 `docker cp` 会直接拒绝只读容器，判题文件经 docker cp 写入容器层）。
 - judge 与 question 容器为访问 sock 显式 `user: root`，其余服务镜像均以 uid 1000 非 root 运行。
 
 ## 3. HTTPS / 域名上线
@@ -38,11 +38,11 @@
 | 库 | 脚本（按序） |
 | --- | --- |
 | codewise_user | `service-user/src/main/resources/Sql/user.sql` |
-| codewise_question | `question.sql` → `function_question.sql` → `function_question_seed.sql` |
+| codewise_question | `question.sql` → `function_question.sql` → `function_question_seed.sql` → judge 的 `failure_submit.sql`（死信登记表） |
 | codewise_review | `sql/sql.sql` |
 | codewise_community | `sql.sql` |
 | codewise_message | `sql.sql`（含 notification_center、consumed_event） |
-| codewise_ai | `codewise_ai.sql` → `consumed_event.sql` |
+| codewise_ai | `codewise_ai.sql` → `consumed_event.sql` → `codewise-agent/sql/agent_tables.sql`（Agent 会话/消息表） |
 
 > 各服务的增量脚本（question 的 `function_test_case_unique_hash.sql`、review/community 的
 > `migration/`、ai 的 `migration_*.sql`）**已全部合入上述基础脚本**，init 不再执行；
@@ -71,14 +71,16 @@ community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF 
 优先级：环境变量 > Nacos 配置 > 本地 yaml。compose 已注入：
 
 - 连接类：`SPRING_DATASOURCE_*`（各库 URL）、`SPRING_DATA_REDIS_*`、`SPRING_RABBITMQ_*`、`NACOS_ADDR`；
-- 密钥类：`CODEWISE_INTERNAL_TOKEN`（全服务）、`JWT_SECRET`（gateway/user/message/review）、`API_KEY_MASTER_KEY`（经 `SPRING_APPLICATION_JSON` 映射到 `security.api-key-master-key`）；
+- 密钥类：`CODEWISE_INTERNAL_TOKEN`（全服务共用同一值）、`JWT_SECRET`（gateway/user/message/review 四个 Java 服务 + Python Agent 容器，须与 `.env` 同值）、`API_KEY_MASTER_KEY`（service-ai 经 `SPRING_APPLICATION_JSON` 映射到 `security.api-key-master-key`；Python Agent 容器直接注入同名变量）；
 - 网关：`CORS_ORIGINS`（逗号分隔）；上传：`FILE_UPLOAD_ROOT=/app/data/uploads`；
-- 判题：`JUDGE_IMAGE`（判题基础镜像名，默认 `codewise-java-judge:17`）；
-- 引导：`ROOT_PASSWORD`/`ROOT_EMAIL` 等（root 管理员一次性创建）；
+- 判题：`JUDGE_IMAGE`（判题基础镜像名，默认 `codewise-java-judge:17`）、`CODEWISE_JUDGE_CONSUMERCONCURRENCY`（compose 经 `JUDGE_CONCURRENCY` 注入，默认 2，必须与容器池容量同步上调，见 `JudgeSubmitConsumer`）；
+- 引导：`ROOT_PASSWORD`/`ROOT_EMAIL` 等（root 管理员一次性创建，用户名取 `ROOT_USERNAME`，默认 `admin`）；
 - 邮件：`SPRING_MAIL_HOST/PORT/USERNAME/PASSWORD`（默认容器内 mailpit:1025）+ `CODEWISE_MAIL_FROM`；
 - Agent：`DSH_PROVIDER`/`DSH_DEFAULT_CONTEXT_WINDOW`/`DSH_IDLE_TIMEOUT_SECONDS`（LLM 路由与上下文窗口）。
 
-仍需 Nacos 下发（可选，缺失即功能降级而非启动失败）：SMTP 发信账号（`service-email.yaml`）、AI Provider 列表、Ollama 摘要模型地址。
+容器内存：compose 为每服务设 `mem_limit`（384m–1.5g，judge 为吞吐主力建议 ≥1.5g），服务运行镜像 ENTRYPOINT 固定 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，堆上限按容器限额 45% 计，防止 JVM 常驻内存超限额被 OOM kill。
+
+仍需 Nacos 下发（可选，缺失即功能降级而非启动失败）：真实 SMTP 发信账号（`service-email.yaml`，容器部署直接在 `.env` 配 `SPRING_MAIL_*` 即可）、AI Provider 列表、Ollama 摘要模型地址。
 
 > 注意：Nacos 若已下发同名配置（如数据源），其优先级高于环境变量，切换部署方式时留意清理旧配置。
 
@@ -125,7 +127,7 @@ docker compose -f deploy/docker-compose.yml exec mysql \
 | --- | --- | --- |
 | 单条死信落 DLQ | ERROR/WARN 日志（logger `OUTBOXPRO_ALERT`） | 查日志定位原因 |
 | 死信积压高水位 | `onHighWatermark` ERROR 日志 + 指标 `codewise.outboxpro.deadletter.backlog` | 立即人工介入 |
-| 死信/出箱查询 | `GET /actuator/outboxpro-ops/dlq`、`/outbox`（需内部 Token；仅只读，重放未开放） | 排查与统计 |
+| 死信/出箱查询 | `GET /actuator/outboxpro-ops/dlq`、`/outbox` — **默认不可用**：需 `outboxpro.ops.enabled=true`（默认 false）且把 `outboxpro-ops` 加入 actuator exposure（镜像配置只暴露 `health,info,metrics`）。未开启时直查 `outboxpro_outbox` / `outboxpro_dead_letter` 表；端点仅只读，重放被 `CodewiseDlqReadAuthorizer` 拒绝 | 排查与统计 |
 | Micrometer 指标 | `GET /actuator/metrics`（计数器 `outboxpro.publish.*`/`outboxpro.consume.*`/`codewise.outboxpro.deadletter`） | 接入 Prometheus |
 | 人工重放 | 未开放 HTTP；由 DBA 按 `outboxpro_dead_letter` 台账修复后重放 | — |
 
@@ -142,7 +144,7 @@ CODEWISE_IMAGE_PREFIX=ghcr.io/<owner>/codewise-
 JUDGE_IMAGE=ghcr.io/<owner>/codewise-java-judge:17
 ```
 
-compose 的全部 `image:` 字段已预留该前缀变量，改完 `.env` 后 `docker compose up -d` 即直接拉取镜像、无需本地构建。
+compose 的全部 `image:` 字段已预留该前缀变量，改完 `.env` 后 `docker compose -f deploy/docker-compose.yml pull`（或直接 `up -d --pull=always`）即可拉取镜像、无需本地构建。注意：流水线当前发布 8 个服务镜像 + `codewise-java-judge` + `codewise-frontend`，**`codewise-agent` 镜像不在发布范围内**（compose 中保留了 build 上下文，该服务仍走本地构建）。
 
 ## 9. 与本地开发的差异
 

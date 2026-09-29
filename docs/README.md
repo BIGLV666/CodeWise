@@ -1,6 +1,6 @@
 # CodeWise 文档导航
 
-文档已按“全局文档 + 服务目录”整理。全局文档只维护跨服务约定，各服务的接口、实现说明和专题内容统一放在对应的 `service-*` 子目录，避免重复维护。
+文档已按“全局文档 + 服务目录”整理。全局文档只维护跨服务约定，各服务的接口、实现说明和专题内容统一放在对应的 `service-*` 与 `codewise-agent` 子目录，避免重复维护。
 
 ## 快速入口
 
@@ -11,6 +11,7 @@
 | 定位代码与文档目录 | [`docs/project-structure.md`](project-structure.md) | 熟悉仓库、查找实现位置 |
 | 查找 HTTP 接口 | [`docs/backend-controller-api.md`](backend-controller-api.md) | 前后端联调、接口排查 |
 | 排查运行问题 | [`docs/maintenance-guide.md`](maintenance-guide.md) | 本地或测试环境故障处理 |
+| 部署整套环境 | [`../deploy/README.md`](../deploy/README.md) | Docker Compose 全栈部署与镜像构建 |
 
 ## 服务与模块文档
 
@@ -24,13 +25,17 @@
 | [`service-message`](service-message/README.md) | 通知中心、邮件、MQ 与 WebSocket |
 | [`service-ai`](service-ai/README.md) | AI 建议、SSE 会话、自定义模型和测试生成 |
 | [`service-judge`](service-judge/README.md) | 判题处理、容器池、死信重试、补偿和管理接口 |
-| [`service-judge-go`](service-judge-go/README.md) | Go 判题原型说明 |
+| [`service-judge-go`](service-judge-go/README.md) | Go 判题原型说明（未接入部署） |
+| [`codewise-agent`](codewise-agent/README.md) | Python Agent：端点、工具白名单、鉴权模型与部署 |
 | [`service-api`](service-api/README.md) | Feign 契约、共享 DTO 与 `Result<T>` |
-| [`service-common`](service-common/README.md) | JWT、Redis、RabbitMQ 和 `UserContext` 基础设施 |
+| [`service-common`](service-common/README.md) | JWT、Redis、RabbitMQ、限流与 `UserContext` 基础设施 |
+| [`../deploy/README.md`](../deploy/README.md) | Docker 全栈部署与镜像构建 |
+| [`../deploy/OPERATIONS.md`](../deploy/OPERATIONS.md) | 运维手册：环境变量、健康检查、故障处置 |
 
 ## 全局架构与业务
 
 - [`docs/technical-design.md`](technical-design.md)：服务边界、认证透传、Feign、RabbitMQ、Redis 和判题链路。
+- [`docs/architecture-and-highlights.md`](architecture-and-highlights.md)：整体架构图与核心业务流程图、技术亮点与面试问答要点。
 - [`docs/codewise-flow-and-features.md`](codewise-flow-and-features.md)：刷题、判题、复习、社区、通知和 AI 的业务闭环。
 - [`docs/project-structure.md`](project-structure.md)：主要目录、模块职责、数据库边界和消息依赖。
 - [`docs/project-metrics.md`](project-metrics.md)：按固定口径记录的工程规模快照。
@@ -51,3 +56,5 @@
 3. 修改服务端口、网关路由、MQ routing key、环境变量或数据库边界时，同步更新架构文档和维护手册。
 4. 示例中的 Token、API Key、密码和内部地址必须使用占位符，不提交真实凭据。
 5. 文档中的路径以仓库根目录为基准，移动文件后应检查 Markdown 相对链接。
+6. 新增对外接口要按既有档位补 `@RateLimit`，管理接口补 `@RequireAdmin`；供 codewise-agent 调用的接口需同步 `codewise-agent/agent-runtime/plugins/codewise-tools/src/gateway.ts` 的工具白名单，并在所属服务文档与 `docs/codewise-agent/README.md` 同时登记。
+7. 沙箱资源限额、容器池数量、MQ 名称（`MqContexts` 常量）等事实只在归属文档详述，其他文档引用而不复制，避免多处漂移。

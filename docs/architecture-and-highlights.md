@@ -1,6 +1,6 @@
 # CodeWise 架构全景 · 业务链路图 · 面试亮点
 
-> 2026-08 整理。覆盖 8 个 Spring Boot 服务 + 2 个共享模块 + Python Agent 的总体架构、
+> 2026-08 首次整理，2026-09 按当前代码复核。覆盖 8 个 Spring Boot 服务 + 2 个共享模块 + Python Agent 的总体架构、
 > 全部核心业务链路、消息可靠性/安全架构，以及按主题组织的面试讲述要点。
 > 实现细节见 `docs/maintenance/messaging-reliability.md`、`docs/technical-design.md`。
 
@@ -30,8 +30,8 @@
   │          │          通知中心)     会话记忆)      │           │
   │          │ 经 RabbitMQ 驱动        │             │           │
   │          ▼                        │             │           │
-  │      judge:8086（不经网关）         │             │           │
-  │      Docker 沙箱判题·容器池预热     │             │           │
+  │  judge:8086（判题经 MQ；管理 API /api/judge/** 经网关）
+  │  Docker 沙箱判题·容器池预热
   ▼          ▼          ▼            ▼             ▼           ▼
 codewise_user codewise_question(判题服务共库) codewise_message codewise_ai codewise_community codewise_review
 ```
@@ -39,6 +39,11 @@ codewise_user codewise_question(判题服务共库) codewise_message codewise_ai
 **基础设施**：MySQL 8（每服务一库，judge 复用 codewise_question）、Redis（限流/幂等/
 分布式锁/热榜）、RabbitMQ（7 组业务交换机 + judge.dlx/ai.dlx 死信拓扑）、Nacos（注册+配置，连接信息不出仓库）、
 Docker（`codewise-java-judge:17` 判题镜像，容器池 2 Java + 1 Python/C/C++）。
+
+**Python Agent**：FastAPI 门面（默认 `:8000`，Docker 部署经 nginx `/agentapi/` 前缀剥离反代）驱动
+dsh Node 运行时执行 `codewise-tools` 注册的 51 个网关工具（另有 `codewise-web` 抓取/执行插件）；
+身份从 JWT `sub` 推导、原始 Bearer Token 经网关回调业务服务；`agent_conversation/agent_message/agent_memory`
+表落在 `codewise_ai` 库。
 
 **共享模块**：`service-api`（Feign 契约 + DTO + `Result<T>` + 事件信封/EventTypes）、
 `service-common`（JWT、UserContext、MQ 拓扑声明、Outbox 组件、信封编解码、统一 Feign
@@ -67,12 +72,12 @@ judge:8086 ─ JudgeSubmitConsumer（毒消息死信 / 失败 5s/10s/20s 等待�
   │   JudgeSubmitHandler：
   │   ① CAS 领取：UPDATE submit_record SET judge_status='judging' WHERE judge_status='pending'
   │   ② Docker 容器执行（事务外——避免长事务持数据库锁跑分钟级任务）
-  │   ③ 事务②：judge_record 落库 + Outbox.append(JUDGE_RESULT_CALLBACK，WA/RE/TLE 再加 AI_ADVICE_REQUEST)
+  │   ③ 事务②：judge_record 落库 + OutboxPro.publish(JUDGE_RESULT_CALLBACK，WA/RE/TLE 再加 AI_ADVICE_REQUEST)
   │
   ▼ RabbitMQ question.queue
   │
 question SubmitRecordHandel（非事务消费者 + TransactionTemplate + 提交后 ACK）
-  │   事务③：CAS judging→success（门控）→ total_submit(+AC) 计数 → REVIEW 场景 append(REVIEW_JUDGE_RECORD)
+  │   事务③：CAS judging→success（门控）→ total_submit(+AC) 计数 → REVIEW 场景 publish(REVIEW_JUDGE_RECORD) / PLAN 场景 publish(PLAN_JUDGE_RECORD，学习计划进度)
   │   事务提交 → basicAck → WebSocket 推送（尽力而为，DB 是事实源）
   │
   ▼ message:8083 WebSocket 推给前端（断线可查库补齐）
@@ -84,7 +89,7 @@ question SubmitRecordHandel（非事务消费者 + TransactionTemplate + 提交�
 ### 2.2 判题失败 → AI 建议 → 推送
 
 ```
-judge 事务② 同时 append AI_ADVICE_REQUEST（payload 只放 ID 引用，代码/日志等大字段
+judge 事务② 同时 publish AI_ADVICE_REQUEST（payload 只放 ID 引用，代码/日志等大字段
   由 AI 侧经 Feign 内部端点按需拉取——大字段不进 MQ）
   │
   ▼ ai.advice.queue（挂 ai.dlx）
@@ -158,8 +163,8 @@ REVIEW 场景判题结果 → Outbox(REVIEW_JUDGE_RECORD) → reviews.queue
 ### 2.6 社区互动 / 通知中心 / 邮件
 
 ```
-点赞/评论/判题通过/申诉 → notification.exchange → notification.queue
-  → 4 个通知 Handler：业务成功后才写幂等标记 + notification_center 唯一键兜底
+点赞/评论/判题通过/申诉/掌握祝贺 → notification.exchange → notification.queue
+  → 6 个通知 Handler（like/review/ai-advice/checked/appeal/review-mastered）：业务成功后才写幂等标记 + notification_center 唯一键兜底
      （失败 Redis 计数重试 3 次 → 失败留存）→ 通知中心收件箱 + WebSocket 实时推
 邮件：注册/验证码 → message.queue → EmailService（consumed_event 幂等；
   发送失败重试 3 次 → FAILED 留存可人工重放；日志只记收件人/主题不落验证码）
@@ -199,9 +204,10 @@ MQ 全拓扑（新队列一律挂 DLX；旧队列参数不可变 ⇒ 换名迁�
 judge.exchange  → judge.submit/debug/retry.queue(挂 judge.dlx) + judge.wait.queue(TTL 弹回)
 ai.exchange     → ai.testcase/advice.queue(挂 ai.dlx) + 两个 wait 队列 + ai.dead.queue
 question.exchange → question.queue（回调/用例/删除）
-notification.exchange → notification.queue（like/review/ai-advice/checked/appeal 5 路由）
+notification.exchange → notification.queue（like/review/ai-advice/checked/appeal/review-mastered 6 路由）
 message.exchange → message.queue（email/websocket）
-reviews.exchange → reviews.queue（判题结果→复习）
+reviews.exchange → reviews.queue（REVIEW_JUDGE_RECORD 判题结果→复习）+ reviews.plan.queue（PLAN_JUDGE_RECORD→学习计划进度打卡）
+user.exchange → user.queue（判题结果→用户侧联动；消费者 service-user Mq/JudgeResHandle，当前无生产者调用点，拓扑保留）
 ```
 
 覆盖消费者：question `SubmitRecordHandel`/`TestCaseHandle`（CAS 幂等）、ai `WAAiHandle`、
@@ -216,11 +222,11 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 |---|---|
 | 网关 | JWT 校验；**先剥离后注入**四个身份头；公共路径白名单精确匹配（拒绝 contains("login") 类宽匹配）；IP 默认只信 remoteAddress |
 | 服务间 | 内部 Token 三处同源（网关注入/拦截器校验/Feign 透传），环境变量注入**无默认值，缺失启动即失败**；WebSocket 握手同校验 |
-| 判题沙箱 | Docker：network none、--memory 256m、--cpus 1.0、--pids-limit 64、只读根文件系统、/workspace 与 /tmp 受限 tmpfs、非 root、cap-drop ALL、no-new-privileges、进程树清理防 fork 炸弹；容器池预热消除冷启动；AI 产物验收沙箱更强（pids 128、/tmp noexec），宿主机执行路径已物理删除 |
+| 判题沙箱 | Docker：network none、--memory 256m（swap 同额）、CPU 配额 1.0、--pids-limit 64、/tmp 受限 tmpfs(16m rw)、非 root(uid 1000)、cap-drop ALL、no-new-privileges、进程树清理防 fork 炸弹；容器池预热消除冷启动。判题池**不启用只读根**（新版 Moby 下 docker cp 拒绝写只读容器，代码注释留痕，隔离靠非 root+capabilities 全清）；AI 产物验收沙箱更强（pids 128、--read-only、/tmp noexec），宿主机执行路径已物理删除 |
 | 密钥 | 仓库零密钥（datasource/redis/rabbitmq/mail 全在 Nacos；internal-token/JWT secret 走环境变量）；自定义模型 API Key AES-256-GCM 加密存储（主密钥 env 注入） |
 | AI 出口 | 自定义模型 URL：仅 HTTPS 公网、校验 DNS 全部解析 IP（防 rebinding）、拒绝私网/环回、禁止跟随重定向；模型列表/单 chunk/总回答限长 |
-| 应用层 | Redis 滑动窗口限流（api-governance starter，网关+服务两级）；SSE 错误脱敏；日志不落 Token/验证码/密钥 |
-| 研发流程 | Mimosa 安全扫描门禁拦 commit（存量高危强制修复才能提交）；约 150 个离线单元测试 |
+| 应用层 | api-governance starter：Redis 滑动窗口限流（6 个业务服务开启，网关侧不限流；细节见 5.F）；`@RequireAdmin` 统一管理员校验；SSE 错误脱敏；日志不落 Token/验证码/密钥 |
+| 研发流程 | Mimosa 安全扫描门禁拦 commit（存量高危强制修复才能提交）；350+ 个离线单元测试 |
 
 ---
 
@@ -231,7 +237,9 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 **A1. Transactional Outbox 消除双写**
 - 问题：DB 提交了但 MQ 没发出去（或反之），判题任务凭空丢失或幽灵消息污染数据。
 - 方案：业务事务内 publish 事件行（OutboxPro 库 `outboxpro_outbox`，judge/question/review/community
-  各自生产者库同构），Relay 每秒 `FOR UPDATE SKIP LOCKED` 批量认领投递——多实例并发安全，
+  四个生产者开启 `outboxpro.enabled: true`，其余服务显式 false；judge 与 question 共写
+  codewise_question 库的 outboxpro_* 表，双 Relay 靠 SKIP LOCKED 并发安全），
+  Relay 每秒（`poll-interval: 1000`）`FOR UPDATE SKIP LOCKED` 批量认领投递——多实例并发安全，
   **Publisher Confirm 确认后才标 SENT**；失败指数退避，5 次转 DEAD 并入台账，
   高水位自动告警（`OUTBOXPRO_ALERT`），运维端点可查。
 - 讲法："我没有引入 Seata/Kafka 事务，只用一张表+一个定时器把 XA 问题降维成了
@@ -272,10 +280,14 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 
 - **异步事件驱动架构**：提交即返回，判题经 MQ 异步，WebSocket 推送 + DB 事实源
   （断线后查库补齐——"WebSocket 只是通知手段，不是存储"）。
-- **Docker 沙箱全家桶**（参数能背：network none / 256m / 1 cpu / 64 pids / 只读根 /
-  受限 tmpfs / 非 root / cap-drop ALL / 进程树清理防 fork bomb；AI 产物验收沙箱更严：128 pids + /tmp noexec）。
-- **容器池预热**：2 Java + 1 Python/C/C++ 常驻，消除冷启动；执行移出数据库事务，
-  避免长事务占连接。
+- **Docker 沙箱全家桶**（参数能背：network none / 256m / 1 cpu / 64 pids / tmpfs /tmp(16m) /
+  非 root uid 1000 / cap-drop ALL / no-new-privileges / 进程树清理防 fork bomb；判题池因新版 Moby
+  与 docker cp 冲突不启用只读根，隔离靠非 root+权限全清；AI 产物验收沙箱更严：128 pids + --read-only + /tmp noexec）。
+- **容器池预热与管理**：2 Java + 1 Python/C/C++ 常驻，消除冷启动；执行移出数据库事务避免长事务占连接；
+  借出为**阻塞租借（最长 10s）+ 每语言等待计数**可观测；执行超时/清理失败置 taint 标记，归还时销毁污染容器并重建同语言补齐容量；
+  `/api/judge/containers` 管理接口（`@RequireAdmin`：查询状态/按语言扩容/按 ID 缩容）；
+  消费并发 `JUDGE_CONCURRENCY`（`codewise.judge.consumer-concurrency`）默认 2，须与池容量同步上调——
+  压测四档（并发+池 1+2 / 2+2 / 4+4 / 8+6）吞吐约 35 / 67 / 103 / 250 条/分，见 `docs/loadtest-report.md`。
 - **执行纪律**：AI 生成的判题产物强制沙箱验收（"AI 只写、确定性执行说了算"）；
   实验性 Go 判题器因沙箱未就绪直接桩化而不是带洞上线。
 
@@ -285,9 +297,12 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
   占位行先落库、收尾全部 `WHERE status='GENERATING'` 原子守卫——迟到回调不覆盖、
   超时只取消本流（AtomicReference 捕获消息 ID 精准取消）。
 - **双 AI 路径**：判题失败建议（MQ 异步）+ 用户追问（SSE 同步流式）；会话记忆用
-  Ollama 小模型**增量压缩**（<14 条跳过 / <3000 字增量 / 超限重建保留最近 SYSTEM 消息，
+  Ollama 小模型**增量压缩**（待摘要 <14 条跳过 / 批次上限 14 / 已摘要 ≥3000 字转 REBUILD 否则
+  INCREMENTAL / 超限重建保留最近 SYSTEM 消息；会话级 Redisson tryLock + `@Version`
   乐观锁防并发覆盖）。
-- **Provider 治理**：真实健康探测 + 失败计数熔断切换；首个 Provider 未出 chunk 才降级，
+- **空响应守卫**：网关限流导致模型返回空白流时不再按成功落库——空内容置 FAILED 并上抛，
+  走分发器延迟重试/死信留痕（配套：SSE 解析兼容 `data:` 无空格形态，防静默截断）。
+- **Provider 治理**：真实健康探测（30s 周期调度）+ 失败计数熔断切换；首个 Provider 未出 chunk 才降级，
   防止两个模型的回答拼进同一条消息。
 - **密钥与出口安全**：API Key AES-256-GCM 加密落库；自定义模型 URL 全套 SSRF 防护
   （HTTPS-only、DNS 全 IP 校验防 rebinding、禁私网、禁重定向）。
@@ -300,18 +315,40 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 - **身份传播链**（网关剥离注入 → ThreadLocal → Feign 再透传 → WS 同校验），
   "客户端永远无法伪造身份"一句话讲完。
 - **游标分页**（messageId 游标、倒序查询正序返回）+ 批量查询防 N+1。
-- **Redis 实战**：Lua 原子限流切桶、热榜临时 Key 构建后原子切换、Redisson 分布式锁
-  （复习日锁/定时任务防重/会话摘要锁）。
+- **Redis 实战**：点赞计数**双桶累加 + Lua 原子切桶**（0/1 选择 Key，每分钟定时切桶后把封闭桶
+  rename 成 processing Key 异步入队刷库，Redisson `task:community:*` 任务锁防多实例重复切桶）；
+  热榜 ZSet 打分 `(点赞×0.5 + 评论×2.0) / √(发布小时数+2)`，实时增量 + 每 5 分钟全量重建，
+  Lua 合并重建期间增量并 RENAME 原子切换临时 Key；api-governance Redis 滑动窗口限流（键策略见 5.F）；
+  Redisson 分布式锁（复习日锁/定时任务防重/会话摘要锁/热榜重建锁）。
 - **配置治理**：连接信息全在 Nacos、密钥全在环境变量、仓库零敏感值、缺失启动即失败。
 
 ### E. 工程素养（差异化加分）
 
-- 约 150 个**纯离线**单元测试（不依赖中间件，Mockito 直测消费者/事务模板/Channel），
+- 350+ 个**纯离线**单元测试（不依赖中间件，Mockito 直测消费者/事务模板/Channel；仅每服务一个
+  `@SpringBootTest` 样板与一个 OutboxPro 集成测试除外），
   重构有安全网；为 MyBatis-Plus 纯单测解决了表元信息初始化的坑。
 - 文档体系：messaging-reliability.md 是"迭代手册"（新事件五步法、新队列纪律、
   排障顺序、三条人工重放通道、升级路径）。
 - AI 协作开发流程：AGENTS.md 约定 + 并行子 agent 分工 + 安全扫描门禁拦 commit
   （存量高危必须修掉才能提交——本轮就是被它逼着把三处存量命令执行风险全修了）。
+
+### F. 横切能力：api-governance 统一 API 治理
+
+- 问题：限流/管理员校验/慢日志这类横切逻辑散落在各服务 controller，改一处要动八个服务。
+- 方案：自研 starter `io.github.biglv666:api-governance-spring-boot-starter:0.1.0`
+  （根 POM 统一管版本），6 个业务服务（user/question/review/community/message/ai）本地 yaml 显式
+  `api.governance.enabled: true`；judge 也标注了 @RateLimit 但本地 yaml 未显式配置（依赖 Nacos 下发）；
+  网关不接入该 starter 配置，只做头清洗与路由。
+- **@RateLimit 声明式限流**：168 个 controller 方法标注；Redis 滑动窗口，按端点配额，
+  未标注端点默认不限（`default-limit: -1`），超限返回 429 + 各服务定制中文文案。
+- **键策略（service-common `RateLimiterConfig`）**：登录用户按 `#user:{id}` 限流（换 IP 绕不过配额）；
+  匿名请求按 `#ip:` 限流并把注解配额 ×20——校园网/公司共享出口不误伤单个 NAT 用户。
+- **@RequireAdmin（`AdminAuthAspect` 实现 governance `PreFilter`）**：方法/类级注解统一拦截，
+  经 Feign 回查 roleId，仅管理员（2）或 root（0）放行，拒绝只回原因不泄露内部细节。
+- 治理端点：每服务 `/api/{svc}/governance`（配置驱动，`slow-threshold-ms: 1000` 慢请求日志，
+  默认不记参数/响应体）。
+- 讲法："横切能力做成 starter + 注解，业务代码只声明意图；键策略里'用户维度 + 匿名 IP 配额放大 20 倍'
+  是我对共享出口误伤问题的答案。"
 
 ---
 
@@ -324,7 +361,8 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 | 为什么不用 Redis 做消费幂等？ | Redis 标记与 DB 事务无原子性（先写标记后回滚→重投被跳过=丢消息）；claim 行进业务事务，回滚即消失。Redis 仍用于限流/锁/热榜等无需与 DB 原子的场景 |
 | ACK 时机？ | 永远在事务提交之后；重试消息经 wait 队列 TTL 延迟弹回，避免立即 requeue 的热循环 |
 | 为什么要换队列名？ | RabbitMQ 队列参数（DLX/TTL）不可变，改参数=新队列+旧队列排空迁移，管理台 moveTo |
-| Docker 判题怎么防逃逸/资源耗尽？ | 无网络+全资源限制+只读根+受限tmpfs+非root+cap-drop ALL+进程树清理；容器池限并发天然背压 |
+| Docker 判题怎么防逃逸/资源耗尽？ | 无网络+全资源限制（256m/1cpu/64pids/tmpfs /tmp）+非root+cap-drop ALL+no-new-privileges+进程树清理；判题池不启用只读根（Moby 新版 docker cp 限制，代码注释留痕），验收沙箱才 --read-only + noexec tmpfs；容器池限并发天然背压 |
+| 限流/管理员校验怎么做成横切能力？ | api-governance starter：@RateLimit 声明 + Redis 滑动窗口；键策略=用户维度优先、匿名按 IP 且配额 ×20（防共享出口误伤）；@RequireAdmin 经 PreFilter 统一拦截，见 5.F |
 | AI 生成内容怎么保证正确？ | AI 只生成，验收用确定性编译+执行（沙箱内），50 组数据强校验；失败留状态不删题目 |
 | SSE 断线/超时？ | 占位行四态机；断开判 IOException→CANCELLED 保留部分内容；DB 是事实源，刷新可恢复 |
 | 事务里能发 MQ 吗？ | 直发不行（回滚=幽灵消息）；Outbox 同事务落表、Relay 异步投递，消费端幂等兜底 |

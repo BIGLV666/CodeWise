@@ -1,6 +1,6 @@
 # CodeWise 维护手册
 
-> 基线日期：2026-07-30
+> 基线日期：2026-09-12（对照代码逐项校验更新）
 > 适用范围：CodeWise 后端微服务仓库
 
 ## 1. 系统定位
@@ -22,6 +22,8 @@ CodeWise 是面向编程学习、在线判题、错题复习和题解社区的 S
 | `service-api` | - | Feign 接口和跨服务 DTO |
 | `service-common` | - | JWT、MQ、Redis、用户上下文等公共能力 |
 
+另有实验性模块 `service-judge-go`（Java service-judge 的 Go 重构，见其 README）：当前仅提供 HTTP 调试/判题骨架，RabbitMQ 消费默认关闭（`JUDGE_MQ_ENABLED`），函数模式与 Docker 沙箱仍由 Java `service-judge` 承载，不参与默认部署。
+
 ## 3. 外部依赖
 
 - JDK 21、Maven Wrapper
@@ -38,11 +40,11 @@ CodeWise 是面向编程学习、在线判题、错题复习和题解社区的 S
 
 | 变量 | 作用范围 | 说明 |
 |------|----------|------|
-| `CODEWISE_INTERNAL_TOKEN` | 全部 8 个服务 | 网关/下游拦截器/Feign 三处同值的内部通信 Token |
-| `JWT_SECRET` | service-gateway、service-message、service-review | JWT 签名密钥，与 Python Agent `.env` 的 `JWT_SECRET` 同值（签名算法由密钥长度自动选择） |
+| `CODEWISE_INTERNAL_TOKEN` | 全部 8 个服务 | 网关/下游拦截器/Feign 三处同值的内部通信 Token（各服务 yaml `codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`，无默认值） |
+| `JWT_SECRET` | service-gateway、service-message、service-review、service-user | JWT 签名密钥（user 登录时签发 token），与 Python Agent `.env` 的 `JWT_SECRET` 同值（签名算法由密钥长度自动选择） |
 | `API_KEY_MASTER_KEY` | service-ai | 自定义模型 API Key 的 AES-GCM 主密钥；经属性 `security.api-key-master-key` 读取，仓库 yaml 不落盘，需通过环境变量或 Nacos 注入 |
 
-网关 IP 信任策略：默认 `codewise.gateway.trust-forwarded-for=false` 只信任 TCP remoteAddress 并剥离客户端 X-Forwarded-For；部署在可信 LB 之后才置 true。数据库增量：`consumed_event` 建表见 service-review resources；Outbox 表（`outboxpro_*`）由生产者服务启动时自动创建（需业务账号有 CREATE 权限，部署初始化脚本已授权）
+网关 IP 信任策略：默认 `codewise.gateway.trust-forwarded-for=false` 只信任 TCP remoteAddress 并剥离客户端 X-Forwarded-For；部署在可信 LB 之后才置 true。数据库增量：`consumed_event` 幂等表共有三份同构 DDL，分别位于 `service-message/src/main/resources/sql.sql`、`service-ai/src/main/resources/sql/consumed_event.sql`（多一列 `result_ref`）、`service-review/src/main/resources/sql/sql.sql`；Outbox 表（`outboxpro_*`）由生产者服务启动时自动创建（`outboxpro.schema-initialize` 默认开，需业务账号有 CREATE 权限，部署初始化脚本已授权）
 
 ## 4. 数据库约定
 
@@ -75,11 +77,12 @@ service-question/src/main/resources/sql/function_test_case_unique_hash.sql
 
 根 `pom.xml` 当前主要承担父依赖管理，没有声明 Maven `modules`。维护时按模块构建，不要使用 `-pl service-question` 从根工程选择模块。
 
-先安装公共依赖：
+先安装公共依赖（`service-common` 依赖 `service-api`，必须先装 api；冷环境还需先装根父 POM，各模块 pom 均声明它为 parent）：
 
 ```powershell
-.\mvnw.cmd -f service-common\pom.xml -DskipTests install
+.\mvnw.cmd -N install
 .\mvnw.cmd -f service-api\pom.xml -DskipTests install
+.\mvnw.cmd -f service-common\pom.xml -DskipTests install
 ```
 
 构建业务模块：
@@ -155,19 +158,16 @@ MySQL / Redis / RabbitMQ / Nacos / Docker
 
 ## 9. 判题安全边界
 
-当前已有限制：容器内执行、总内存限制、JVM 堆限制、运行超时和禁用网络。
+已有限制（`DockerExecTemplate.createContainer` 建池时统一设置）：容器内执行、内存 256MB（含 swap 同值）、CPU 配额（period/quota 各 100ms ≈ 1 核）、PID 上限 64、禁用网络（network=none）、丢弃全部 capabilities、`no-new-privileges`、非 root 用户（uid 1000）运行、`/tmp` 落在 16m tmpfs、JVM 堆限制、运行超时与编译超时 15s（`LanguageSpec.COMPILE_TIMEOUT_MS`）。
 
-当前仍需加固：
+刻意不启用只读根文件系统与 `/workspace` tmpfs：新版 Moby（29+，containerd 存储）下 `docker cp` 对只读容器直接拒绝、对 tmpfs 挂载点静默写入被遮挡路径，代码注释有完整权衡说明。
 
-- 设置容器 PID 数量和 CPU 配额。
-- 使用非 root 用户，删除不必要 capabilities。
-- 启用只读根文件系统和 `no-new-privileges`。
-- 限制输出文件与临时磁盘大小。
-- 编译阶段增加超时。
-- 每次提交使用独立临时容器，结束后销毁。
-- 超时时停止整个容器或进程组，防止后台子进程残留。
+仍需评估：
 
-当前语言容器会复用，`cleanContainerWorkspace()` 只清理工作目录，不等于清理用户创建的后台进程。判题节点不应与数据库、消息队列等核心服务部署在同一宿主机。
+- 每次提交使用独立临时容器，结束后销毁（当前以「污染即销毁重建」近似）。
+- 限制输出文件与临时磁盘大小（/tmp 已限，stdout/stderr 文件尚无显式上限）。
+
+exec 超时或异常会把容器标记为污染（tainted），归还时销毁重建、整棵进程树随之清理——超时残留后台子进程不会污染下一个用例。语言容器平时复用，`cleanContainerWorkspace()` 只清理工作目录，这正是「超时即污染重建」存在的原因。判题节点不应与数据库、消息队列等核心服务部署在同一宿主机。
 
 ### 容器池运维
 
@@ -191,7 +191,9 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ## 10. Redis 与 RabbitMQ 维护
 
-- 判题主链路已改为事务性 Outbox（OutboxPro，Publisher Confirm 确认投递）+ 统一消息信封：提交经 `outboxpro_outbox` 中转投递，判题队列为 `judge.submit.queue` / `judge.debug.queue` / `judge.retry.queue`（均挂 DLX），延迟重试经 `judge.wait.queue` TTL 弹回，死信入 `judge.dead.queue` 并登记 `failure_submit`。架构说明、迭代手册与重放操作见 `docs/maintenance/messaging-reliability.md`。
+- 判题主链路已改为事务性 Outbox（OutboxPro，Publisher Confirm 确认投递）+ 统一消息信封：提交经 `outboxpro_outbox` 中转投递，判题队列为 `judge.submit.queue` / `judge.debug.queue` / `judge.retry.queue`（均挂 DLX），submit 消费失败经 `judge.wait.queue` TTL 延迟弹回（debug 失败写 Redis 结果不重试、retry 失败直接死信留痕），死信入 `judge.dead.queue` 并登记 `failure_submit`。架构说明、迭代手册与重放操作见 `docs/maintenance/messaging-reliability.md`。
+- MQ 拓扑声明集中在 `service-common` `MqConfig`，仅当 `codewise.mq.enabled=true` 时装配：community/message/review 已在本地 yaml 显式配 true，question/judge/ai/user 依赖 Nacos 下发；缺省不声明队列，监听方会因队列不存在启动失败。
+- 手动 ACK 消费者所在服务（question/judge/ai/message/review/user）本地 yaml 均显式配置 `spring.rabbitmq.listener.simple.acknowledge-mode: manual`——Spring 默认 AUTO 会与手动 ACK 叠加触发 406 双重确认、channel 崩溃循环，容器部署（Nacos 空跑）时不能依赖 Nacos 下发该项。
 - 新增队列必须挂 DLX；改队列参数必须换新队列名（RabbitMQ 队列参数不可变）。
 - 修改 routing key 时同时检查生产者、队列绑定和消费者。
 - 消费者必须考虑重复投递，优先使用业务唯一 ID 或数据库唯一键实现幂等；消费入口统一用 `EnvelopeCodec.unwrap` 双读（信封/裸格式）。
@@ -199,6 +201,15 @@ DELETE /api/judge/containers/{language}/{containerId}
 - Redis 双桶回写失败时不得删除旧桶；Lua 切桶和 Redisson 任务锁必须一起保留。
 
 ## 11. 常见故障排查
+
+### 服务启动即失败
+
+1. 缺 `CODEWISE_INTERNAL_TOKEN`：全部 8 个服务 yaml 均为 `codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`（无默认值），缺失直接启动失败，属预期。
+2. 生产者服务（question/judge/review/community）缺 `outboxpro.producer.poll-interval: 1000`：OutboxPro 默认值 `"1000ms"` 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 解析失败导致启动即挂；必须显式配纯毫秒。
+3. 缺 `JWT_SECRET`：gateway/message/review/user 的 `jwt.secret: ${JWT_SECRET}` 无默认值。Python Agent 侧密钥不一致时，响应只有 `401`「登录状态已失效，请重新登录」（码 `4011002`），**具体原因（签名不匹配、密钥缺失、长度不足）只写服务端日志**：日志出现 `Token 校验失败: Signature verification failed` 即两端 `JWT_SECRET` 不一致；出现 `服务端 JWT 配置异常` 则是 Agent 自身密钥缺失或短于 32 字节（此时返回 `500` / 码 `5001001`）。
+4. 消费者服务监听队列报「队列不存在」：`codewise.mq.enabled` 未下发（MqConfig 不装配则不声明队列，见第 10 节）。
+5. service-ai 缺 `API_KEY_MASTER_KEY`：`ApiKeyCryptoService` 构造读 `security.api-key-master-key`（无默认值），缺失启动失败。
+6. judge 消费后 channel 反复 406（PRECONDITION_FAILED - acknowledgement source）：`acknowledge-mode: manual` 配置丢失（见第 10 节）。
 
 ### 服务无法被调用
 
@@ -208,7 +219,7 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ### 提交一直 pending
 
-1. 查 `codewise_question.outboxpro_outbox`：`status='DEAD'`（投递超限，经 `/actuator/outboxpro-ops/outbox` 查台账）或 PENDING 积压（Relay 未运行 / broker 断连，`last_error_message` 有原因）。
+1. 查 `codewise_question.outboxpro_outbox`：`status='DEAD'`（投递超限，重试台账见 `outboxpro_dead_letter` 表）或 PENDING 积压（Relay 未运行 / broker 断连，`last_error_message` 有原因）。运维端点 `/actuator/outboxpro-ops/outbox`、`/dlq` 默认不可用：需 `outboxpro.ops.enabled=true`（默认关）且把 `outboxpro-ops` 加入 actuator exposure（本地 yaml 只暴露 health,info,metrics），未开启时直接查表。
 2. 检查判题消息是否进入 RabbitMQ（`judge.submit.queue` 深度）。
 3. 检查 `service-judge` 消费日志（eventId / retryCount / 最终结果）与死信队列 `judge.dead.queue`。
 4. 检查 Docker 容器池是否初始化成功。
@@ -243,7 +254,7 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 - 根 Maven 工程尚未聚合所有模块。
 - 自动化测试覆盖仍偏少，Docker 判题缺少隔离环境集成测试（本机跑全上下文测试需先起 Nacos/Redis/RabbitMQ）。
-- 判题沙箱的 PID、CPU、文件系统和进程回收限制不完整。
-- RabbitMQ 死信队列、延迟重试与失败补偿已落地（见 `docs/maintenance/messaging-reliability.md`）；剩余：publisher confirm 未启用（当前至少一次 + 消费幂等）、消息（邮件/通知）与社区生产端尚未接入 Outbox/统一信封（判题与复习链路已迁移）。
+- 判题沙箱已配置 PID/CPU/内存/禁网/capabilities/非 root/编译超时；剩余：未做「每次提交一次性容器」（以复用 + 超时或异常污染销毁重建近似）、stdout/stderr 输出文件无显式磁盘上限。
+- RabbitMQ 死信队列、延迟重试与失败补偿已落地（见 `docs/maintenance/messaging-reliability.md`），Outbox Relay 投递已经 Publisher Confirm 确认；剩余：非事务直发通道（邮件/WebSocket 推送、社区点赞等尽力而为通知）仍为至少一次 + 消费幂等，message 与社区部分生产端未接入 Outbox/统一信封，`message.queue` / `notification.queue` 未挂 DLX（判题、复习、申诉链路已迁移）。
 - Feign 超时、熔断、降级和统一异常契约仍需收敛。
 - 需要补充 traceId、结构化日志和判题资源监控。

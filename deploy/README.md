@@ -1,11 +1,11 @@
 # CodeWise Docker 快速开始（Quickstart）
 
-目标：**一台 Linux 主机 + Docker，十分钟内跑起 CodeWise 全栈**（前端、网关、7 个业务服务、Python Agent、MySQL/Redis/RabbitMQ/Nacos、判题沙箱、Mailpit 邮件捕获）。生产部署与运维要求见 [`OPERATIONS.md`](OPERATIONS.md)。
+目标：**一台 Linux 主机 + Docker，十分钟内跑起 CodeWise 全栈**（前端、网关、7 个业务服务、Python Agent、MySQL/Redis/RabbitMQ/Nacos、Mailpit 邮件捕获共 15 个常驻容器；另有一个一次性 judge-base 构建任务容器，判题沙箱为运行期动态创建的临时容器）。生产部署与运维要求见 [`OPERATIONS.md`](OPERATIONS.md)。
 
 ## 前置条件
 
 - Docker 24+ 与 docker compose v2 插件；
-- 内存 ≥ 8G、磁盘 ≥ 20GB。
+- 内存 ≥ 10G（常驻容器 mem_limit 合计约 8.8G，判题沙箱容器另各限 256m）、磁盘 ≥ 20GB。
 
 ## 三步启动
 
@@ -20,7 +20,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 首次启动会自动完成：
 
-- MySQL 建库 + 全部建库授权与建表/迁移 SQL（[`mysql-init/01-init-databases.sh`](mysql-init/01-init-databases.sh)）；
+- MySQL 建库 + 业务账号全库授权 + 建表 SQL（增量变更已合入基础脚本；[`mysql-init/01-init-databases.sh`](mysql-init/01-init-databases.sh)）；
 - OutboxPro 事件表（`outboxpro_*`）由生产者服务首次启动时自动创建；
 - root 管理员创建（`ROOT_USERNAME`，默认 `admin`；密码取 `ROOT_PASSWORD`，`sys_init` 表幂等）；
 - RabbitMQ 拓扑与判题容器池预热。
@@ -45,10 +45,10 @@ curl http://localhost:8082/actuator/health        # {"status":"UP"}
 
 ## 构建了什么
 
-- 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；
-- 判题基础镜像：[`judge-base/Dockerfile`](judge-base/Dockerfile)（JDK17 + uid 1000 judge 用户 + jackson 函数题依赖）；
-- Python Agent 镜像：`codewise-agent/Dockerfile`（Node 22 + Python 3.11 双运行时），nginx 以 `/agentapi/` 反代；
-- 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend/CodeWise-frontend`（pnpm + `VITE_AGENT_BASE_URL=/agentapi`）并挂载 [`nginx.conf`](nginx.conf)。
+- 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；容器内 Maven 多阶段构建按 `-N install` 根 POM → `service-api` → `service-common` → 目标模块的顺序执行（仓库无聚合 POM）；运行阶段固定 JVM 参数 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，与 compose 各服务 `mem_limit`（384m–1.5g）配合防止容器 OOM kill；
+- 判题基础镜像：[`judge-base/Dockerfile`](judge-base/Dockerfile)（JDK17 + uid 1000 judge 用户 + jackson 2.15.x 函数题依赖三件套内置到 `/opt/judge/lib`）；
+- Python Agent 镜像：`codewise-agent/Dockerfile`（node:22-bookworm-slim 单镜像双运行时：Node 22 + Debian 自带 Python 3.11），nginx 以 `/agentapi/` 反代；
+- 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend/CodeWise-frontend`（pnpm + `VITE_AGENT_BASE_URL=/agentapi`）并挂载 [`nginx.conf`](nginx.conf)；[`frontend/Dockerfile`](frontend/Dockerfile) 为内容一致的独立构建参考。
 
 ## 遇到问题
 

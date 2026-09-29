@@ -109,12 +109,13 @@ Authorization: Bearer <token>
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `postId` | `Long` | 是 | 帖子 ID |
+| `postId` | `Long` | 是 | 帖子 ID（评论题解时为题解 ID） |
+| `type` | `PostType` | 否 | 默认 `POST`；查询题解评论时传 `SOLUTION` |
 | `rootCommentId` | `Long` | 否 | 默认 `-1` 不按根评论筛选；传根评论 ID 查询其回复 |
 | `lastId` | `Long` | 否 | 下一页游标 |
 | `pageSize` | `Integer` | 否 | 默认 20，范围 1 到 100 |
 
-返回：`Result<CursorPageResult<CommentVo>>`，每条记录包含当前用户的 `isLike` 状态。
+返回：`Result<CursorPageResult<CommentVo>>`，按 `commentId` 升序游标分页，只返回正常状态（`status=1`）的评论，每条记录包含当前用户的 `isLike` 状态。
 
 ## 点赞接口
 
@@ -129,8 +130,9 @@ Authorization: Bearer <token>
 - 接收人从内容作者缓存获取，缓存未命中时回源对应业务表并回填。
 - 自己点赞自己的内容不生成通知。
 - 消息 ID 由业务类型、点赞用户和目标 ID 组成，同一用户对同一内容仅提醒一次。
-- 通知发送到 `notification.exchange`，由 `service-message` 持久化并尝试 WebSocket 推送。
+- 通知发送到 `notification.exchange`（路由键 `notification.like.routing`），由 `service-message` 持久化并尝试 WebSocket 推送。
 - 点赞计数仍通过 Redis 增量桶定时批量回写 MySQL。
+- 通知任务提交到专用线程池 `communityLikeNotifyExecutor`，与点赞计数桶消费线程池 `communityBucketConsumerExecutor` 隔离（桶消费是长期占用线程的刷库循环，混用会饿死通知任务）；队列满时 `CallerRunsPolicy` 让通知退化为调用线程同步执行，通知不丢。
 
 点赞接口为状态切换操作。返回 `true` 表示操作后已点赞，返回 `false` 表示操作后已取消点赞。
 
@@ -156,6 +158,20 @@ Authorization: Bearer <token>
 返回：`Result<Boolean>`。
 
 点赞记录会先写入 Redis 增量桶，再由定时任务批量更新帖子、评论或题解的 `likeCount`，因此计数展示存在短暂延迟。
+
+> 帖子详情的 `likeCount` 会实时叠加当前点赞增量桶中该帖的增量（读取 `like_post_key-<当前桶>`），因此发帖详情看到的点赞数已含尚未落库的部分。
+
+## 异步线程池
+
+社区服务注册三个专用 `ThreadPoolTaskExecutor`（均在 `AsyncThreadConfig` 中定义，参数可经 `application.yaml` 的 `codewise.async.*` 覆盖，拒绝策略统一为 `CallerRunsPolicy`，优雅关闭 `waitForTasksToCompleteOnShutdown=true`）：
+
+| Bean 名称 | 用途 | 配置前缀 | 默认 core/max/queue | 线程名前缀 |
+| --- | --- | --- | --- | --- |
+| `communityCascadeDeleteExecutor` | 删帖/删评论的级联清理（标签、评论、点赞异步删除） | `codewise.async.cascade-delete` | 2 / 8 / 100 | `community-cascade-delete-` |
+| `communityBucketConsumerExecutor` | 点赞桶、题解浏览量桶的刷库消费循环 | `codewise.async.bucket-consumer` | 2 / 4 / 100（无 keep-alive 项） | `community-bucket-consumer-` |
+| `communityLikeNotifyExecutor` | 点赞通知（读缓存 + Feign 取用户 + 投递 RabbitMQ） | `codewise.async.like-notify` | 2 / 8 / 500 | `community-like-notify-` |
+
+级联删除与桶消费为 `keep-alive` 60 秒、`await-termination` 30 秒；`bucket-consumer` 未配置 keep-alive。删除帖子的接口在级联任务被线程池拒绝时会在调用线程内同步执行兜底。
 
 ## Agent 专用社区接口
 
@@ -236,8 +252,9 @@ Authorization: Bearer <token>
 | `postId` | `Long` | 帖子 ID |
 | `postTitle` | `String` | 标题 |
 | `tags` | `List<String>` | 标签 |
-| `userId` | `Long` | 发布用户 ID |
-| `userName` | `String` | 发布用户名 |
+| `userId` | `String` | 发布用户 ID（实体为 `Long`，VO 中转成字符串避免前端精度丢失） |
+| `userName` | `String` | 发布用户昵称（经 Feign 回填） |
+| `avatar` | `String` | 发布用户头像（经 Feign 回填） |
 | `likeCount` | `Long` | 点赞数 |
 | `commentCount` | `Long` | 评论数 |
 | `createTime` | `LocalDateTime` | 创建时间 |
@@ -370,6 +387,7 @@ GET /api/community/comments?postId=200&type=SOLUTION&pageSize=20
 | --- | --- | --- |
 | `postContent` | `String` | 帖子正文 |
 | `isLike` | `Boolean` | 当前用户是否已点赞 |
+| `userDto` | `UserDto` | 作者信息（经 Feign 获取，可能为 `null`） |
 | `relatedPost` | `Map<String, Map<Long, String>>` | 标签到相关帖子 ID、标题的映射 |
 
 ### CommentVo
@@ -378,14 +396,15 @@ GET /api/community/comments?postId=200&type=SOLUTION&pageSize=20
 | --- | --- | --- |
 | `commentId` | `Long` | 评论 ID |
 | `comment` | `String` | 评论内容 |
-| `userId` | `Long` | 评论用户 ID |
+| `userId` | `String` | 评论用户 ID（VO 中转成字符串） |
 | `userName` | `String` | 评论用户名 |
-| `postId` | `Long` | 所属帖子 ID |
+| `postId` | `Long` | 所属帖子/题解 ID |
 | `rootCommentId` | `Long` | 所属根评论 ID |
 | `replyUserId` | `Long` | 被回复用户 ID |
 | `replyUserName` | `String` | 被回复用户名 |
 | `likeCount` | `Long` | 点赞数 |
 | `isLike` | `Boolean` | 当前用户是否已点赞 |
+| `type` | `PostType` | 评论目标类型：`POST` 或 `SOLUTION` |
 | `createTime` | `LocalDateTime` | 创建时间 |
 | `updateTime` | `LocalDateTime` | 更新时间 |
 
@@ -419,24 +438,28 @@ GET /api/community/check/post/list
 | lastId | Long | 否 | 游标，上一页最后一条的 post_id |
 | pageSize | Integer | 否 | 每页数量，默认 10 |
 
-**响应示例**:
+**响应示例**（`CursorPageResult<HomePostVo>`，帖子按 `postId` 升序游标分页，仅含 `status=0` 待审核帖子；`total` 未统计，恒为 `null`）:
 ```json
 {
   "code": 200,
   "data": {
-    "list": [
+    "records": [
       {
         "postId": 123456,
         "postTitle": "如何优化算法性能",
-        "postContent": "我在做题时...",
-        "userId": 1001,
+        "tags": ["算法"],
+        "userId": "1001",
         "userName": "张三",
-        "status": 0,
-        "createTime": "2026-08-18T10:30:00"
+        "avatar": "https://...",
+        "likeCount": 0,
+        "commentCount": 3,
+        "createTime": "2026-08-18T10:30:00",
+        "updateTime": "2026-08-18T10:30:00"
       }
     ],
-    "hasMore": true,
-    "total": 25
+    "nextCursor": 123456,
+    "hasNext": true,
+    "total": null
   }
 }
 ```
@@ -447,23 +470,26 @@ GET /api/community/check/post/list
 GET /api/community/check/post/detail?postId=123456
 ```
 
-**响应示例**:
+**响应示例**（`CheckDetailVo`，帖子/评论/题解共用同一扁平结构，作者信息经 Feign 回填到 `userDto`）:
 ```json
 {
   "code": 200,
   "data": {
-    "content": {
-      "postId": 123456,
-      "postTitle": "标题",
-      "postContent": "正文...",
-      "status": 0,
-      "createTime": "2026-08-18T10:30:00"
-    },
-    "author": {
-      "userId": 1001,
-      "userName": "张三",
-      "avatar": "https://..."
-    }
+    "targetId": 123456,
+    "type": "POST",
+    "title": "如何优化算法性能",
+    "content": "正文...",
+    "userId": "1001",
+    "userDto": { "userId": "1001", "userName": "zhangsan", "nickName": "张三", "avatarUrl": "https://...", "roleId": 1 },
+    "status": 0,
+    "tags": ["算法"],
+    "postId": null,
+    "rootCommentId": null,
+    "questionId": null,
+    "likeCount": 0,
+    "commentCount": 3,
+    "createTime": "2026-08-18T10:30:00",
+    "updateTime": "2026-08-18T10:30:00"
   }
 }
 ```
@@ -478,7 +504,10 @@ POST /api/community/check/post?postId=123456&status=1
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | postId | Long | 是 | 帖子 ID |
-| status | Integer | 是 | 1=通过，2=拒绝 |
+| status | Integer | 是 | 1=通过，2=拒绝（仅待审核 `status=0` 的帖子可审核） |
+| reason | String | 否 | 拒绝原因，拒绝时写入 `take_down_post` 并随通知下发 |
+
+通过后帖子入热榜（Redis ZSet 记 0 分），拒绝时移出热榜并记录下架表；无论通过或拒绝都会向作者发送审核结果通知。
 
 **响应**:
 ```json
@@ -511,7 +540,9 @@ POST /api/community/check/post/status
 
 ---
 
-### 1.5 获取待审核评论列表
+### 1.5 获取评论列表（用于下架处置）
+
+评论采用即时发布，没有待审核态；该列表返回**已发布（`status=1`）** 的评论，供管理员执行下架处置。
 
 ```http
 GET /api/community/check/comment/list
@@ -520,31 +551,36 @@ GET /api/community/check/comment/list
 **请求参数**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| lastId | Long | 否 | 游标 |
+| lastId | Long | 否 | 游标，上一页最后一条的 comment_id |
 | pageSize | Integer | 否 | 每页数量，默认 10 |
 | rootCommentId | Long | 否 | 筛选某个一级评论下的回复 |
-| type | PostType | 否 | POST 或 SOLUTION |
+| type | PostType | 否 | 默认按 `POST`，可传 `SOLUTION` |
 
-**响应示例**:
+**响应示例**（`CursorPageResult<CommentVo>`，按 `commentId` 升序游标；审核台不回填 `isLike`）:
 ```json
 {
   "code": 200,
   "data": {
-    "list": [
+    "records": [
       {
         "commentId": 789,
         "comment": "评论内容...",
-        "userId": 1002,
+        "userId": "1002",
         "userName": "李四",
         "postId": 123456,
         "rootCommentId": null,
-        "status": 0,
+        "replyUserId": null,
+        "replyUserName": null,
+        "likeCount": 0,
+        "isLike": null,
         "type": "POST",
-        "createTime": "2026-08-18T11:00:00"
+        "createTime": "2026-08-18T11:00:00",
+        "updateTime": "2026-08-18T11:00:00"
       }
     ],
-    "hasMore": false,
-    "total": 8
+    "nextCursor": 789,
+    "hasNext": false,
+    "total": null
   }
 }
 ```
@@ -584,24 +620,29 @@ GET /api/community/check/solution/list
 | lastId | Long | 否 | 游标 |
 | pageSize | Integer | 否 | 每页数量，默认 10 |
 
-**响应示例**:
+**响应示例**（`CursorPageResult<HomeSolutionVo>`，按 `solutionId` 升序游标；`HomeSolutionVo` 不含正文与状态字段，作者信息经 Feign 回填到 `userDto`）:
 ```json
 {
   "code": 200,
   "data": {
-    "list": [
+    "records": [
       {
         "solutionId": 5001,
         "questionId": 101,
         "solutionTitle": "双指针解法",
-        "solutionContent": "这道题可以用...",
-        "solutionUserId": 1003,
-        "status": 0,
-        "createTime": "2026-08-18T12:00:00"
+        "solutionUserId": "1003",
+        "userDto": { "userId": "1003", "userName": "lisi", "nickName": "李四", "avatarUrl": "https://...", "roleId": 1 },
+        "likeCount": 0,
+        "lookCount": 12,
+        "commentCount": 0,
+        "tags": ["双指针"],
+        "createTime": "2026-08-18T12:00:00",
+        "updateTime": "2026-08-18T12:00:00"
       }
     ],
-    "hasMore": true,
-    "total": 15
+    "nextCursor": 5001,
+    "hasNext": true,
+    "total": null
   }
 }
 ```
@@ -621,8 +662,9 @@ POST /api/community/check/solution?solutionId=5001&status=1
 **请求参数**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| solutionId | Long | 是 | 题解 ID |
+| solutionId | Long | 是 | 题解 ID（仅待审核 `status=0` 的题解可审核） |
 | status | Integer | 是 | 1=通过，2=拒绝 |
+| reason | String | 否 | 拒绝原因，拒绝时写入 `take_down_post` 并随通知下发 |
 
 ### 1.11 下架或恢复已发布题解
 
@@ -664,27 +706,31 @@ GET /api/community/check/takedown/list
 **请求参数**:
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| lastId | Long | 否 | 游标 |
+| lastId | Long | 否 | 游标，传上一页返回的 `nextCursor`；本页按记录 `id` **降序**返回 |
 | pageSize | Integer | 否 | 每页数量，默认 10 |
 
-**响应示例**:
+**响应示例**（`CursorPageResult<TakeDownPostVo>`；`takeDownId` 是 `take_down_post` 的雪花 ID，用 `@JsonSerialize(ToStringSerializer)` 序列化为字符串避免精度丢失；`adminName` 取管理员 `userName`；`title`/`content` 为关联内容摘要，正文超 100 字截断加 `...`；`total` 为本页条数）:
 ```json
 {
   "code": 200,
   "data": {
-    "list": [
+    "records": [
       {
-        "id": 9001,
+        "takeDownId": "1948273645123456789",
         "rootType": "POST",
         "rootId": 123456,
         "rootCommentId": null,
         "questionId": null,
         "reason": "涉及敏感内容",
         "adminId": 1,
-        "createTime": "2026-08-18T14:00:00"
+        "adminName": "admin",
+        "createTime": "2026-08-18T14:00:00",
+        "title": "如何优化算法性能",
+        "content": "我在做题时..."
       }
     ],
-    "hasMore": false,
+    "nextCursor": 1948273645123456789,
+    "hasNext": false,
     "total": 3
   }
 }
@@ -710,28 +756,27 @@ GET /api/community/appeal-admin/list
 | pageSize | Integer | 否 | 每页数量，默认 20 |
 | status | Integer | 否 | 筛选状态：0=待处理，1=已拒绝，2=已恢复，null=全部 |
 
-**响应示例**:
+**响应示例**（`CursorPageResult<AppealVo>`，按 `appealId` 升序游标；管理端回填申诉人 `user` 与关联内容 `title`；`total` 为本页条数）:
 ```json
 {
   "code": 200,
   "data": {
-    "list": [
+    "records": [
       {
         "appealId": 2001,
-        "userId": 1001,
-        "rootType": "POST",
-        "rootId": 123456,
-        "rootCommentId": null,
-        "questionId": null,
+        "postId": 123456,
+        "postType": "POST",
+        "title": "如何优化算法性能",
         "reason": "我认为内容没有违规...",
+        "takeDownReason": null,
         "status": 0,
-        "adminReason": null,
-        "handlerId": null,
-        "handledAt": null,
-        "createTime": "2026-08-18T15:00:00"
+        "user": { "userId": "1001", "userName": "zhangsan", "nickName": "张三", "avatarUrl": "https://...", "roleId": 1 },
+        "createTime": "2026-08-18T15:00:00",
+        "updateTime": "2026-08-18T15:00:00"
       }
     ],
-    "hasMore": true,
+    "nextCursor": 2001,
+    "hasNext": true,
     "total": 12
   }
 }
@@ -759,8 +804,10 @@ POST /api/community/appeal-admin/handle
 ```
 
 **业务逻辑**:
-- `pass=true`: 申诉状态改为 `APPROVED(2)`，原内容状态恢复为 `APPROVED(1)`
-- `pass=false`: 申诉状态改为 `REJECTED(1)`，原内容状态保持不变
+- `pass=true`：申诉状态置为 `2`（已恢复），原内容状态恢复为 `1`（正常）；帖子同时清缓存并移出热榜。
+- `pass=false`：申诉状态置为 `1`（已拒绝），`takeDownReason` 记为 `adminReason`，原内容状态保持不变。
+- 仅处理中（申诉 `status=0`）的记录可被处理，重复处理返回「该申诉已处理」。
+- 处理结果通知（`NotificationCenterType.APPEAL`）与申诉状态更新**同事务**经 OutboxPro 事务性发件箱登记（`outboxPublisher.publish(NOTIFICATION_APPEAL, ...)`），由 Relay 经 Publisher Confirm 至少一次投递；重复投递由 `service-message` 按 `messageId` 幂等去重。
 
 ---
 
@@ -802,6 +849,7 @@ POST /api/community/appeal/submit
 - 只能申诉本人发布的内容，且内容处于被下架/被拒绝状态（status=2/3）时才可申诉
 - 同一内容只有一条 `Appeal` 记录：待审核（status=0）期间重复提交会被拒绝；处理完结后可再次提交并更新理由、重置状态
 - 申诉状态：0-待审核，1-拒绝，2-恢复（通过后原内容恢复）
+- 提交申诉**不再向管理员发送通知**，管理员通过「申诉管理列表」轮询待处理（status=0）申诉
 
 ### 3.2 我的申诉历史
 
@@ -872,33 +920,44 @@ GET /api/community/mine?type=POST&lastId=&pageSize=20
 | lastId | Long | 否 | 游标 |
 | pageSize | Integer | 否 | 每页数量，默认 20 |
 
-**响应示例**:
+**响应示例**（`CursorPageResult<MyContentVo>`；`targetId`/`rootId`/`questionId` 为字符串；列表按 ID **降序**游标分页，`nextCursor` 传下一页 `lastId`；`rejectReason` 从 `take_down_post` 回填（仅下架/拒绝内容）；`total` 恒为 `null`）:
 ```json
 {
   "code": 200,
   "data": {
-    "list": [
+    "records": [
       {
-        "id": 123456,
-        "type": "POST",
-        "title": "如何优化算法性能",
-        "content": "我在做题时...",
-        "status": 1,
-        "checkReason": null,
-        "createTime": "2026-08-18T10:30:00"
-      },
-      {
-        "id": 123457,
+        "targetId": "123457",
         "type": "POST",
         "title": "另一个帖子",
         "content": "...",
         "status": 2,
-        "checkReason": "内容涉及违规",
-        "createTime": "2026-08-17T09:00:00"
+        "rejectReason": "内容涉及违规",
+        "tags": ["算法"],
+        "rootId": null,
+        "rootType": null,
+        "questionId": null,
+        "createTime": "2026-08-17T09:00:00",
+        "updateTime": "2026-08-17T09:00:00"
+      },
+      {
+        "targetId": "123456",
+        "type": "POST",
+        "title": "如何优化算法性能",
+        "content": "我在做题时...",
+        "status": 1,
+        "rejectReason": null,
+        "tags": ["二分"],
+        "rootId": null,
+        "rootType": null,
+        "questionId": null,
+        "createTime": "2026-08-18T10:30:00",
+        "updateTime": "2026-08-18T10:30:00"
       }
     ],
-    "hasMore": true,
-    "total": 45
+    "nextCursor": 123456,
+    "hasNext": true,
+    "total": null
   }
 }
 ```
@@ -914,13 +973,15 @@ GET /api/community/mine?type=POST&lastId=&pageSize=20
 
 ## 五、数据模型
 
-### 5.1 内容状态枚举 (PostStatus)
+### 5.1 内容状态 (PostStatus)
+
+`PostStatus` 不是枚举，而是保存 `int` 常量的工具类（数据库为 tinyint，保持既有映射）：`PENDING=0`（待审核，仅作者与管理员可见）、`NORMAL=1`（审核通过，公开可见）、`TACK_DOWN=2`（已下架/审核不通过）。帖子 `Post` 实体另有 `status=3`（审核未通过）的历史取值；申诉资格判断同时接受 `2` 和 `3`。
 
 ```java
-public enum PostStatus {
-    PENDING(0, "待审核"),
-    APPROVED(1, "已通过"),
-    REJECTED(2, "已拒绝/已下架");
+public final class PostStatus {
+    public static final int PENDING = 0;   // 待审核
+    public static final int NORMAL  = 1;   // 审核通过
+    public static final int TACK_DOWN = 2; // 已下架 / 审核不通过
 }
 ```
 
@@ -929,20 +990,16 @@ public enum PostStatus {
 ```java
 public enum PostType {
     POST,       // 社区帖子
-    COMMENT,    // 评论
-    SOLUTION    // 题解
+    SOLUTION,   // 题解
+    COMMENT     // 评论
 }
 ```
 
-### 5.3 申诉状态枚举 (AppealStatus)
+`PostType` 用 `@EnumValue`/`@JsonValue`，与数据库及 JSON 均以枚举名（`POST`/`SOLUTION`/`COMMENT`）存取。
 
-```java
-public enum AppealStatus {
-    PENDING(0, "待处理"),
-    REJECTED(1, "已拒绝"),
-    APPROVED(2, "已通过/已恢复")
-}
-```
+### 5.3 申诉状态
+
+申诉没有独立枚举类，`Appeal.status` 为 `int`：`0`-待审核、`1`-拒绝、`2`-恢复（通过后原内容恢复）。
 
 ---
 
@@ -950,39 +1007,24 @@ public enum AppealStatus {
 
 ### 6.1 审核通知
 
-**触发场景**: 管理员审核内容后（通过/拒绝/下架/恢复）
+**触发场景**: 管理员审核内容后（通过 / 拒绝 / 下架 / 恢复）
 
-**通知对象**: 内容所有者
+**通知对象**: 内容所有者（作者）
 
-**通知内容**:
-- PASS: "您的{类型}已通过审核"
-- REJECT: "您的{类型}未通过审核：{原因}"
-- TAKE_DOWN: "您的{类型}因违规已被下架：{原因}"
-- RESTORE: "您的{类型}已恢复显示"
+**载荷**: `NotificationDto`（`type=NotificationCenterType.CHECKED`），`extraData` 为 `NotificationCheckedDto{passed, takeDown, title, message, rootId, rootType, rootCommentId, questionId}`；文案由 `service-message` 消费端生成。`messageId` 形如 `content-check:<类型>:<id>:<动作码>`（动作码 pass/reject/down/restore），保证下架后恢复不会被误判为重复。
 
-**通知类型**: `NotificationCenterType.CHECKED`
-
-**消息队列**: `NOTIFICATION_CHECKED_ROUTING_KEY`
+**投递方式**: 尽力而为（fire-and-forget），`PostCheckService` 在事务外用 `RabbitTemplate` 直发 `notification.exchange` → `notification.checked.routing`，发送失败不影响审核结果落库。
 
 ### 6.2 申诉通知
 
-#### 用户提交申诉 → 通知管理员
+**用户提交申诉**：**不再向管理员发送通知**，管理员通过「申诉管理列表」轮询待处理（`status=0`）申诉。
 
-**通知对象**: 管理员（userId=0）
+**管理员处理申诉 → 通知用户**
 
-**通知内容**: "用户{userName}提交了申诉"
-
-#### 管理员处理申诉 → 通知用户
-
-**通知对象**: 申诉人
-
-**通知内容**:
-- 通过: "您的申诉已通过，内容已恢复"
-- 拒绝: "您的申诉已被拒绝：{管理员回复}"
-
-**通知类型**: `NotificationCenterType.APPEAL`
-
-**消息队列**: `NOTIFICATION_APPEAL_ROUTING_KEY`
+- **通知对象**: 申诉人
+- **通知类型**: `NotificationCenterType.APPEAL`，`extraData` 为 `NotificationAppealDto{appealId, postId, postType, title, reason, adminReason, passed}`
+- **投递方式**: 经 **OutboxPro 事务性发件箱**与申诉状态更新同事务登记（`outboxPublisher.publish(EventTypes.NOTIFICATION_APPEAL, notification)`），由 Relay 经 Publisher Confirm 至少一次投递；路由仍为 `notification.exchange` → `notification.appeal.routing`（见 `OutboxEventRouteConfig`）
+- **幂等**: 生产者不再做 Redis 预检占位；`messageId` 为 `appeal-handle:<appealId>:<pass|reject>`，重复投递由消费端按 `messageId` 去重
 
 ---
 
@@ -1012,7 +1054,7 @@ CREATE TABLE appeal(
 
 ```sql
 CREATE TABLE take_down_post(
-    id BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    id BIGINT NOT NULL PRIMARY KEY COMMENT '主键，雪花 ID（IdType.ASSIGN_ID，非自增；VO 序列化为字符串）',
     root_type VARCHAR(20) NOT NULL COMMENT '内容类型：POST/SOLUTION/COMMENT',
     root_id BIGINT NOT NULL COMMENT '根内容ID（帖子/题解/评论的ID）',
     root_comment_id BIGINT COMMENT '如果是评论，记录评论ID',
@@ -1026,21 +1068,9 @@ CREATE TABLE take_down_post(
 );
 ```
 
-### 7.3 post/comment/solution 表新增字段
+### 7.3 post/comment/solution 的状态与原因字段
 
-```sql
--- Post 表
-ALTER TABLE `post` 
-  ADD COLUMN `check_reason` TEXT COMMENT '审核/下架原因';
-
--- Comment 表
-ALTER TABLE `comment` 
-  ADD COLUMN `check_reason` TEXT COMMENT '审核/下架原因';
-
--- Solution 表
-ALTER TABLE `solution` 
-  ADD COLUMN `check_reason` TEXT COMMENT '审核/下架原因';
-```
+帖子、评论、题解各自使用整型 `status` 列表示内容状态（`0` 待审核 / `1` 正常 / `2` 下架，帖子另有历史值 `3` 审核未通过），实体与 mapper 均按整型映射，**不存在 `check_reason` 列**。审核拒绝 / 下架的原因统一写入 `take_down_post.reason`；「我的内容」列表的 `rejectReason` 由 `MyContentService` 按内容类型反查 `take_down_post`（取最新一条）回填。
 
 ---
 
@@ -1048,38 +1078,38 @@ ALTER TABLE `solution`
 
 ### 8.1 管理员权限
 
-以下接口需要 `@RequireAdmin` 权限（通过 JWT 中的 `role` 字段判断）：
-
-- 所有 `/api/community/check/**` 路径
-- 所有 `/api/community/appeal-admin/**` 路径
+`PostCheckController` 与 `AppealAdminController` 类级标注 `@RequireAdmin`（`/api/community/check/**`、`/api/community/appeal-admin/**`）。校验由 `service-common` 的 `AdminAuthAspect` 完成——它实现 api-governance 的 `PreFilter`，通过 `META-INF/spring/...AutoConfiguration.imports` 全局自动注册，凡引入 service-common 的服务都生效。判定流程：取 `UserContext.getUserId()`（网关注入，不信任客户端），经 `UserFeignClient.getUserInfo` 回查 `roleId`，`roleId==2`（管理员）或 `0`（root）放行；否则通过 `FilterContext.setRejectStatus` + `setRejectReason` 返回拒绝，文案取自 `CommonErrorCode`——未登录或回查失败 → 「登录状态已失效，请重新登录」（`4010001`），非管理员 → 「该功能仅限管理员使用」（`4030002`）。`FilterContext.rejectStatus` 默认值是 `429`（面向限流），本切面必须显式改写为 401/403，否则权限类拒绝会被归一成限流码 `4290001`。**并非**读取 JWT 里的 role 字段。
 
 ### 8.2 用户权限
 
-以下接口需要普通登录用户权限（JWT 验证）：
+所有接口都要求登录：网关 `AuthGlobalFilter` 校验 JWT 后注入 `X-User-Id` 等身份头，下游 `UserAuthInterceptor` 校验内部令牌并填充 `UserContext`（`WebConfig` 对其注册 `/**` 拦截）。发帖、评论、点赞、删除、我的内容/申诉等接口一律从 `UserContext.getUserId()` 取当前用户，不接受客户端提交的 `userId`。
 
-- `/api/community/appeal/submit` - 提交申诉
-- `/api/community/mine` - 查看我的内容
+### 8.3 限流
 
-**身份来源**: 从 `UserContext.getUserId()` 获取，不接受客户端传递的 userId 参数
+各接口经 api-governance `@RateLimit`（Redis 滑动窗口）限流，超限返回错误码 `4290001`（HTTP 仍为 `200`），提示「社区操作过于频繁，请稍后重试」。不同接口阈值不同，例如发帖/编辑/删除 20/60s、点赞 120/60s、列表查询 100–200/60s，审核台类级 120/60s。
 
 ---
 
 ## 九、错误码
 
-| code | 说明 |
-|------|------|
-| 200 | 成功 |
-| 400 | 请求参数错误 |
-| 401 | 未登录或 Token 无效 |
-| 403 | 无权限（非管理员） |
-| 404 | 内容不存在 |
-| 500 | 服务器内部错误 |
+| code | HTTP | 说明 |
+|------|------|------|
+| 200 | 200 | 成功（`Result.success`） |
+| `4000401`、`4040401`、`4090401`、`5000401` 等 | 200 | 社区自有业务错误：`throw new BizException(CommunityErrorCode.X)`，编码规则 `类别(3位) × 10000 + 服务号(04) × 100 + 序号(2位)`，`message` 取枚举里面向用户的文案 |
+| `4000001`、`4010001`、`4030001`、`4040001`、`5000001` 等 | 200 | 跨服务通用语义（参数、未登录、无权限、资源不存在、兜底）复用 `service-api` 的 `CommonErrorCode`，不在本服务重复定义 |
+| `4290001` | 200 | api-governance 限流拒绝，提示「社区操作过于频繁，请稍后重试」（配置项 `api.governance.rate-limit.status-code: 429` 只用于推导错误码，响应 HTTP 仍为 200） |
+| `4010001` | 401 | 由 `service-gateway` 的 `AuthGlobalFilter` 在 JWT 校验阶段直接短路返回（响应体同为 `{code, message, data}`，文案取自 `GatewayErrorCode`），请求不会到达本服务 |
+| 任意非 200 的 code | 200 | 其余异常（NPE、SQL/`DataAccessException`、Feign 与下游原始报错）由 `service-common` 的 `AbstractGlobalExceptionHandler` 统一换成通用中文文案，原始信息只进服务端日志；`IllegalArgumentException` / `IllegalStateException` 同样返回枚举通用文案，不透出 `e.getMessage()` |
+
+业务服务的 HTTP 状态码保持 200，失败与否一律看 `Result.code`（前端按 `code !== 200` 分支）。
+
+管理员权限拒绝（`AdminAuthAspect`）经 `GovernanceException` 由 `handleGovernance` 按拒绝状态归一：401 → `4010001`「登录状态已失效，请重新登录」，403 → `4030002`「该功能仅限管理员使用」。完整枚举清单见 `docs/backend-controller-api.md`「错误码与业务异常」。
 
 **错误响应示例**:
 ```json
 {
-  "code": 403,
-  "message": "需要管理员权限",
+  "code": 4030002,
+  "message": "该功能仅限管理员使用",
   "data": null
 }
 ```
@@ -1122,8 +1152,8 @@ curl -X POST "http://localhost:8082/api/community/appeal/submit" \
   -H "Authorization: Bearer {user_token}" \
   -H "Content-Type: application/json" \
   -d '{
-    "rootType": "POST",
-    "rootId": 123456,
+    "postId": 123456,
+    "postType": "POST",
     "reason": "我认为内容没有违规..."
   }'
 ```
@@ -1134,11 +1164,11 @@ curl -X POST "http://localhost:8082/api/community/appeal/submit" \
 
 ## 十一、注意事项
 
-1. **幂等性保证**: 所有通知消息使用 Redis 实现 7 天幂等，相同操作不会重复发送通知
+1. **幂等性保证**: 生产者不再做 7 天 Redis 预检占位；每条通知带确定性 `messageId`（点赞 `like:<业务类型>:<用户>:<目标>`、审核 `content-check:<类型>:<id>:<动作>`、申诉 `appeal-handle:<id>:<pass|reject>`），重复投递由 `service-message` 消费端按 `messageId` 去重
 2. **降级处理**: 审核详情中的作者信息通过 Feign 调用获取，调用失败不影响主流程
-3. **无限次申诉**: 用户可对同一内容多次申诉，每次生成新记录
+3. **同一内容一条申诉记录**: `appeal` 按 `(post_id, post_type)` 唯一，待审核期间禁止重复提交，处理完结后可再次提交（复用同一条记录、更新理由、重置状态），并非每次生成新记录
 4. **评论即时发布**: 评论无待审核态，只能下架/恢复，不能审核通过/拒绝
-5. **跨服务调用**: 审核相关操作会触发 RabbitMQ 消息，由 `service-message` 异步处理通知
+5. **跨服务调用**: 审核与点赞结果通知在事务外用 `RabbitTemplate` 尽力直发；申诉处理结果通知经 OutboxPro 事务性发件箱与业务同事务登记，由 `service-message` 异步处理
 6. **下架记录**: 所有下架操作都会在 `take_down_post` 表中留存记录，用于审计和统计
 
 ---
@@ -1154,6 +1184,8 @@ curl -X POST "http://localhost:8082/api/community/appeal/submit" \
 ## 概述
 本次实现为 CodeWise 平台社区模块添加了完整的**内容审核**和**申诉流程**，覆盖社区帖子（POST）、评论（COMMENT）、题解（SOLUTION）三种内容类型。
 
+> 本节为历史开发日志（实施日期 2026-08-18），保留了当时的设计与验证记录。其中的接口路径、数据模型、枚举、通知与幂等机制等**以本文档前文「内容审核与申诉 API」「数据模型」「通知机制」章节为准**；下方片段与当前实现不一致处已在各处标注修正。
+
 **实施日期**: 2026-08-18  
 **涉及服务**: `service-community`, `service-message`, `service-api`, `service-common`
 
@@ -1168,15 +1200,13 @@ curl -X POST "http://localhost:8082/api/community/appeal/submit" \
 - **通知机制**: 审核结果通过 RabbitMQ 异步通知用户
 
 ### 2. 申诉流程
-- **用户申诉**: 内容所有者可对被拒绝或下架的内容发起申诉（无限次）
-- **管理员处理**: 可以通过（恢复内容）或拒绝申诉
-- **双向通知**: 
-  - 用户提交申诉 → 通知管理员
-  - 管理员处理申诉 → 通知用户
+- **用户申诉**: 内容所有者可对被拒绝或下架（status=2/3）的内容发起申诉；同一内容一条 `appeal` 记录，待审核期间禁止重复提交，处理完结后可复用同一条记录再次提交
+- **管理员处理**: 可以通过（恢复内容为 status=1）或拒绝申诉（status=1，记录 `takeDownReason`）
+- **通知**: 提交申诉不通知管理员（管理员轮询待处理列表）；管理员处理结果通知申诉人，经 OutboxPro 事务性发件箱投递
 
 ### 3. 我的内容管理
-- **统一查询**: 用户可查看自己的所有内容（帖子/评论/题解）
-- **状态筛选**: 支持按状态（待审核/已通过/已拒绝/已下架）筛选
+- **统一查询**: 用户可按内容类型（`type=POST/COMMENT/SOLUTION`）查看自己发布的内容（该接口只按类型分列，不接收状态筛选参数，各状态一并返回）
+- **状态可见**: 每条记录返回 `status`（0/1/2）与 `rejectReason`（下架/拒绝时反查 `take_down_post`）
 - **申诉入口**: 被拒绝/下架的内容可直接发起申诉
 
 ---
@@ -1305,37 +1335,35 @@ RedisDto/
 ### 2. 数据模型
 
 #### Appeal（申诉表）
+
 ```java
-appealId          BIGINT PRIMARY KEY    // 雪花ID
-userId            BIGINT                // 申诉人
-rootType          ENUM                  // POST/COMMENT/SOLUTION
-rootId            BIGINT                // 内容ID
-rootCommentId     BIGINT                // 评论ID（仅COMMENT类型）
-questionId        BIGINT                // 关联题目ID（题解/评论）
-reason            TEXT                  // 申诉理由
-status            ENUM                  // PENDING/APPROVED/REJECTED
-adminReason       TEXT                  // 管理员回复
-handlerId         BIGINT                // 处理人ID
-handledAt         DATETIME              // 处理时间
-createTime        DATETIME
+appealId        BIGINT PK AUTO_INCREMENT   // 申诉 ID（IdType.AUTO，自增）
+postId          BIGINT                      // 内容 ID（帖子/题解/评论）
+postType        VARCHAR                     // POST/COMMENT/SOLUTION（枚举名）
+userId          BIGINT                      // 申诉人
+reason          TEXT                        // 申诉理由
+takeDownReason  TEXT                        // 拒绝时管理员回复/下架原因
+status          INT                         // 0-待审核 1-拒绝 2-恢复
+adminUserId     BIGINT                      // 处理管理员
+createTime      DATETIME
+updateTime      DATETIME
 ```
 
 #### TakeDownPost（下架记录表）
 ```java
-id                BIGINT PRIMARY KEY
-rootType          ENUM
-rootId            BIGINT
-rootCommentId     BIGINT
-questionId        BIGINT
+id                BIGINT PK             // 雪花 ID（IdType.ASSIGN_ID，非自增）；VO 字段 takeDownId 序列化为字符串
+rootType          VARCHAR               // POST/COMMENT/SOLUTION（枚举名）
+rootId            BIGINT                // 被下架内容 ID
+rootCommentId     BIGINT                // 评论所在根评论 ID
+questionId        BIGINT                // 题解所属题目 ID
 reason            TEXT                  // 下架原因
 adminId           BIGINT                // 操作管理员
 createTime        DATETIME
 ```
 
-#### Post/Comment/Solution（内容表修改）
-新增字段：
-- `status` ENUM: PENDING/APPROVED/REJECTED/TAKEN_DOWN
-- `checkReason` TEXT: 审核不通过原因
+#### Post/Comment/Solution（内容状态）
+
+内容表用整型 `status` 列表示状态（0 待审核 / 1 正常 / 2 下架，帖子另有历史值 3 审核未通过），**没有 `checkReason` 列**；审核拒绝 / 下架原因写入 `take_down_post.reason`。
 
 ---
 
@@ -1376,18 +1404,18 @@ PostCheckService
 - RESTORE: "您的{类型}已恢复显示"
 
 #### 申诉通知（AppealHandle）
+
 ```
 AppealService (用户提交)
-  └─> RabbitMQ (NOTIFICATION_EXCHANGE → NOTIFICATION_APPEAL_ROUTING_KEY)
-        └─> AppealHandle 消费
-              └─> userId=0 表示管理员通知
-                    └─> "用户提交了申诉"
+  └─> 不发送通知（管理员通过「申诉管理列表」轮询待处理申诉）
 
-AppealService (管理员处理)
-  └─> RabbitMQ
-        └─> AppealHandle 消费
-              └─> userId={申诉人} 表示用户通知
-                    └─> "您的申诉已{通过/拒绝}"
+AppealService.handleAppeal (管理员处理，@Transactional)
+  └─> OutboxPro 发件箱登记 (eventType=NOTIFICATION_APPEAL, payload=NotificationDto)
+        └─> Relay 经 Publisher Confirm 至少一次投递
+              └─> RabbitMQ (NOTIFICATION_EXCHANGE → NOTIFICATION_APPEAL_ROUTING_KEY)
+                    └─> AppealHandle 消费
+                          └─> userId={申诉人}，按 messageId 幂等去重
+                                └─> "您的申诉已{通过/拒绝}"
 ```
 
 ---
@@ -1403,97 +1431,77 @@ AppealService (管理员处理)
 - 业务层只需发送结构化数据，文案逻辑集中在 message 服务
 
 ### 2. 幂等性保证
-```java
-// 每次操作生成唯一 messageId
-String messageId = "check:" + postId + ":" + action;
-String redisKey = RedisContext.NOTIFICATION_IDEMPOTENT_KEY + messageId;
 
-// 7天内重复操作不会重复发送通知
-Boolean set = redisTemplate.opsForValue().setIfAbsent(redisKey, "1", 7, TimeUnit.DAYS);
-if (Boolean.TRUE.equals(set)) {
-    rabbitTemplate.convertAndSend(...);
-}
+生产者侧不再用 7 天 Redis 预检占位（旧实现占位成功但 MQ 发送失败会静默丢通知）。当前策略是**每条通知携带确定性 `messageId`，去重交给 `service-message` 消费端**：
+
+```java
+// 审核：内容类型 + 目标 ID + 动作码，避免下架后再恢复被误判为重复
+String messageId = "content-check:" + type.name() + ":" + id + ":" + action.code;
+// 点赞：like + 业务类型 + 点赞用户 + 目标
+// 申诉：appeal-handle:<appealId>:<pass|reject>
 ```
+
+审核 / 点赞通知在事务外经 `RabbitTemplate` 尽力直发；申诉处理通知改由 OutboxPro 事务性发件箱与业务同事务登记，保证不丢、至少一次投递，重复由消费端按 `messageId` 去重。
 
 ### 3. 跨服务数据查询
-审核详情需要显示作者信息，通过 OpenFeign 调用 `service-user`:
+审核详情需要显示作者信息，通过 OpenFeign 调用 `service-user`（单个用 `getUserInfo`，列表用 `getUserList` 批量避免 N+1）：
 ```java
-CheckDetailVo detail = new CheckDetailVo();
-detail.setContent(post.getContent());
-
+CheckDetailVo detail = CheckDetailVo.of(post);
 try {
-    Result<User> userResult = userFeignClient.getUserById(post.getUserId());
-    detail.setAuthor(userResult.getData());
+    Result<UserDto> user = userFeignClient.getUserInfo(post.getUserId());
+    detail.setUserDto(user == null ? null : user.getData());
 } catch (Exception e) {
-    log.warn("获取用户信息失败: userId={}", post.getUserId(), e);
-    detail.setAuthor(null); // 降级处理，不影响主流程
+    log.warn("审核详情查询作者信息失败，userId={}", post.getUserId(), e);
+    detail.setUserDto(null); // 降级处理，不影响主流程
 }
 ```
 
-### 4. 申诉无限次设计
-**需求**: Q2 提到"无限次申诉即可"
+### 4. 申诉记录设计
+**需求**: Q2 提到"可多次申诉即可"
 
 **实现**: 
-- 不限制同一内容的申诉次数
-- 每次提交生成新的 `Appeal` 记录
-- 管理员可查看完整申诉历史
+- 同一内容（`post_id` + `post_type`）只保留一条 `Appeal` 记录
+- 待审核（`status=0`）期间重复提交被拒绝；处理完结后可再次提交，复用同一条记录、更新理由并重置为待审核
+- 管理员通过「申诉管理列表」查看全部申诉记录
 
 ---
 
-## 五、数据库变更（需执行）
+## 五、数据库变更
+
+> 与本文档「七、数据库表结构」一致，落地字段以实体与 mapper 映射为准。
 
 ### 新增表
 ```sql
--- 申诉表
+-- 申诉表（对应 Appeal 实体 / AppealMapper.xml）
 CREATE TABLE `appeal` (
-  `appeal_id` BIGINT PRIMARY KEY,
+  `appeal_id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,   -- IdType.AUTO 自增
+  `post_id` BIGINT NOT NULL,
+  `post_type` VARCHAR(20) NOT NULL,                          -- POST/COMMENT/SOLUTION
   `user_id` BIGINT NOT NULL,
-  `root_type` ENUM('POST', 'COMMENT', 'SOLUTION') NOT NULL,
-  `root_id` BIGINT NOT NULL,
-  `root_comment_id` BIGINT,
-  `question_id` BIGINT,
-  `reason` TEXT NOT NULL,
-  `status` ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
-  `admin_reason` TEXT,
-  `handler_id` BIGINT,
-  `handled_at` DATETIME,
-  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_user` (`user_id`),
-  INDEX `idx_root` (`root_type`, `root_id`),
-  INDEX `idx_status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `reason` TEXT,
+  `take_down_reason` TEXT,
+  `status` INT NOT NULL,                                     -- 0 待审核 / 1 拒绝 / 2 恢复
+  `admin_user_id` BIGINT,
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
 
--- 下架记录表
+-- 下架记录表（对应 TakeDownPost 实体 / TakeDownPostMapper.xml）
 CREATE TABLE `take_down_post` (
-  `id` BIGINT PRIMARY KEY,
-  `root_type` ENUM('POST', 'COMMENT', 'SOLUTION') NOT NULL,
+  `id` BIGINT NOT NULL PRIMARY KEY,                          -- IdType.ASSIGN_ID 雪花，非自增
+  `root_type` VARCHAR(20) NOT NULL,
   `root_id` BIGINT NOT NULL,
   `root_comment_id` BIGINT,
   `question_id` BIGINT,
   `reason` TEXT NOT NULL,
   `admin_id` BIGINT NOT NULL,
-  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_root` (`root_type`, `root_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 ```
 
-### 修改现有表
-```sql
--- Post 表
-ALTER TABLE `post` 
-  ADD COLUMN `status` ENUM('PENDING', 'APPROVED', 'REJECTED', 'TAKEN_DOWN') DEFAULT 'PENDING',
-  ADD COLUMN `check_reason` TEXT;
+### 内容表状态列
 
--- Comment 表
-ALTER TABLE `comment` 
-  ADD COLUMN `status` ENUM('PENDING', 'APPROVED', 'REJECTED', 'TAKEN_DOWN') DEFAULT 'PENDING',
-  ADD COLUMN `check_reason` TEXT;
-
--- Solution 表
-ALTER TABLE `solution` 
-  ADD COLUMN `status` ENUM('PENDING', 'APPROVED', 'REJECTED', 'TAKEN_DOWN') DEFAULT 'PENDING',
-  ADD COLUMN `check_reason` TEXT;
-```
+`post`/`comment`/`solution` 使用整型 `status` 列（0 待审核 / 1 正常 / 2 下架，帖子另有历史值 3），审核与下架原因不落在内容表，统一写入 `take_down_post.reason`；**不存在 `check_reason` 列**。
 
 ---
 
@@ -1526,8 +1534,8 @@ ALTER TABLE `solution`
 
 ### 2. 权限配置
 确认以下配置已添加：
-- [ ] `service-gateway` 放行审核相关路径
-- [ ] `@RequireAdmin` 注解生效（拦截器配置）
+- [-] `service-gateway` 放行审核相关路径（整服务路由 `Path=/api/community/**`，无需逐路径配置）
+- [-] `@RequireAdmin` 注解生效（由 `service-common` 的 `AdminAuthAspect` 实现 api-governance `PreFilter`，经 `META-INF/spring/...AutoConfiguration.imports` 自动注册；2026-09-11 修复前该切面从未注册，详见 `docs/maintenance/repair-plan.md`）
 
 ### 3. 测试
 - [ ] 单元测试（Service 层）
@@ -1554,8 +1562,8 @@ ALTER TABLE `solution`
 
 ### 7.2 权限配置
 确认以下配置已添加：
-- [ ] `service-gateway` 放行审核相关路径
-- [ ] `@RequireAdmin` 注解生效（拦截器配置）
+- [-] `service-gateway` 放行审核相关路径（整服务路由 `Path=/api/community/**`，无需逐路径配置）
+- [-] `@RequireAdmin` 注解生效（由 `service-common` 的 `AdminAuthAspect` 实现 api-governance `PreFilter`，经 `META-INF/spring/...AutoConfiguration.imports` 自动注册；2026-09-11 修复前该切面从未注册，详见 `docs/maintenance/repair-plan.md`）
 
 ### 7.3 测试
 - [ ] 单元测试（Service 层）
@@ -1630,9 +1638,9 @@ service-common/src/main/java/org/example/servicecommon/
 3. **Redis Key 前缀已统一**（RedisContext 中管理）
 4. **雪花ID 生成器已配置**（依赖 service-common）
 5. **跨服务调用有熔断降级**（Feign 调用失败不影响主流程）
-6. **幂等性保证**: 所有通知使用 Redis 实现 7 天幂等，避免重复发送
+6. **幂等性保证**: 通知带确定性 `messageId`，由 `service-message` 消费端去重；申诉处理通知经 OutboxPro 事务性投递，生产者侧不再做 7 天 Redis 预检
 7. **评论即时发布**: 评论无待审核态，只能下架/恢复
-8. **无限次申诉**: 用户可对同一内容多次申诉
+8. **申诉**: 同一内容一条 `appeal` 记录，待审核期间禁止重复提交，处理完结后可复用记录再次申诉
 
 ---
 

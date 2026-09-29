@@ -28,7 +28,8 @@ CodeWise/
 |   |-- service-judge/README.md
 |   |-- service-judge-go/README.md
 |   |-- service-api/README.md
-|   `-- service-common/README.md
+|   |-- service-common/README.md
+|   `-- codewise-agent/README.md        # Python Agent：端点、工具映射、鉴权与部署
 |
 |-- service-api/
 |   `-- src/main/java/org/example/serviceapi/
@@ -37,27 +38,35 @@ CodeWise/
 |
 |-- service-common/
 |   `-- src/main/java/org.example.servicecommon/
-|       |-- config/                    # MQ、JWT、拦截器等公共配置
-|       |-- outbox/                    # 通用 Transactional Outbox（事件登记与 Relay）
-|       |-- event/                     # 统一事件信封与 EventPublisher
-|       |-- dto/                       # 公共消息对象
-|       |-- RedisDto/                  # Redis Key 与缓存对象
-|       |-- service/                   # 公共邮件等能力
-|       `-- until/                     # 用户上下文等工具
+|       |-- config/                    # MqContexts/MqConfig、Redis、Feign 头透传、限流键、UserAuthInterceptor
+|       |-- aop/                       # @RequireAdmin + AdminAuthAspect（api-governance PreFilter 管理员校验）
+|       |-- event/                     # 统一事件信封编解码（EnvelopeCodec）与 EventPublisher
+|       |-- outboxpro/                 # OutboxPro 装配、告警通知器、DLQ 读取授权
+|       |-- dto/                       # 公共消息对象（邮件、WebSocket、复习）
+|       |-- RedisDto/                  # Redis Key 与调试/判题缓存对象
+|       |-- service/                   # 公共邮件能力
+|       `-- until/                     # UserContext、JwtUntil、FilePathUtil
 |
 |-- service-gateway/
 |   `-- src/main/java/org/example/servicegateway/
 |       `-- config/                    # 路由鉴权与全局过滤器
 |
 |-- service-user/
-|   `-- src/main/java/org/example/serviceuser/
-|       |-- controller/                # 登录、资料等接口
-|       |-- Fegin/                     # 面向其他服务的用户查询接口
-|       |-- service/                   # 用户业务逻辑
-|       |-- mapper/                    # 用户数据访问
-|       |-- dto/                       # 用户请求与响应模型
-|       |-- mq/                        # 用户相关消息消费
-|       `-- Advice/                    # 统一异常处理
+|   `-- src/main/
+|       |-- java/org/example/serviceuser/
+|       |   |-- controller/            # 登录、资料、申诉接口
+|       |   |-- Fegin/                 # 面向其他服务的用户查询 @RestController（不是 Feign 客户端）
+|       |   |-- service/               # 用户业务逻辑
+|       |   |-- entry/ + dto/ + vo/    # 实体、请求与响应模型
+|       |   |-- mapper/                # 用户数据访问
+|       |   |-- mq/ + MqHandle/        # 判题结果计数消费与处理
+|       |   |-- annotation/ + aspect/  # 服务内自定义注解与切面
+|       |   |-- until/ + enums/ + Config/
+|       |   `-- Advice/                # 统一异常处理
+|       `-- resources/
+|           |-- Sql/                   # 建表脚本（大写目录）
+|           |-- templates/             # 邮件模板
+|           `-- application.yml        # 唯一使用 .yml 的服务，其他服务为 .yaml
 |
 |-- service-question/
 |   `-- src/main/
@@ -97,8 +106,8 @@ CodeWise/
 |       |   `-- config/                # Outbox 路由与 OutboxPro 配置
 |       `-- resources/
 |           |-- mapper/                # MyBatis XML
-|           |-- migration/             # 增量迁移（V3 学习计划、V4 笔记）
-|           `-- sql.sql                # 复习库结构
+|           |-- migration/             # 增量迁移（V2 索引、V3 学习计划、V4 笔记）
+|           `-- sql/sql.sql            # 复习库结构
 |
 |-- service-community/
 |   `-- src/main/
@@ -125,7 +134,9 @@ CodeWise/
 |       |   |-- email/                 # 验证码与系统邮件
 |       |   |-- mq/                    # routing key 分派与消息消费
 |       |   |-- notificationcenter/    # 通知接口、持久化、消费者与 VO
-|       |   `-- websocket/             # 握手鉴权、会话与实时推送
+|       |   |-- consumedevent/         # consumed_event 幂等表实体/Mapper/服务
+|       |   |-- websocket/             # 握手鉴权、会话与实时推送
+|       |   `-- Advice/                # 统一异常处理
 |       `-- resources/
 |           `-- sql.sql                # codewise_message 表结构
 |
@@ -145,10 +156,14 @@ CodeWise/
 |-- codewise-agent/                     # Python Agent（FastAPI 门面 + dsh Node 工具运行时）
 |   |-- api/                            # FastAPI 会话、普通调用和 SSE 接口
 |   |-- dsh_bridge/                     # dsh 桥接：会话进程管理、Token 刷新、事件透传
+|   |-- service/ + entry/ + mapper/     # 业务编排、SQLAlchemy 模型与数据访问
+|   |-- dto/ + util/                    # Pydantic 模型、JWT/配置工具
 |   |-- agent-runtime/                  # dsh Node 部署闭包（cordis 配置与工具插件）
-|   |   `-- plugins/codewise-tools/     # 51 个网关工具插件（TypeScript）
-|   |-- entry/ + mapper/                # SQLAlchemy 模型和数据访问
+|   |   |-- plugins/codewise-tools/     # 51 个网关工具插件（TypeScript）
+|   |   `-- plugins/codewise-web/       # 网页抓取与代码执行插件
+|   |-- tests/                          # pytest（`pytest tests/`）
 |   |-- sql/agent_tables.sql
+|   |-- Dockerfile
 |   `-- main.py
 |
 |-- pom.xml                            # Maven 父工程与版本管理

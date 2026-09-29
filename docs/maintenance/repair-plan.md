@@ -8,7 +8,7 @@
 
 ### 1. 身份与授权
 
-- [-] 修复 `service-question` 删除题目的 owner/admin 授权校验。
+- [ ] 修复 `service-question` 删除题目的 owner/admin 授权校验。（2026-09-29 复核：题目**查看**（`QuestionService:142`）与**修改**（`:249`）已按 `question.createUserId` 比对，函数题用例生成走 `QuestionPermissionService.requireOwnerOrAdmin`；但 `deleteQuestion`（`:276`）仍是 `!Objects.equals(userDto.getData().getUserId(), UserContext.getUserId().toString())`——回查本就是按当前登录用户发起的，条件恒不成立，实际等于任何登录用户可删任意题目。改法：按 `question.getCreateUserId()` 比对，或直接复用 `QuestionPermissionService`，并补越权回归测试）
 - [-] 修复提交记录删除接口的 IDOR 风险。
 - [-] 函数题创建时禁止信任客户端提交的 `createUserId`。
 - [-] 函数测试用例批量插入增加 owner/admin 校验。
@@ -30,9 +30,9 @@
 
 ### 3. 判题沙箱
 
-- [-] 限制 CPU、内存、PID、文件大小和输出大小。
-- [-] 使用非 root 用户运行代码。
-- [-] 启用只读根文件系统。
+- [ ] 限制 CPU、内存、PID、文件大小和输出大小。（2026-09-29 复核：CPU 1 核、内存/swap 256MB、PID 64、`network none`、判题 2000ms/编译 15s 已在容器创建时强制（`DockerExecTemplate:67-74`、`LanguageSpec:93`）；**文件大小（fsize ulimit）与输出字节数仍无硬限制**，当前只对结果文本做截断（`BuildResult:94-105`），刷屏写盘仍可撑爆容器层，待补）
+- [-] 使用非 root 用户运行代码。（`DockerExecTemplate:81` 以 `1000:1000` 运行，`deploy/judge-base/Dockerfile` 预建 `/workspace` 属主）
+- [-] 根文件系统策略。（原计划「启用只读根文件系统」已按实测结论调整：主判题链路**不启用** `readonlyRootfs`，`/workspace` 也不做 tmpfs——Moby 29（containerd 存储）下 `docker cp` 对只读容器直接返回 400，对 tmpfs 挂载点则静默写入被遮挡的 rootfs 导致 exec 不可见；隔离改由「非 root + `cap-drop=ALL` + `no-new-privileges` + `/tmp` 16m tmpfs」承担（`DockerExecTemplate:55-58` javadoc 记录完整理由）。仅 AI 产物验收容器仍用 `--read-only`（`InternalJavaArtifactJudge:92`））
 - [-] `cap-drop=ALL`，启用 `no-new-privileges`。
 - [-] 禁止或严格限制容器网络访问。
 - [-] 增加进程树清理，防止子进程残留和 fork bomb。
@@ -43,11 +43,12 @@
 
 - [-] 使用 Lua 原子完成“读取当前桶 + 自增”或修正切桶并发窗口。
 - [-] 从公共帖子缓存中移除用户维度的 `isLike` 字段。
-- [-] 内容下架、删除、审核状态变化后主动失效相关缓存。
-- [ ] 修复帖子详情读取错误 Redis Key 的问题。
+- [-] 内容下架、删除、审核状态变化后主动失效相关缓存。（2026-09-29 复核：删除与申诉恢复路径已全量失效详情+热榜缓存（`PostService:372-374,397-399`、`AppealService:337-339`）；审核驳回/下架仅移除热榜 ZSET（`PostCheckService:166,205`），不删 `POST_KEY`/`POST_ID_KEY` 详情缓存，靠 `HotPostTask` 每 5 分钟全删兜底——最长 5 分钟窗口内可见旧详情，建议补齐）
+- [-] 修复帖子详情读取错误 Redis Key 的问题。
 - [-] 修复 Solution `isLike` 查询缺少当前用户条件的问题。
-- [-] 申诉处理改为事务 + 条件更新，避免并发处理覆盖。
-- [-] 异步删除不要只依赖裸 `CompletableFuture`，改用 MQ 或受控线程池。
+- [ ] 申诉处理改为事务 + 条件更新，避免并发处理覆盖。（2026-09-29 复核：`AppealService.processAppeal` 已加 `@Transactional`（`:312`），但防并发仍是「读后检查 status」（`:318-320`），不是 `WHERE status = 0` 的条件更新，两个管理员同时处理仍有覆盖窗口；拒绝分支还吞掉 `DuplicateKeyException`（`:366-373`）。改法：`update ... where id = ? and status = 0` 并以影响行数判定）
+- [-] 异步删除不要只依赖裸 `CompletableFuture`，改用 MQ 或受控线程池。（2026-09-14 复核：`PostService`/`AppealService` 已走 `communityCascadeDeleteExecutor`；`SolutionService.deleteSolution`、`CommentService`、`PostCheckService` 仍是裸 `CompletableFuture.runAsync`，待补）
+- [-] 点赞通知线程池化：`LikeRecordService` 三处点赞通知原为裸 `CompletableFuture.runAsync`，默认落到 `ForkJoinPool.commonPool`（并行度 = CPU 核数 - 1，且池内是阻塞的 Redis/Feign/Rabbit 调用，会拖垮整个 JVM 的并行流），改注入专用 `communityLikeNotifyExecutor`（core 2 / max 8 / queue 500 + `CallerRunsPolicy` 退化为同步执行，通知不丢），与桶消费线程池隔离，避免刷库循环被通知任务饿死。（2026-09-14）
 - [-] 热榜重建使用临时 Key 构建完成后原子切换。
 
 ### 5. Message 与 AI 消费可靠性
@@ -67,7 +68,7 @@
 - [ ] Mastered 题目答错后必须回退到 Active 或待复习状态。（2026-08-23 用户决策：保持 Mastered 终态不回退。现状备忘：SM-2 对答错本有惩罚逻辑（repetitions=0、间隔重置 1 天），但已 Mastered 的题不进每日快照、消费端跳过，惩罚不执行且 `updateReview` 在 status=1 时拒绝人工调整——若未来想恢复复习，需同时放开快照判断与状态回退。）
 - [-] 增加事件级幂等表，防止同一判题结果重复更新复习计划。（2026-08-23：codewise_review 建 consumed_event 表，幂等键 `review:judge:{judgeRecordId}`，消费改 `EnvelopeCodec.unwrap` 双读；原有快照成员判断保留为第二层兜底）
 - [-] 修复 Redis 幂等标记先于数据库提交造成的误判。（2026-08-23 核查：该反模式在判题消费链路原不存在（历史重构已消除）；新幂等方案的 claim 行与业务更新同事务，回滚即消失、重投可重新接管，从设计上排除该误判）
-- [-] 提醒消息发布增加 Outbox 或 Publisher Confirm。（2026-08-23：service-review 启用 service-common 通用 Outbox（codewise_review 建 event_outbox 表），两个提醒任务改 `outboxService.append(REVIEW_REMINDER...)`，消费端 ReviewHandle 双读信封；messageId 按天幂等 + 消费端既有幂等不变）
+- [-] 提醒消息发布增加 Outbox 或 Publisher Confirm。（2026-08-23 启用 Outbox；2026-09-29 复核：实现已由自研 `event_outbox` + `outboxService.append` 迁移为 OutboxPro 1.1.0——`ReviewMessageTask:132` 调 `OutboxProPublisher.publish(REVIEW_REMINDER...)`，路由在 `OutboxEventRouteConfig:22-38` 以 `EventDefinition` 声明，全仓已无旧表与旧 API；messageId 按天幂等 + 消费端 `EnvelopeCodec.unwrap` 双读不变）
 
 ## 二、P1：可靠性和可维护性
 
@@ -83,7 +84,7 @@
 - [-] 将 Judge 的 submit/debug/retry 处理器拆成清晰的独立消费者。
 - [-] 拆分过大的 `JudgeService.java`，按任务领取、容器执行、结果处理、补偿恢复拆分。
 - [ ] 社区点赞/审核通知生产端接入 Outbox 或 Publisher Confirm（当前为裸 `RabbitTemplate`，`service-community` `LikeRecordService`）。
-- [ ] 自研 `api-governance-spring-boot-starter` 已发布至 Maven（`io.github.biglv666:api-governance-spring-boot-starter:0.1.0`），全服务坐标迁移完成但尚未提交；提交后删除对本地快照的依赖。
+- [-] 自研 `api-governance-spring-boot-starter` 已发布至 Maven（`io.github.biglv666:api-governance-spring-boot-starter:0.1.0`），全服务坐标迁移完成（2026-09-29 复核：根 `pom.xml` 统一托管版本，7 个服务 POM 均为普通 Maven 坐标，全仓无 `systemPath`/`<scope>system</scope>`，本地快照依赖已移除）。
 
 ### AI
 
@@ -102,7 +103,7 @@
 
 - [ ] 拆分敏感 `UserDto`，避免公开接口携带邮箱、手机号、openId、登录 IP 等字段。
 - [ ] 统一 `Long userId` 与 `String userId` 类型。
-- [ ] 为 `Result<T>` 增加结构化错误码、traceId 和可安全展示的 message。
+- [x] 为 `Result<T>` 增加结构化错误码、traceId 和可安全展示的 message。（2026-09：`BizException` + 各服务 `XxxErrorCode` 枚举（`code = 类别×10000 + 服务号×100 + 序号`）+ `service-common` `AbstractGlobalExceptionHandler` 已落地，message 只来自枚举文案、HTTP 保持 200 由 `Result.code` 表达失败；traceId 尚未进入 `Result`，改由第三节 OpenTelemetry 项跟踪）
 - [ ] 删除 common/api 中重复 DTO，统一事件 DTO 所有权。
 - [ ] 为 Redis Key 建立集中注册表和 TTL 策略。
 - [ ] 评估 Redis Default Typing 的反序列化攻击面，改为白名单类型或显式序列化。
@@ -114,9 +115,9 @@
 - [ ] 接入 OpenTelemetry，贯通 Gateway、Feign、RabbitMQ、Judge 和通知链路。
 - [ ] 采集容器借用等待 P95/P99、容器利用率、判题端到端耗时、DLQ 数量。
 - [ ] 采集 AI 首 Token 延迟、Provider 失败率、SSE 中断率。
-- [ ] 使用 Testcontainers 补充 MySQL、Redis、RabbitMQ 集成测试。
+- [ ] 使用 Testcontainers 补充 MySQL、Redis、RabbitMQ 集成测试。（2026-09-29 现状：`service-common` 已引入 Testcontainers（MySQL + RabbitMQ）并承载集成测试，`service-judge` 有 `CODEWISE_DOCKER_IT=true` 门控的沙箱集成测试；缺 Redis 容器测试与其余服务的覆盖）
 - [ ] 增加恶意代码、资源耗尽、消息重复、MQ 重放、WebSocket 断连测试。
-- [ ] 做真实并发压测后再确定 QPS、P95 和性能提升数据。
+- [-] 做真实并发压测后再确定 QPS、P95 和性能提升数据。（2026-09-29：已在 Docker 全栈单机完成判题链路四档逐级加压压测（1/2/4/8 并发），接入层 100 发突发 130 rps / p99 84ms，结论见 `docs/loadtest-report.md`）
 - [-] Redis 热榜重建使用临时 Key + 原子切换。
 - [ ] 复核社区申诉、下架历史等路径中的剩余 N+1 查询。
 

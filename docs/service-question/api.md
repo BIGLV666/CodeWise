@@ -2,7 +2,11 @@
 
 本文档整理题目服务的题目、函数题、提交判题和测试点接口。统一鉴权和响应约定见 [`../backend-controller-api.md`](../backend-controller-api.md)。
 
-基础路径：`/api/question`
+基础路径：`/api/question`（服务端口 `8084`）
+
+### 错误码
+
+业务失败的 HTTP 状态码保持 200，客户端按 `Result.code !== 200` 分支；七位错误码规则（`类别(3位)×10000 + 服务号(2位)×100 + 序号(2位)`，本服务服务号为 `02`，形如 `4040201`）与通用映射见 [`../backend-controller-api.md`](../backend-controller-api.md) 的「错误码与业务异常」一节。本服务专属语义收录在 `service-question` 的 `exception/QuestionErrorCode.java`；未登录、无权限、仅管理员、参数、下游不可用等跨服务语义复用 `CommonErrorCode`（服务号 00）。只有 `BizException` 的文案面向用户原样返回，其余异常一律换成通用中文文案。下文各接口括注的 code 均为枚举实际值。
 
 ### HTML 导入题目
 
@@ -20,7 +24,8 @@ Content-Type: multipart/form-data
 
 用法说明：
 
-- 服务读取 HTML 内容并调用解析逻辑生成 `Question`。
+- 服务读取 HTML 内容并调用解析逻辑生成 `Question`（`HtmlService.Luogu`，按标题+内容加 Redisson 分布式锁防止重复提交同一题）。
+- 题目落库时 `aiStatue=pending`、`createUserId` 取登录态；AI 测试用例生成请求（`EventTypes.AI_TESTCASE_REQUEST`）经 OutboxPro 与插入同事务登记，投递到 `MqContexts.Ai_EXCHANGE` / `Ai_TESTCASE_ROUTING_KEY`，生成结果由本服务的 `question.testcace.routing` 消费者回写入 `test_case`。
 - 适合后台导入题目，不适合普通用户频繁调用。
 
 返回：`Result<Question>`。
@@ -33,7 +38,7 @@ Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-请求体：`InsertQuestionDto`
+请求体：`InsertQuestionDto`（字段即下表；`difficulty`、`source` 不在该 DTO 中，创建时难度取库默认值）
 
 ```json
 {
@@ -52,6 +57,12 @@ Content-Type: application/json
 
 返回：`Result<Question>`。
 
+说明：
+
+- 需要登录（`UserContext.getUserId()` 为空时报「登录状态已失效，请重新登录」，`4010001`），创建者 ID 与来源由服务端登录态写入。
+- 手工新增的题目初始 `status=3`（私密），仅创建者与管理员可通过详情接口看到；`aiStatue` 直接置 `success`（不触发 AI 测试点生成）；`contentHash` 为 `description` 的 MD5。
+- 同一创建者的 `create_user_id + content_hash` 建有唯一索引，重复正文会插入失败。
+
 ### 查询题目详情
 
 ```http
@@ -65,7 +76,12 @@ Authorization: Bearer <token>
 | --- | --- | --- | --- |
 | `questionId` | `Long` | 是 | 题目 ID |
 
-返回：`Result<Question>`。
+返回：`Result<QuestionVo>`。`QuestionVo` 在题目字段之外附带 `functionConfig`（仅函数题非空，含 `className`、`methodName`、`parameterConfig`、`outputType`）。
+
+可见性规则（`QuestionService.getQuestionById`）：
+
+- 题目不存在报「题目不存在或已被删除」（`4040201`）；`status=0` 报「该题目已下架，暂时无法访问」（`4090201`）；`status=2` 报「该题目正在审核中，暂时无法访问」（`4090202`）。
+- `status=3`（私密）仅创建者本人或管理员（roleId=2，经 `UserFeignClient` 回查）可见，否则报「该内容当前不可访问」（`4030003`）。
 
 ### 更新题目
 
@@ -83,6 +99,8 @@ Query 参数：
 
 请求体：`InsertQuestionDto`，字段同新增题目。
 
+鉴权：仅题目创建者本人或管理员（roleId=2，经 `UserFeignClient` 回查）可修改，否则报「没有权限执行该操作」（`4030001`）；题目不存在报「题目不存在或已被删除」（`4040201`）。
+
 返回：`Result<Question>`。
 
 ### 删除题目
@@ -98,7 +116,7 @@ Authorization: Bearer <token>
 | --- | --- | --- | --- |
 | `questionId` | `Long` | 是 | 题目 ID |
 
-返回：`Result<Void>`，成功消息为“删除成功”。只有题目创建者或管理员可以删除；服务端从登录态确定操作者，忽略客户端声称的身份。
+返回：`Result<Void>`，成功消息为“删除成功”。服务端从登录态确定操作者（经 `UserFeignClient` 回查用户，忽略客户端声称的身份）。注意：`QuestionService.deleteQuestion` 的资格判断实际写法是「回查到的用户等于当前登录用户 或 roleId=2」，而回查本身就是按当前登录用户发起的，条件恒成立——即当前实现下**任何登录用户都可删除任意题目**，与“仅创建者或管理员”的设计意图不符，属已知偏差（代码待修复前以本段描述为准）。
 
 ### 游标分页查询题目
 
@@ -113,10 +131,10 @@ Authorization: Bearer <token>
 | --- | --- | --- | --- |
 | `pageSize` | `Integer` | 是 | 每页数量 |
 | `lastId` | `Long` | 否 | 上一页最后一条记录 ID，第一页不传 |
-| `difficulty` | `Integer` | 否 | 难度过滤 |
+| `difficulty` | `String` | 否 | 难度过滤，支持逗号分隔多值（如 `1,2`，各值之间为 OR 条件） |
 | `status` | `Integer` | 否 | 状态过滤 |
 | `title` | `String` | 否 | 标题关键字 |
-| `type` | `String` | 否 | 题目类型过滤 |
+| `type` | `String` | 否 | 题目类型过滤：`ACM` / `FUNCTION` |
 
 返回：`Result<CursorPageResult<ReturnQuestionDto>>`
 
@@ -127,6 +145,7 @@ Authorization: Bearer <token>
 | `records` | `List<T>` | 当前页数据 |
 | `nextCursor` | `Long` | 下一页游标 |
 | `hasNext` | `Boolean` | 是否还有下一页 |
+| `total` | `Long` | 保留字段，题目/提交游标查询均未填充（恒为 `null`） |
 
 `records` 中每条题目为 `ReturnQuestionDto`，用于题目列表页：
 
@@ -175,6 +194,8 @@ Authorization: Bearer <token>
 
 ## service-question 函数题
 
+函数题控制器 `FunctionQuestionParseController` 类级标注 `@RequireAdmin`：本节全部接口均要求管理员（roleId=2）或 root（roleId=0）身份，由 `service-common` 的 `AdminAuthAspect` 统一拦截。
+
 ### 解析 LeetCode 题目
 
 ```http
@@ -218,7 +239,7 @@ Content-Type: application/json
 }
 ```
 
-返回：`Result<Long>`，`data` 为新题目 ID。函数题创建、解析、测试用例生成和批量测试用例管理属于管理员操作；题目创建者 ID 始终由服务端登录态写入，不信任请求体中的 `createUserId`。
+返回：`Result<Long>`，`data` 为新题目 ID。函数题创建、解析、测试用例生成和批量测试用例管理属于管理员操作；题目创建者 ID 始终由服务端登录态写入，不信任请求体中的 `createUserId`。函数题创建即 `status=1`（上架），`timeLimit`/`memoryLimit`/`difficulty` 缺省时分别为 2000/256/1；`title`、`description` 必填；同一创建者正文哈希重复时报「该题目已存在，请勿重复导入」（`4090203`）。首批 `samples` 以 `isSample=1`、`isHidden=0` 入库 `function_test_case`，并取第一条回填题目样例。
 
 ### 批量补充函数测试用例
 
@@ -241,13 +262,13 @@ Content-Type: application/json
 
 - 新增记录是隐藏测试用例，默认 `isSample=0`、`isHidden=1`。
 - 后端根据函数参数和返回类型标准化输入输出，并自动接续执行顺序。
-- 同一道题的输入输出哈希唯一，重复提交返回“测试用例已存在”。
+- 同一道题的输入输出哈希唯一，重复提交返回「相同输入与输出的测试用例已存在，请勿重复添加」（`4090204`）。
 - 接口不会修改题目的公开样例字段。
 - 该接口要求管理员权限，避免普通用户向任意题目注入隐藏测试数据。
 
 返回：`Result<Integer>`，`data` 为本次新增数量。
 
-### AI 生成函数测试用例（异步任务）
+### 随机生成函数测试用例（异步任务）
 
 ```http
 POST /api/question/function/test-cases/generate
@@ -255,11 +276,19 @@ Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-请求体：`FunctionTestCaseGenerateRequest`（题目 ID、生成数量等生成配置）。
+请求体：`FunctionTestCaseGenerateRequest`
 
-返回：`Result<FunctionTestCaseGenerationTaskVo>`，`data` 为异步任务信息（`taskId`、`status`：`PENDING/SUCCESS/FAILED` 等）。
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `questionId` | `Long` | 是 | 目标函数题 ID（须为 FUNCTION 类型） |
+| `standardAnswer` | `String` | 是 | 标准答案 Java 代码，长度上限 100000 字符 |
+| `count` | `Integer` | 否 | 生成数量，默认 20，范围 1-100 |
+| `seed` | `Long` | 否 | 随机输入种子，缺省用 `System.nanoTime()` |
+| `language` | `String` | 否 | 目前仅支持 `java`，传其他值报错 |
 
-说明：接口立即返回任务 ID，生成在后台异步执行；任务结果 30 分钟 TTL。查询进度使用下面的状态接口。
+返回：`Result<FunctionTestCaseGenerationTaskVo>`（`taskId`、`questionId`、`userId`、`status`、`requestedCount`、`generatedCount`、`seed`、`errorMessage`、`createTime`、`finishTime`），`status` 为 `PENDING/SUCCESS/FAILED`。
+
+说明：机制是本地按函数参数配置生成随机输入，把标准答案作为调试提交经 `judge.exchange` / `judge.debug.routing` 送进判题沙箱执行，判题回执（`question.debug.routing`）将各用例的实际输出作为期望输出批量入库；并非由大模型直接生成。接口立即返回任务 ID，任务状态存 Redis（key 前缀 `function_case_generation_task:`），TTL 30 分钟。查询进度使用下面的状态接口，仅任务发起者本人可查。
 
 ### 查询函数测试用例生成状态
 
@@ -283,9 +312,9 @@ Authorization: Bearer <token>
 | --- | --- | --- | --- |
 | `titleSlug` | `String` | 是 | LeetCode 题目标识 |
 
-返回：`Result<LeetCodeArtifactTaskVo>`，`data` 为异步任务信息（`taskId`、`status`）。
+返回：`Result<LeetCodeArtifactTaskVo>`，`data` 为异步任务信息（`taskId`、`titleSlug`、`questionId`、`userId`、`status`、`generatedCount`、`seed`、`artifactDirectory`、`errorMessage`、`createTime`、`finishTime`）。`status` 流转：`PENDING → FETCHING → GENERATING → VALIDATING → SAVING → SUCCESS`，任一步失败置 `MANUAL_REVIEW` 并记录 `errorMessage`。
 
-说明：产物（标准 Main、验收用例等）统一保存到 `data/function-artifacts`，验收一律经过 Docker 沙箱编译执行，不在宿主机直接运行 AI 生成代码。
+说明：产物（generator / 标准答案源码、`question.json`、`generated-cases.txt`、`artifacts.txt`、`status.json` 等）统一保存到 `data/function-artifacts/<taskId>/`（配置项 `codewise.function-artifact.root`），验收一律经过 Docker 沙箱（镜像 `codewise.function-artifact.docker-image`，默认 `codewise-java-judge:17`，容器无网络、限时 30s），不在宿主机直接运行 AI 生成代码；验收通过后在事务内创建函数题并批量入库测试用例。任务列表在内存 Map 中维护，重启后可从各任务目录的 `status.json` 恢复读取。
 
 ### 查询 LeetCode 产物生成状态
 
@@ -312,7 +341,9 @@ Content-Type: application/json
 {
   "code": "#include <iostream>\nint main(){return 0;}",
   "language": "cpp",
-  "questionId": 1
+  "questionId": 1,
+  "questionTitle": "A+B Problem",
+  "submitScene": "NORMAL"
 }
 ```
 
@@ -322,14 +353,18 @@ Content-Type: application/json
 | --- | --- | --- | --- |
 | `code` | `String` | 是 | 提交代码 |
 | `language` | `String` | 是 | 语言标识 |
-| `questionId` | `Long` | 是 | 题目 ID |
+| `questionId` | `Long` | 是 | 题目 ID，为空报「题目不存在或已被删除」（`4040201`） |
+| `questionTitle` | `String` | 否 | 题目标题，冗余写入提交记录 |
+| `submitScene` | `String` | 是 | 提交场景：`NORMAL` / `REVIEW` / `PLAN` |
 
 返回：`Result<Long>`，`data` 为 `submitRecordId`。
 
 用法说明：
 
 - 接口只返回提交记录 ID。
-- 判题结果异步处理，前端可通过提交记录接口或 WebSocket 获取后续状态。
+- `submitScene` 缺失或为空白时报业务错误「提交类型不能为空，请刷新后重试」（`4000207`），不在枚举内的值报「不支持该提交类型，请刷新后重试」（`4000208`）（服务端先校验再进入归一化，不会再因缺字段抛 NPE 得到 500）。
+- `userId` 取自 `UserContext`；提交记录以 `judge_status=pending` 落库，判题请求事件（`EventTypes.JUDGE_SUBMIT_REQUEST`，载荷仅 `submitRecordId`）经 OutboxPro 与插入同事务登记，由 Relay 投递到 `MqContexts.JUDGE_EXCHANGE` / `JUDGE_ROUTING_KEY`。
+- 判题结果异步处理，前端可通过提交记录接口或 WebSocket 获取后续状态（异步链路见文末“提交与判题异步链路”一节）。
 
 ### 自定义调试
 
@@ -357,12 +392,13 @@ Content-Type: application/json
 
 说明：
 
-- `tests` 为临时调试用例，不一定写入正式测试点。
+- `tests` 为临时调试用例，不一定写入正式测试点；`DebugDto` 另有可选字段 `includeQuestionSample`（是否附带题目样例参与调试）。
+- `userId` 由服务端登录态写入，`tests` 每项为 `{input, output}`。
 - 后端根据题目类型自动选择 ACM 或函数调试流程。
 - 函数模式当前只支持 Java，会读取函数配置并生成 `Main.java`。
 - 函数模式会将本次调试用例一次编译、逐个运行，避免每个用例重复编译。
 
-返回：`Result<String>`。
+返回：`Result<String>`，`data` 为本次调试任务的 UUID。调试请求经 OutboxPro（`EventTypes.JUDGE_DEBUG_REQUEST`，与 Redis 任务写入同事务）投递到 `MqContexts.JUDGE_EXCHANGE` / `JUDGE_DEBUG_ROUTING_KEY`；判题完成后结果由本服务 `question.debug.routing` 消费者接收，并通过 WebSocket 通道 `debug-judge-result`（`WebsocketContexts.DEBUG_JUDGE_RESULT`）推送给前端。
 
 ### 根据提交记录 ID 查询
 
@@ -371,7 +407,7 @@ GET /api/question/getsubmitrecordbyid?submitRecordId=1
 Authorization: Bearer <token>
 ```
 
-返回：`Result<SubmitRecord>`。
+返回：`Result<SubmitRecord>`。仅查询当前登录用户自己的提交记录（查询条件带 `user_id`），查不到时报「提交记录不存在或已被删除」（`4040203`），不能通过枚举 ID 读取他人代码。
 
 ### 查询某题提交记录
 
@@ -380,7 +416,7 @@ GET /api/question/getsubmitrecordsbyquestionid?questionId=1
 Authorization: Bearer <token>
 ```
 
-返回：`Result<List<SubmitRecord>>`。
+返回：`Result<List<SubmitRecord>>`。只返回当前登录用户在该题的提交，按 `submitTime` 倒序。
 
 ### 查询当前用户提交记录
 
@@ -389,7 +425,7 @@ GET /api/question/getsubmitrecordsbyuserid?pageSize=20&lastId=100
 Authorization: Bearer <token>
 ```
 
-说明：不需要传 `userId`，服务从登录态读取当前用户。按提交记录 ID 游标分页，第一页不传 `lastId`。
+说明：不需要传 `userId`，服务从登录态读取当前用户。按提交记录 ID **倒序**游标分页（`id < lastId`），第一页不传 `lastId`，后续页传上一页的 `nextCursor`。
 
 返回：`Result<CursorPageResult<SubmitRecord>>`（字段见游标分页查询题目一节）。
 
@@ -407,6 +443,8 @@ Content-Type: application/json
 [1, 2, 3]
 ```
 
+约束：ID 列表去重后最多 10 个、必须为正整数；只返回当前登录用户自己的记录，按 `submitTime` 倒序。
+
 返回：`Result<List<SubmitRecord>>`。
 
 ### 删除提交记录
@@ -420,6 +458,8 @@ Authorization: Bearer <token>
 
 ## service-question 测试点管理
 
+测试点控制器 `TestCaseController` 类级标注 `@RequireAdmin`（管理员或 root 才能调用）；服务层另按题目维度校验“创建者或 roleId=2 管理员”。
+
 ### 查询每题测试点数量
 
 ```http
@@ -427,7 +467,7 @@ GET /api/question/getallquestion
 Authorization: Bearer <token>
 ```
 
-说明：返回 `List<Map<String,Object>>`，用于统计每个题目的测试点数量。
+说明：返回 `List<Map<String,Object>>`，前面每项为 `{question_id, count}`（每题测试点数量，按 question_id 升序），列表末尾额外附加一条汇总 `{total: 题目数, questions: [题目ID升序列表]}`。
 
 返回：`Result<List<Map<String,Object>>>`。
 
@@ -457,7 +497,7 @@ Content-Type: application/json
 
 返回：`Result<TestCase>`。
 
-测试点管理接口由管理员使用，测试数据不接受普通用户直接维护。
+新增时 `caseId` 由服务端置空、`createUserId` 取登录态用户。测试点管理接口由管理员使用，测试数据不接受普通用户直接维护。
 
 ### 根据测试点 ID 查询
 
@@ -500,7 +540,7 @@ Content-Type: application/json
 }
 ```
 
-说明：DTO 字段为空时由 Service 决定是否保留原值。
+说明：DTO 字段为 `null` 时保留原值（逐字段判空覆盖），全部字段可选。
 
 返回：`Result<TestCase>`。
 
@@ -512,3 +552,89 @@ Authorization: Bearer <token>
 ```
 
 返回：`Result<Void>`。
+
+## service-question 批量详情与内部接口
+
+### 批量查询题目详情（Agent 专用）
+
+```http
+POST /api/question/agent/detail
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+请求体：`AgentQuestionDetailDto`
+
+```json
+{ "questionIds": [1, 2, 3] }
+```
+
+说明：供 codewise-agent 在收藏夹瘦身列表之上按需拉详情；需登录，`questionIds` 去重后 1-10 个，超出报「单次最多查询 10 道题目详情」（`4000205`）。逐题独立判定可见性（与单题详情规则一致：私密题仅创建者与管理员可见，下架/审核中一律不可见；角色仅在批次命中他人私密题时回查一次），不因个别题目失败而整体报错。
+
+返回：`Result<List<AgentQuestionDetailVo>>`，每项含 `questionId`、`state`（`ok`/`not_found`/`invisible`）、`message`、`question`（仅 `state=ok` 时有值，结构同 `QuestionVo`）。
+
+### 服务间题目信息接口（QuestionFegin）
+
+供其他服务经 OpenFeign 调用（`service-api` 的 `QuestionFeignClient`），不做题目可见性过滤，前端不应直接使用：
+
+| 方法 路径 | 用途 | 返回 |
+| --- | --- | --- |
+| `GET /api/question/info/{questionId}` | 按 ID 查单个完整题目 | `Result<QuestionDto>` |
+| `POST /api/question/info/favoritequestions` | 按 ID 列表批量查完整题目（收藏快照等），不存在的 ID 跳过 | `Result<List<QuestionDto>>` |
+| `POST /api/question/info/briefquestions` | 按 ID 列表批量查瘦身信息（不含题干/样例等大字段，保留 `status`/`createUserId` 供调用方自行过滤） | `Result<List<QuestionBriefDto>>` |
+
+批量接口请求体均为题目 ID 数组（空列表返回空结果）。
+
+### 内部判题上下文
+
+```http
+GET /api/question/internal/judge-context/{judgeRecordId}
+Authorization: Bearer <token>（或仅内部 Token 的服务间调用）
+```
+
+用途：AI 建议消息瘦身后只携带 `judgeRecordId`，`service-ai` 经 `QuestionFeignClient#getJudgeContext` 回拉代码、日志、输入输出、题目描述等大字段，组装 `JudgeContextDto`（`judgeRecordId`、`submitRecordId`、`questionId`、`language`、`judgeStatus`、`code`、`log`、`inputData`、`expectedOutput`、`userOutput`、`questionContent`）。
+
+鉴权（防 IDOR）：无用户上下文（`UserContext.getUserId()==null`，即 MQ 消费线程发起、仅携带 `X-Internal-Token` 的内部调用）放行；携带用户身份时必须是管理员（roleId=2），否则报「该功能仅限管理员使用」（`4030002`）。关联记录缺失时返回 `Result.error` 文本，不抛堆栈。
+
+## 提交与判题异步链路
+
+1. `POST /api/question/judge`：`submit_record` 落库（`judge_status=pending`，`submitScene` 归一化为 `NORMAL/REVIEW/PLAN`）+ `EventTypes.JUDGE_SUBMIT_REQUEST` 经 OutboxPro 同事务登记，事件路由在 `OutboxEventRouteConfig` 声明，投递到 `MqContexts.JUDGE_EXCHANGE` / `JUDGE_ROUTING_KEY`（载荷仅 `submitRecordId`）。
+2. `service-judge` 领取时先 CAS `pending→judging`，在 Docker 容器池内编译运行并写 `judge_record`，随后将结果（载荷 `judgeRecordId`）经其自身 Outbox 路由发回 `question.exchange` / `question.submit.record.routing`。
+3. 本服务 `MQ/Mq` 监听队列 `question.queue`（`MqContexts.Question_QUEUE_NAME`），按路由键分发给 `MessageHandler` 实现：
+
+   | 路由键（MqContexts 常量） | 处理器 | 职责 |
+   | --- | --- | --- |
+   | `question.submit.record.routing`（`QUESTION_SUBMIT_RECORD_ROUTING_KEY`） | `SubmitRecordHandel` | CAS 收尾 `judging→success`、题目计数、REVIEW/PLAN 事件 Outbox 转发、WebSocket 推送 |
+   | `question.debug.routing`（`QUESTION_DEBUG_ROUTING_KEY`） | `DebugHandle` | 调试结果/随机用例生成任务收尾，经 `debug-judge-result` 推送 |
+   | `question.testcace.routing`（`Question_TESTCASE_ROUTING_KEY`，注意常量值拼写为 testcace） | `TestCaseHandle` | AI 生成的测试用例按输入+期望输出 MD5 去重入库，收尾 `ai_statue=success` |
+   | `question.delete.queue.routing`（`QUESTION_DELETE_QUESTION_ROUTING_KEY`） | `DeleteQuestion` | 将题目 `ai_statue` 置 `failure` |
+
+4. `SubmitRecordHandel` 可靠性：载荷信封/裸 `Long` 双读（`EnvelopeCodec.unwrap`）；CAS 幂等（重复投递跳过）；事务提交后才 ACK；失败按消息体 MD5 在 Redis 计数（`question:judge:retry-count`），未 3 次 requeue 重投，超限留存 `question:judge:failed` 后丢弃。`REVIEW` 场景经 `EventTypes.REVIEW_JUDGE_RECORD`（→ `REVIEW_EXCHANGE` / `REVIEW_JUDGE_RECORD_ROUTING_KEY`）、`PLAN` 场景经 `EventTypes.PLAN_JUDGE_RECORD`（→ `REVIEW_EXCHANGE` / `PLAN_JUDGE_RECORD_ROUTING_KEY`）转发给 `service-review`。WebSocket 推送为 ACK 后尽力而为：`message.exchange` / `WEBSOCKET_ROUTING_KEY`，通道 `judge-result`，`code/log/expectedOutput/actual` 大字段截断至 16KB。
+5. 兜底：定时任务 `SubmitTask` 每 5 分钟扫描 `judge_status=pending` 且创建超 5 分钟的记录，重发判题请求到 `JUDGE_EXCHANGE` / `JUDGE_ROUTING_KEY`；`QuestionAiStatueTask` 每 5 分钟扫描 `ai_statue` 为 `pending`（超时）/`failure` 的题目重试 AI 用例生成（测试点已 ≥5 个则直接置 `success`）。
+
+判题 DB 为准，WebSocket 推送为尽力而为；前端以提交记录查询接口轮询兜底。
+
+## 数据表
+
+本服务独占 `codewise_question` 库（建表脚本见 `service-question/src/main/resources/sql/`）：
+
+| 表 | 说明 | 关键字段 |
+| --- | --- | --- |
+| `question` | 题目 | `question_id`(自增)、`question_type`(ACM/FUNCTION)、`status`(0 下架/1 正常/2 审核/3 私密)、`ai_statue`、`content_hash`、`total_submit`/`total_ac`/`pass_rate`；唯一索引 `create_user_id+content_hash` |
+| `test_case` | ACM 测试点 | `case_id`、`question_id`、`input_data`/`expected_output`、`is_sample`/`is_hidden`、`sort_order`/`score_weight`、单用例 `time_limit`/`memory_limit` |
+| `function_config` | 函数题配置 | `question_id`(唯一)、`class_name`、`method_name`、`parameter_config`(JSON)、`output_type` |
+| `function_test_case` | 函数题测试用例 | `question_id`、`input_data`/`expected_output`、生成列 `case_hash`(SHA-256)，唯一索引 `question_id+case_hash` |
+| `submit_record` | 提交记录 | `submit_record_id`、`question_id`、`user_id`、`submit_status`(AC/WA/TLE/RE/CE/OLE/MLE/PE)、`judge_status`(pending/judging/success)、`submit_scene`、`language` |
+| `judge_record` | 判题记录（判题机写入，本服务读取） | `judge_record_id`、`submit_record_id`、`test_case_id`、`submit_status`、`fail_index`、`test_total`、`code`/`input_data`/`expected_output`/`user_output`/`log`/`error_msg`、`time_used`/`memory_used` |
+
+Outbox 事件表由 OutboxPro 管理（`outboxpro.enabled: true`，`outboxpro.producer.poll-interval: 1000` 为必填纯毫秒值）。
+
+## 配置与环境
+
+- 服务端口 `8084`；Nacos 配置 `service-question.yaml`（`NACOS_ADDR`）。
+- `codewise.internal-token` 来自环境变量 `CODEWISE_INTERNAL_TOKEN`（无默认值，缺失启动失败），网关/内部调用鉴权用。
+- 函数判题产物目录 `codewise.function-artifact.root`（默认 `./data/function-artifacts`，不进版本库），沙箱镜像 `JUDGE_IMAGE`（默认 `codewise-java-judge:17`），单用例超时 `timeout-seconds: 30`。
+- RabbitMQ 手动 ACK（`spring.rabbitmq.listener.simple.acknowledge-mode: manual`），消费者在代码内手动确认，见上文可靠性说明。
+- MyBatis XML 位于大写目录 `resources/Mapper/`，`mapper-locations` 已显式声明大小写双路径。
+- HTML 导入文件大小上限 20MB（与 nginx `client_max_body_size` 对齐）。
+- 接口治理：`api.governance` 启用 Redis 滑动窗口限流（`@RateLimit`），超限时 HTTP 仍为 200，返回 `code=4290001`、提示「题目操作过于频繁，请稍后重试」，管理端点前缀 `/api/question/governance`（访问需管理员）。

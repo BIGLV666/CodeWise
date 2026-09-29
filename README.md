@@ -202,7 +202,7 @@ CodeWise/
 
 ## Docker 部署
 
-除本地开发外，项目提供一键 Docker 全栈部署：一台 Linux 主机 + Docker 即可在十分钟左右跑起 16 个容器（前端、网关、7 个业务服务、Python Agent、MySQL/Redis/RabbitMQ/Nacos、判题沙箱、Mailpit 邮件捕获），并已在实机完成端到端验证。
+除本地开发外，项目提供一键 Docker 全栈部署：一台 Linux 主机 + Docker 即可在十分钟左右跑起全栈——15 个常驻容器（前端、网关、7 个业务服务、Python Agent、MySQL/Redis/RabbitMQ/Nacos、Mailpit 邮件捕获），另有一个一次性 judge-base 构建任务容器（`up -d --build` 时构建判题基础镜像后即退出），判题沙箱是运行期由 service-judge 动态创建的临时容器，并已在实机完成端到端验证。
 
 三步启动：
 
@@ -218,7 +218,7 @@ docker compose -f deploy/docker-compose.yml ps   # 等待全部 healthy（首次
 
 打开 `http://localhost/`，用 `admin` 登录（密码取 `.env` 的 `ROOT_PASSWORD`，首次启动自动创建）。
 
-首次启动自动完成：MySQL 建库建表与迁移 SQL、OutboxPro 事件表、root 管理员创建（`sys_init` 表幂等）、RabbitMQ 拓扑与判题容器池预热。
+首次启动自动完成：MySQL 建库建表（各服务增量脚本已合入基础 SQL，见 `deploy/mysql-init/01-init-databases.sh`）、OutboxPro 事件表、root 管理员创建（`sys_init` 表幂等）、RabbitMQ 拓扑与判题容器池预热。
 
 镜像构成：
 
@@ -237,11 +237,18 @@ docker compose -f deploy/docker-compose.yml ps   # 等待全部 healthy（首次
 
 如果 IDE（如 IntelliJ IDEA）在加载项目时提示依赖解析失败，或 Maven 每次启动都重新加载且出错，这是因为共享模块（`service-api`、`service-common`）还未安装到本地 Maven 仓库。
 
-使用提供的一键安装脚本：
+使用提供的一键安装脚本（按顺序安装根 POM、`service-api`、`service-common`，common 依赖 api，api 在前）：
 
 ```powershell
-.\mvnw.cmd -f service-common\pom.xml -DskipTests install
+.\install-shared-modules.ps1
+```
+
+手动执行等价于：
+
+```powershell
+.\mvnw.cmd -N install
 .\mvnw.cmd -f service-api\pom.xml -DskipTests install
+.\mvnw.cmd -f service-common\pom.xml -DskipTests install
 ```
 
 然后分别编译或启动所需服务：
@@ -251,9 +258,9 @@ docker compose -f deploy/docker-compose.yml ps   # 等待全部 healthy（首次
 .\mvnw.cmd -f service-judge\pom.xml test
 ```
 
-判题服务所在 Docker 主机需要提前构建 `codewise-java-judge:17` 镜像，并提供 Jackson JAR。
+判题服务所在 Docker 主机需要提前构建 `codewise-java-judge:17` 镜像（`docker build -t codewise-java-judge:17 deploy/judge-base`，镜像已内置函数题编译所需的 Jackson 三件套到 `/opt/judge/lib`）。
 
-函数测试生成链路还要求 `service-ai` 与 `service-question` 配置相同的 `CODEWISE_INTERNAL_TOKEN`。用户自定义模型密钥由 `API_KEY_MASTER_KEY` 加密，仓库中不得保存真实密钥。运行时生成的函数产物写入 `data/function-artifacts`，不纳入版本控制。
+自 2026-08 起**所有服务**都要求配置 `CODEWISE_INTERNAL_TOKEN`（无默认值，缺失即启动失败），网关注入、下游校验、Feign 透传三处必须同值；函数测试生成链路同样依赖 `service-ai` 与 `service-question` 的该 Token 一致。用户自定义模型密钥由 `API_KEY_MASTER_KEY`（32 字节 Base64）加密，仓库中不得保存真实密钥。运行时生成的函数产物写入 `data/function-artifacts`，不纳入版本控制。
 
 Python Agent 位于仓库内 `codewise-agent/`，使用 `codewise-agent/sql/agent_tables.sql` 初始化会话表，并在 `codewise-agent/.env` 中配置：
 
@@ -271,7 +278,7 @@ cd codewise-agent
 .\.venv\Scripts\python.exe main.py
 ```
 
-FastAPI 默认监听 `127.0.0.1:8000`。前端调用 `/api/agent/**` 时必须携带 CodeWise 登录 Token；`JWT_SECRET` 不一致会导致 Agent 返回 `401 Token 签名无效`。
+FastAPI 默认监听 `127.0.0.1:8000`。前端调用 `/api/agent/**` 时必须携带 CodeWise 登录 Token；`JWT_SECRET` 与 Java 侧不一致时，Agent 返回 `401` 且文案统一为「登录状态已失效，请重新登录」（码 `4011002`），签名不匹配等细节只写服务端日志。Agent 测试用 pytest 运行：`.\.venv\Scripts\python.exe -m pytest tests/`。
 
 ## 文档
 
@@ -293,6 +300,7 @@ FastAPI 默认监听 `127.0.0.1:8000`。前端调用 `/api/agent/**` 时必须�
 - [自定义 AI 配置接口](docs/service-ai/README.md#用户自定义-ai-服务配置接口)
 - [Java AI 模块与会话记忆](docs/service-ai/README.md)
 - [V1 发布基线](docs/v1-release-notes.md)
+
 ## 项目定位
 
 本项目用于个人学习与工程实践，重点展示异步判题、函数题适配、容器池调度、学习数据闭环和 AI 辅助等核心实现及其设计过程。

@@ -67,7 +67,10 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
   Boot 3.2.4 解析不了，启动即失败）。
 - 覆盖事件：
   - question：JUDGE_SUBMIT_REQUEST（提交判题）、JUDGE_DEBUG_REQUEST（调试）、
-    REVIEW_JUDGE_RECORD（复习场景判题结果转发 review）、AI_TESTCASE_REQUEST（题目导入触发的用例生成，原为事务内裸发）
+    REVIEW_JUDGE_RECORD（复习场景判题结果转发 review）、
+    PLAN_JUDGE_RECORD（计划场景判题结果，reviews.exchange / plan.judge.record.routing →
+    reviews.plan.queue，消费方 service-review ProgressTrackerService）、
+    AI_TESTCASE_REQUEST（题目导入触发的用例生成，原为事务内裸发）
   - judge：JUDGE_RESULT_CALLBACK（结果回调 question）、AI_ADVICE_REQUEST（AI 建议，WA/RE/TLE 时）
   - review：REVIEW_REMINDER（复习到期提醒，codewise_review 库独立 outboxpro_outbox 表）、
     REVIEW_MASTERED（掌握祝贺：SM-2 状态 0→1 时与更新同事务发布，payload 为
@@ -84,7 +87,7 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 | 消费失败（submit） | 延迟重试 5s/10s/20s（wait 队列 TTL 弹回），3 次后 nack 进 DLQ | DLQ → failure_submit 登记 → `POST /api/judge/failure/retry/{id}` |
 | 消费失败（retry 流程） | 业务已记录 failure_submit=FAILURE，nack 进 DLQ 留痕 | 同上 |
 | 消费失败（debug） | 写 Redis 错误结果 + 回调 question + ACK（前端可见失败原因） | 无需 |
-| Outbox 投递失败 | 指数退避 1s*2^n，5 次转 DEAD（含台账） | `GET /actuator/outboxpro-ops/outbox`、`/dlq`（内部 Token，只读） |
+| Outbox 投递失败 | 指数退避 1s*2^n，5 次转 DEAD（含台账） | `GET /actuator/outboxpro-ops/outbox`、`/dlq`（内部 Token，只读；端点默认关闭，需 `outboxpro.ops.enabled=true` 并加入 actuator exposure，未开启时直查 `outboxpro_outbox`/`outboxpro_dead_letter` 表） |
 
 毒消息（载荷解析失败）直接 nack 进 DLQ，不重试。
 
@@ -100,18 +103,20 @@ judge.dlx (direct) ── judge.dead ──→ judge.dead.queue
 
 | 配置 | 默认 | 说明 |
 |------|------|------|
-| `outboxpro.enabled` | false（默认 matchIfMissing=true，须逐服务显式） | 生产者服务（question/judge/review/community）true，其余显式 false |
+| `outboxpro.enabled` | 库默认 true（matchIfMissing=true，须逐服务显式） | 生产者服务（question/judge/review/community）true，其余（user/message/ai/gateway）必须显式 false |
 | `outboxpro.producer.poll-interval` | "1000ms"（6.2 语法） | **必须显式配 `1000`**：Boot 3.2.4（Framework 6.1）解析不了 "1000ms"，启动即失败 |
 | `outboxpro.dlq.alert.threshold` | 100 | 死信积压高水位告警阈值（`OUTBOXPRO_ALERT` ERROR 日志 + 指标） |
+| `outboxpro.ops.enabled` | false | `/actuator/outboxpro-ops` 只读检索端点开关；开启后还需把 `outboxpro-ops` 加入 actuator exposure（本地 yaml 默认只暴露 health,info,metrics），授权由 `CodewiseDlqReadAuthorizer` 仅放行 `outbox:list`/`dlq:list` |
 | `codewise.internal-token` | 无（必填） | 内部通信 Token，经 `CODEWISE_INTERNAL_TOKEN` 环境变量注入，缺失启动失败 |
-| `jwt.secret` | 无（必填） | JWT 密钥，经 `JWT_SECRET` 环境变量注入（gateway/message/review），与 Python Agent 同值 |
+| `jwt.secret` | 无（必填） | JWT 密钥，经 `JWT_SECRET` 环境变量注入（gateway/message/review/user），与 Python Agent 同值 |
 | `codewise.gateway.trust-forwarded-for` | false | 网关是否信任 X-Forwarded-For（部署在可信 LB 后才置 true，直连时只用 remoteAddress） |
-| `codewise.mq.enabled` | - | 既有开关，控制 MqConfig 声明 |
+| `codewise.mq.enabled` | 未配置 = 不装配 MqConfig | 控制队列/交换机声明；community/message/review 本地 yaml 已显式 true，其余服务靠 Nacos 下发；缺省时队列不声明、消费者监听启动失败 |
 
 ## 8. 已知限制与后续项
 
-- publisher confirm 未启用（依赖 Nacos 变更），当前为至少一次 + 消费幂等。
+- Outbox 主链路已随 OutboxPro 启用 publisher confirm（Relay 确认后才标 SENT）；仍为「至少一次 + 消费幂等」的是事务外直发通道（`EventPublisher`/`RabbitTemplate` 尽力而为发送，如 WebSocket 推送、点赞/审核通知）。
 - `message.queue` / `notification.queue` 仍未挂 DLX（RabbitMQ 队列参数不可变，补挂需换新队列名并排空，收益是失败消息进 DLQ 而非依赖 consumed_event FAILED 留存，见第 9 节）。
+- `question.queue` / `reviews.queue` 同样未挂 DLX：判题结果回调消费失败按消息体 MD5 在 Redis 计数，3 次超限留存 `FAILED_KEY` 后 nack 丢弃（`SubmitRecordHandel.handleFailure`）；复习消费同模式（Redis 计数 + `REVIEW_JUDGE_FAILED_KEY` 留存）。两者均依赖 `submit_record` 状态 CAS 做重投幂等，Redis 留存数据需人工补发。
 - token 出源码、Gateway 头清洗等安全项属 P0-1，另行处理。
 
 ## 9. Message 与 AI 消费可靠性（P0-5 专项）
@@ -153,7 +158,7 @@ ai.dlx (direct) ── ai.dead ──→ ai.dead.queue
 
 - claim：INSERT 成功 = NEW；唯一键冲突按既有行分派：COMPLETED → 真重复直接 ACK；PROCESSING/FAILED → RECLAIM 重新接管（broker 对未 ACK 消息重投，崩溃残留行必须可重跑，at-least-once）。
 - `recordFailure`：`retry_count = retry_count + 1` 原子自增、last_error 截断 500 字符，状态保持 PROCESSING。
-- 覆盖消费者：service-message `EmailService`（email.routing）、`AiAdviceHandle`（notification.ai.advice.routing）；service-ai `WAAiHandle`（ai.wa-advice.routing）；service-review `ReviewService.setReview`（reviews.judge.record.routing，幂等键 `review:judge:{judgeRecordId}`，claim 行与 SM-2 业务更新同事务）。4 个通知 handler（like/review/checked/appeal）维持原有「业务成功后写标记 + DB 唯一键」安全模式。
+- 覆盖消费者：service-message `EmailService`（email.routing）、`AiAdviceHandle`（notification.ai.advice.routing）、`ReviewMasteredHandle`（notification.review.mastered.routing，幂等键 messageId `review:mastered:{userId}:{questionId}`，收件箱落库成功才 complete）；service-ai `WAAiHandle`（ai.wa-advice.routing）；service-review `ReviewService.setReview`（reviews.judge.record.routing，幂等键 `review:judge:{judgeRecordId}`，claim 行与 SM-2 业务更新同事务）。4 个通知 handler（like/review/checked/appeal）维持原有「业务成功后写标记 + DB 唯一键」安全模式。
 - service-message `mq/Mq.java` 分发器对 handler 未捕获异常（如 DB 抖动导致 claim 失败）做兜底：退避 5s 后 nack 重投，消息不丢（这两个队列未挂 DLX，nack(requeue=false) 等于丢弃）。
 
 ### 9.3 关键丢失/提前完成风险的消除
@@ -166,7 +171,7 @@ ai.dlx (direct) ── ai.dead ──→ ai.dead.queue
 
 ### 9.4 部署与排空步骤（AI v2 上线时）
 
-1. 按顺序构建：`service-common install` → service-message / service-ai（同批发布；`EmailMessage` 加字段、AI 队列改名均要求同批）。
+1. 按顺序构建：`service-api`/`service-common install`（common 依赖 api，先装 api）→ service-message / service-ai（同批发布；`EmailMessage` 加字段、AI 队列改名均要求同批）。
 2. **先在 RabbitMQ 管理台删除旧 `ai.queue` 到 `ai.exchange` 的两条旧绑定**（ai.testcase.routing、ai.wa-advice.routing），再发布新版本——否则灰度期间新消息会同时投递旧队列（无消费者）造成堆积。
 3. 执行 DDL：`codewise_message` 追加 `consumed_event`；`codewise_ai` 建 `consumed_event`（或执行主 DDL 增量部分）、执行 `migration_20260823_ai_message_status.sql`。
 4. 旧 `ai.queue` 若仍有残留消息，管理台（15672）按消息路由键 moveTo `ai.advice.queue` / `ai.testcase.queue`，确认排空后删除旧队列。
@@ -202,10 +207,10 @@ UPDATE consumed_event SET status = 'PROCESSING', retry_count = 0 WHERE event_id 
 
 1. **登记类型常量**：`service-api` `dto/event/EventTypes.java` 加常量。类型命名「领域_对象_动作」，先登记再引用，禁止魔法值散落。
 2. **选发布方式**：
-   - 需要与数据库写入原子一致 → 在业务 `@Transactional` 内 `outboxService.append(eventType, exchange, routingKey, payload)`；
-   - 纯通知、允许丢 → `eventPublisher.publish(...)` 非事务直发。
+   - 需要与数据库写入原子一致 → 在业务 `@Transactional` 内 `OutboxProPublisher.publish(eventType, payload)`，并在该服务 `OutboxEventRouteConfig` 登记 `EventDefinition` Bean（eventType + payloadType + exchange/routingKey 路由）；
+   - 纯通知、允许丢 → `eventPublisher.publish(exchange, routingKey, eventType, payload)` 非事务直发。
    - payload 只放 ID 引用；新的大字段诉求先落库（或已有表），消费方按需 Feign 拉取。
-3. **消费端**：`EnvelopeCodec.unwrap(body, X.class)` 双读；**必须实现幂等**（业务唯一键 CAS / `judge_status` 短路 / Redis setIfAbsent 三选一，参考现有消费者）。
+3. **消费端**：`EnvelopeCodec.unwrap(body, X.class)` 双读；**必须实现幂等**（业务唯一键 CAS / `judge_status` 短路 / Redis setIfAbsent / `consumed_event` 数据库状态机（claim/complete/recordFailure/markFailed，message、ai、review 已用）四选一，参考现有消费者）。
 4. **测试**：生产端验证 append/publish 参数（参考 `JudgeTaskServiceTest`）；消费端验证裸格式 + 信封格式双读与幂等分支（参考 `JudgeSubmitConsumerTest`）。
 5. **文档**：本文档第 3 节的覆盖事件清单补一行。
 
@@ -230,7 +235,7 @@ UPDATE consumed_event SET status = 'PROCESSING', retry_count = 0 WHERE event_id 
 | 通道 | 操作 | 适用 |
 |------|------|------|
 | 判题失败重试 | `POST /api/judge/failure/retry/{failureId}`（先 `GET /{status}/list` 查列表） | DLQ 死信登记的提交 |
-| Outbox DEAD 重放 | `GET /actuator/outboxpro-ops/outbox`、`/dlq`（内部 Token，只读查询）；HTTP 重放未开放，必要时由 DBA 按 `outboxpro_dead_letter` 台账修复 | 投递超限事件 |
+| Outbox DEAD 重放 | `GET /actuator/outboxpro-ops/outbox`、`/dlq`（内部 Token，只读查询；该端点默认关闭，需 `outboxpro.ops.enabled=true` + exposure 放行，未开启直查表）；HTTP 重放未开放（`CodewiseDlqReadAuthorizer` 拒绝 `outbox:replay`），必要时由 DBA 按 `outboxpro_dead_letter` 台账修复 | 投递超限事件 |
 | 队列手动转移 | 管理台 move 消息到目标队列 | 特殊抢救，慎用 |
 
 ### 观测点（OutboxPro 已内置告警，建议再接入 Prometheus）

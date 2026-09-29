@@ -1,14 +1,15 @@
 # service-judge 模块说明
 
-`service-judge` 是 CodeWise 的异步判题执行服务。它不直接接收用户提交请求，而是通过 RabbitMQ 消费 `service-question` 发布的判题或调试任务，在 Docker 容器中编译、运行代码，并把判题结果回调给题目服务。
+`service-judge` 是 CodeWise 的异步判题执行服务（端口 `8086`）。它不直接接收用户提交请求：判题主链路经 RabbitMQ 到达，HTTP 面只暴露管理接口（Gateway 转发 `/api/judge/**`）。它通过 RabbitMQ 消费 `service-question` 发布的判题或调试任务，在 Docker 容器中编译、运行代码，并把判题结果回调给题目服务。
 
-容器池以受限、非 root 容器执行不可信代码：根文件系统只读，只有 `/workspace` 与 `/tmp` 使用容量受限的临时文件系统；容器禁用网络、移除全部 capabilities 并启用 `no-new-privileges`，同时限制 CPU、内存和 PID 数。执行超时或异常的容器不会回收到池中，而是销毁重建以清理可能遗留的进程树。
+容器按语言创建并在启动时预热：Java 使用 `codewise-java-judge:17` 镜像（构建文件 `deploy/judge-base/Dockerfile`，预创建 2 个），Python 使用 `python:3.11-alpine`，C 与 C++ 共用 `gcc:13`（各预创建 1 个）。容器池以受限、非 root（uid 1000）容器执行不可信代码：内存 256MB（含 swap 等额）、CPU 配额 1 核、PID 上限 64、网络模式 `none`、丢弃全部 Linux capabilities 并启用 `no-new-privileges`，`/tmp` 为 16MB 的 tmpfs。根文件系统**不**启用只读、`/workspace` 也不是 tmpfs（新版 Moby 下 `docker cp` 对只读容器直接拒绝；`/workspace` 为 judge-base 镜像预建的 judge 属主目录，隔离由「非 root + capabilities 全清 + no-new-privileges + tmpfs /tmp」保证）。运行时限由容器内 `timeout 2s` 强制执行（`LanguageSpec.TIME_LIMIT_MS=2000`），编译等待上限 15s（`COMPILE_TIMEOUT_MS`），函数模式批量脚本时限随用例数线性扩展。借出容器最长等待 10 秒；执行超时或异常的容器被标记污染，归还时销毁重建以清理遗留进程树，不再复用。
 
 ## 1. 包结构
 
 ```text
 service-judge/src/main/java/org/example/servicejudge/
-|-- config/                         # Docker、Web 配置（Feign 头透传由 service-common 自动配置提供）
+|-- Advice/                         # GlobalExceptionHandler，HTTP 面全局异常处理：继承 service-common 的 AbstractGlobalExceptionHandler，只声明 basePackages；错误码见 exception/JudgeErrorCode（服务号 07）
+|-- config/                         # Docker、Web、Outbox 事件路由配置（Feign 头透传由 service-common 自动配置提供）
 |-- controller/                     # 管理员 HTTP 接口
 |   |-- DockerController.java
 |   `-- FailureSubmitController.java
@@ -57,14 +58,17 @@ service-judge/src/main/java/org/example/servicejudge/
 
 | 类 | 职责 |
 | --- | --- |
-| `JudgeService` | 管理 Docker 容器池；编译、批量执行测试点并生成 `JudgeRecord` |
-| `JudgeSubmitConsumer` | 监听 `judge.submit.queue`，领取任务（`pending -> judging` CAS）并交给 `JudgeSubmitHandler` |
+| `JudgeService` | 判题门面：编排「借容器 -> 准备工作区 -> 编译 -> 执行 -> 读结果 -> 还容器」，实现单次运行、ACM 批量、函数批量、函数调试四个入口；容器管理方法委托 `ContainerPoolManager` |
+| `ContainerPoolManager` | 按语言维护容器池：启动预热（Java 2 个，Python/C/C++ 各 1 个）、借出（最长等待 10 秒）、归还、污染销毁重建与管理操作前的 `checkAdmin` 二次校验 |
+| `DockerExecTemplate` | 纯 Docker I/O：按沙箱资源限制创建容器、工作区打包复制与清理、脚本执行（超时/异常回调上报污染）、结果文件读取与内存统计 |
+| `JudgeTaskService` | Submit/Retry 链路统一编排：CAS 领取、无事务执行 Docker 判题、`@Transactional` 落 `judge_record` 并登记 Outbox 事件（Docker 执行绝不置于数据库事务内） |
+| `JudgeSubmitConsumer` | 监听 `judge.submit.queue`（手动 ACK），信封/裸格式双读解析后交给 `JudgeSubmitHandler`；业务失败按退避转 `judge.wait.queue` 延迟重试，超限死信 |
 | `JudgeDebugConsumer` | 监听 `judge.debug.queue`，处理调试任务 |
 | `JudgeRetryConsumer` | 监听 `judge.retry.queue`，处理人工重试任务 |
-| `JudgeSubmitHandler` | 处理正常提交，写入判题结果，经 Outbox 回调题目服务；按原业务规则可触发 AI 建议 |
-| `JudgeDebugHandler` | 从 Redis 读取调试任务，执行样例/自定义用例并回写调试结果 |
+| `JudgeSubmitHandler` | 委托 `JudgeTaskService.handleSubmit` 完成领取（`pending -> judging` CAS）、判题、落库与 Outbox 回调；WA/RE/TLE 时同事务追加 AI 建议事件 |
+| `JudgeDebugHandler` | 从 Redis 读取调试任务，执行样例/自定义用例，结果写回 Redis 并回调题目服务（`question.debug.routing`）；业务失败内部消化为 `SYSTEM_ERROR` 结果，不进重试链路 |
 | `JudgeRetryHandler` | 原子抢占失败记录，复用已有结果或重新判题，记录错误并回调题目服务；不触发 AI 建议 |
-| `JudgeDeadLetterHandler` | 消费判题死信，将提交登记到 `failure_submit` 并标记本地提交为失败 |
+| `JudgeDeadLetterHandler` | 消费判题死信，按消息类型分派：仅提交类死信登记 `failure_submit` 并标记本地提交失败，重试/未知类型留痕放行 |
 | `FailureSubmitService` | 管理员按状态查询失败记录，将待处理记录投递到重试 routing key |
 | `FailureSubmitReconcileTask` | 每分钟修正超过五分钟仍处于重试中/失败状态的异常记录 |
 
@@ -75,9 +79,10 @@ service-judge/src/main/java/org/example/servicejudge/
 | 正常判题 | `judge.exchange` | `judge.routing` | `judge.submit.queue` | `JudgeSubmitConsumer` |
 | 调试判题 | `judge.exchange` | `judge.debug.routing` | `judge.debug.queue` | `JudgeDebugConsumer` |
 | 失败重试 | `judge.exchange` | `judge.retry.routing` | `judge.retry.queue` | `JudgeRetryConsumer` |
+| 延迟重试等待 | 默认交换机（按队列名直投） | TTL 到期后经 `judge.exchange`/`judge.routing` 弹回提交队列 | `judge.wait.queue`（无消费者） | 无 |
 | 判题死信 | `judge.dlx` | `judge.dead` | `judge.dead.queue` | `JudgeDeadLetterHandler` |
 
-submit/debug/retry 队列均绑定 `judge.dlx`，消费失败 `basicNack(requeue=false)` 的消息进入死信队列。旧版 `judge.queue` 统一消费者（`Mq` + `MessageHandler` 分发）已被三个独立消费者替代并弃用；旧队列排空步骤见 `docs/maintenance/messaging-reliability.md`。结果回调经 OutboxPro（`outboxpro_outbox` 表 + Relay，Publisher Confirm 确认投递）投递到 `question.exchange / question.submit.record.routing`。
+submit/debug/retry 队列均绑定 `judge.dlx`，消费失败 `basicNack(requeue=false)` 的消息进入死信队列。提交队列的业务失败不立即死信：按消息头 `x-codewise-retry-count` 指数退避（5s/10s/20s，最多 3 次）原样转投 `judge.wait.queue` 延迟重试；载荷解析失败的毒消息与重试超限的消息直接死信。调试与重试链路不做延迟重试（失败直接死信留痕）。旧版 `judge.queue` 统一消费者（`Mq` + `MessageHandler` 分发）已被三个独立消费者替代并弃用；旧队列排空步骤见 `docs/maintenance/messaging-reliability.md`。结果回调经 OutboxPro（`outboxpro_outbox` 表 + Relay，Publisher Confirm 确认投递）投递到 `question.exchange / question.submit.record.routing`。
 
 ## 4. 正常判题流程
 
@@ -86,26 +91,27 @@ service-question
   -> 事务提交 submit_record + outboxpro_outbox 登记
   -> Outbox Relay 投递 judge.exchange / judge.routing
   -> judge.submit.queue
-  -> JudgeSubmitConsumer（pending -> judging CAS 领取）
-  -> JudgeSubmitHandler
-  -> JudgeService
+  -> JudgeSubmitConsumer（信封/裸载荷解析，手动 ACK）
+  -> JudgeSubmitHandler -> JudgeTaskService（pending -> judging CAS 领取）
+  -> JudgeService（借容器 -> 编译 -> 逐用例执行 -> 还容器）
   -> judge_record
   -> Outbox / question.exchange / question.submit.record.routing
   -> service-question 更新提交记录（judging -> success CAS 幂等）
 ```
 
-正常判题结果为 `WA`、`RE` 或 `TLE` 时，`JudgeSubmitHandler` 保留原有 AI 建议投递逻辑。
+正常判题结果为 `WA`、`RE` 或 `TLE` 时，`JudgeTaskService.publishResultEvents` 与结果落库同事务追加登记 `AI_ADVICE_REQUEST` 事件（经 OutboxPro 投递到 `ai.exchange / ai.wa-advice.routing`，payload 为瘦身引用 DTO）。
 
 ## 5. 死信与重试流程
 
 ### 5.1 死信登记
 
-`JudgeDeadLetterHandler.consumeDeadMessage`：
+`JudgeDeadLetterHandler.consumeDeadMessage` 按消息类型分派：仅 `JUDGE_SUBMIT_REQUEST`（或历史裸数值格式）登记失败；`JUDGE_RETRY_REQUEST` 的死信状态已由 `JudgeRetryHandler` 落库，未知类型或无法解析的裸消息只记录日志后 ACK 放行——绝不把 failureId 当 submitRecordId 插表。提交类死信的登记流程：
 
-1. 接收死信中的 `submitRecordId`。
+1. 解析死信中的 `submitRecordId`。
 2. 插入一条 `failure_submit`，初始状态为 `PENDING(0)`，重试次数为 `0`。
 3. 将判题服务本地 `submit_record.judge_status` 从 `judging` 改为 `failure`。
-4. `submit_record_id` 有唯一索引，防止同一提交生成多条失败记录。
+4. `submit_record_id` 有唯一索引，防止同一提交生成多条失败记录；重复消费触发唯一键冲突时幂等放行。
+5. 登记与状态更新在同一事务内，且经代理调用保证 ACK 在事务提交之后执行。
 
 ### 5.2 人工发起重试
 
@@ -203,16 +209,16 @@ JudgeRetryHandler -X-> ai.exchange
 
 ## 8. 管理接口
 
-所有接口通过 Gateway 调用，并要求管理员身份。
+所有接口通过 Gateway（路由 `/api/judge/**`，服务监听 `8086`）调用，并要求管理员身份。守卫为两层：类级 `@RequireAdmin` 切面（`AdminAuthAspect` 从 `UserContext` 取用户、经 Feign 回查 roleId，管理员 `2` 或 root `0` 放行）+ 类/方法级 `@RateLimit` 限流；容器池接口在其之上还有 `ContainerPoolManager.checkAdmin` 二次校验（仅接受 roleId==2，即 root 也无法操作容器池）。
 
 ```http
-GET /api/judge/failure/{status}/list
-POST /api/judge/failure/retry/{failureId}
+GET /api/judge/failure/{status}/list     # 限流 30 次/60 秒
+POST /api/judge/failure/retry/{failureId} # 限流 30 次/60 秒
 ```
 
 状态参数使用 `0`、`1`、`2`、`3`。重试接口只接受当前状态为 `PENDING(0)` 的记录。
 
-容器池管理接口仍位于：
+容器池管理接口仍位于（整个控制器限流 60 次/60 秒；删除只针对空闲容器，且每种语言至少保留一个）：
 
 ```http
 GET    /api/judge/containers
@@ -241,3 +247,12 @@ DELETE /api/judge/containers/{language}/{containerId}
 ```
 
 完整 Spring 上下文测试依赖 Nacos、Docker、MySQL、Redis 和 RabbitMQ。缺少外部环境时优先运行无上下文的处理器单元测试。
+
+运行配置要点（`application.yaml` + 环境变量）：
+
+- `NACOS_ADDR`（Nacos 地址）、`CODEWISE_INTERNAL_TOKEN`（注入 `codewise.internal-token`，网关内部身份头校验必需）。
+- `spring.rabbitmq.listener.simple.acknowledge-mode: manual` 必须由本地 yaml 显式兜底（消费者全部手动 ACK，默认 AUTO 会双重确认导致 channel 崩溃循环）。
+- `docker.host` 默认 `unix:///var/run/docker.sock`；明文 `tcp://` 地址直接拒绝启动，远程连接必须 `docker.tls-verify: true` 且配置 `docker.cert-path`。
+- `codewise.judge.consumer-concurrency`（提交队列消费并发，默认 2）须与容器池容量同步上调，否则池容器闲置或排队空转。
+- `outboxpro.enabled: true`，与 question 共用 `codewise_question` 库的 `outboxpro_*` 表；`outboxpro.producer.poll-interval: 1000`（纯毫秒，Boot 3.2.4 不支持 `"1000ms"` 写法）。
+- Docker 部署（`deploy/docker-compose.yml`）：service-judge 挂载宿主 `/var/run/docker.sock`（DooD），`JUDGE_CONCURRENCY` 环境变量映射消费并发；`judge-base` 一次性任务负责构建 `codewise-java-judge:17`（可用 `JUDGE_IMAGE` 覆盖镜像名）。
