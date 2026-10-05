@@ -129,6 +129,7 @@ public class AiAdviceTaskService {
         // change.createTime 应是用户真正编辑代码的时间，而不是请求到达后端的时间。
         // 这样前端在停止输入 45 秒后批量上报时，后端才能判断用户已经停笔。
         LocalDateTime newestChangeTime = root.getLastChangeTime();
+        boolean changesTtlApplied = false;
         for(AiTaskChangesDto change:changes){
             if (change.getCreateTime() == null) {
                 change.setCreateTime(now);
@@ -137,11 +138,16 @@ public class AiAdviceTaskService {
                 newestChangeTime = change.getCreateTime();
             }
             redisTemplate.opsForList().rightPush(changesKey, change);
+            if (!changesTtlApplied) {
+                // rightPush 不会继承 TTL，首次写入后立即兜底，防止续期逻辑失效时产生永久 key。
+                redisTemplate.expire(changesKey, TASK_TTL);
+                changesTtlApplied = true;
+            }
         }
         root.setLastChangeTime(newestChangeTime);
         root.setLastActiveTime(now);
         redisTemplate.opsForValue().set(rootKey,root,TASK_TTL);
-        timeChange(":"+aiTaskDto.getUserId()+":"+aiTaskDto.getQuestionId());
+        timeChange(aiTaskDto.getUserId(), aiTaskDto.getQuestionId());
 
         Long accumulatedChangeCount = redisTemplate.opsForList().size(changesKey);
         if (accumulatedChangeCount == null || accumulatedChangeCount == 0) {
@@ -177,10 +183,11 @@ public class AiAdviceTaskService {
                 && Duration.between(start, end).compareTo(duration) >= 0;
     }
 
-    private void timeChange(String key){
-        String rootKey=AI_TASK_KEY+":"+key;
-        String changesKey=AI_TASK_CHANGES_KEY+":"+key;
-        String aiAdviceKey=AI_ADVICE_KEY+":"+key;
+    private void timeChange(Long userId, Long questionId){
+        String key=":"+userId+":"+questionId;
+        String rootKey=AI_TASK_KEY+key;
+        String changesKey=AI_TASK_CHANGES_KEY+key;
+        String aiAdviceKey=AI_ADVICE_KEY+key;
         redisTemplate.expire(rootKey,TASK_TTL);
         redisTemplate.expire(changesKey,TASK_TTL);
         redisTemplate.expire(aiAdviceKey,TASK_TTL);
@@ -369,7 +376,7 @@ public class AiAdviceTaskService {
         if (size == null) {
             return List.of();
         }
-        timeChange(":" + userId + ":" + questionId);
+        timeChange(userId, questionId);
         List<Object> range = redisTemplate.opsForList().range(key, 0L, size);
         List<String> advices = new ArrayList<>(range == null ? 0 : range.size());
         if (range != null) {
