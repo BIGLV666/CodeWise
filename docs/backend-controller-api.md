@@ -108,7 +108,7 @@ X-Real-IP: <clientIp>
 编码规则：`code = 类别(3位) × 10000 + 服务号(2位) × 100 + 序号(2位)`，形如 `4040201`（题目服务 · 资源不存在）。
 
 - **类别**取 HTTP 语义：`400` 参数/请求体、`401` 未登录、`403` 无权限、`404` 不存在、`409` 状态冲突/重复、`429` 频率限制、`500` 服务端。
-- **服务号**：`00` 通用、`01` user、`02` question、`03` review、`04` community、`05` message、`06` ai、`07` judge、`08` 基础设施（service-common）、`09` gateway、`10` Python agent。
+- **服务号**：`00` 通用、`01` user、`02` question、`03` review、`04` community、`05` message、`06` ai、`07` judge、`08` 基础设施（service-common）、`09` gateway、`10` Python agent、`11` quiz-nest。
 
 枚举分布（接口 `ErrorCode` 定义在 `service-api/.../exception/`）：
 
@@ -125,6 +125,7 @@ X-Real-IP: <clientIp>
 | `InfraErrorCode` | `service-common` | 6 | 信封编解码、必需配置缺失 |
 | `GatewayErrorCode` | `service-gateway` | 8 | 网关自身兜底（不依赖 service-api，文案与 `CommonErrorCode` 对齐） |
 | `AgentErrorCode` | `codewise-agent` | 5 | Python agent 鉴权与会话 |
+| `QuizNestErrorCode` | `service-quiz-nest` | 11 | 小组创建、修改、退出与成员状态 |
 
 收敛规则（写在 `service-common/.../advice/AbstractGlobalExceptionHandler`，各服务的 `Advice`/`advice` 子类只声明 `basePackages`）：
 

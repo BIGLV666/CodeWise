@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.servicequiznest.mapper.GroupMapper">
+
+    <!-- 修改小组：调用方 GroupService.updateGroup 已校验调用者为 ROOT/ADMIN，
+         这里不再用 user_id 兜底，否则管理员改自己未创建的小组会 0 行受影响、被误报为 UPDATE_FAILED。
+         GroupUtil.checkGroup 已保证 groupId/groupName/groupType 非空，description 允许被清空。 -->
+    <update id="updateGroup">
+        update `group`
+        set group_name = #{groupName},
+            group_description = #{groupDescription},
+            group_type = #{groupType},
+            update_time = CURRENT_TIMESTAMP()
+        where group_id = #{groupId}
+    </update>
+
+    <!-- 普通成员退出：删除自己的成员记录；影响行数为 0 表示不在该小组（服务层转 LEAVE_GROUP_FAILED）。
+         第二个参数必须是退出者本人的 userId（SQL 读不到 UserContext）。 -->
+    <update id="leaveGroup">
+        delete from group_member
+        where group_id = #{groupId} and user_id = #{userId}
+    </update>
+
+    <!-- root 退出：删除退出者本人的成员记录，role='ROOT' 兜底（非 root 调用返回 0）。
+         「最后一名成员则删除 group」不能写进同一条语句：MySQL 多表 DELETE 禁止子查询引用被删的目标表
+         （实测 ERROR 1093），本仓库也未开 allowMultiQueries，因此空组清理由
+         GroupService.leaveGroup 在删除成员后用 MP 的 delete 收尾。
+         指定新 root 的晋升（晋升算法）实现后再补。 -->
+    <update id="rootLeaveGroup">
+        delete from group_member
+        where group_id = #{groupId} and user_id = #{userId} and role = 'ROOT'
+    </update>
+</mapper>
