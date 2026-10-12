@@ -417,7 +417,8 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "80:80"
+      # 宿主端口可配：默认 80；宿主 80 已被占用（如已装 nginx / 宝塔面板）时改为 8080 等
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - service-gateway
     restart: unless-stopped
