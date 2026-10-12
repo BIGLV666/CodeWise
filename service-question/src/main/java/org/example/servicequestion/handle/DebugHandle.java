@@ -1,6 +1,5 @@
 package org.example.servicequestion.handle;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.exception.BizException;
@@ -32,7 +31,7 @@ public class DebugHandle implements MessageHandler {
     private RedisTemplate<String, Object> redisTemplate;
     @Autowired
     private FunctionTestCaseGenerationService functionTestCaseGenerationService;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Override
     public String getRoutingKey() {
         return MqContexts.QUESTION_DEBUG_ROUTING_KEY;
@@ -42,7 +41,10 @@ public class DebugHandle implements MessageHandler {
     @SuppressWarnings("unchecked")
     public void handle(String message, Channel channel, Message amqpMessage) throws IOException {
         Long taskId = amqpMessage.getMessageProperties().getDeliveryTag();
-        String uuid=objectMapper.readValue(amqpMessage.getBody(), String.class);
+        // 该路由的消息体就是裸 uuid 字符串（由 Mq.java 以 UTF-8 解码后经 message 传入），
+        // 不是 JSON：此前用 objectMapper.readValue(body, String.class) 当 JSON 解析，
+        // 对不带引号的 uuid 必然抛 Unexpected character/Unrecognized token，导致调试判题消息全部处理失败。
+        String uuid = message == null ? null : message.trim();
         try{
             if(uuid==null||uuid.equals("")){
                 log.info("未找到该记录{}",uuid);
