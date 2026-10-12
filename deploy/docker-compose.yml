@@ -324,7 +324,16 @@ services:
       SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-1025}
       SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
       SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
-      SPRING_MAIL_FROM: ${CODEWISE_MAIL_FROM:-codewise@noreply.local}
+      # 发件地址读的是 codewise.mail.from（EmailService 的 @Value），不是 spring.mail.from。
+      # 故容器内环境变量必须是 CODEWISE_MAIL_FROM 才能被松绑定命中；写成 SPRING_MAIL_FROM
+      # 会被静默忽略，发件人退回 Java 里的硬编码默认值（作者个人邮箱）——曾导致真实 SMTP
+      # 因发件地址与认证账号不一致而被拒。
+      CODEWISE_MAIL_FROM: ${CODEWISE_MAIL_FROM:-codewise@noreply.local}
+      # TLS：Spring Boot 不会自动开启 SSL/STARTTLS，必须显式打开，否则 465 直接连不上、
+      # 587 多数服务商也会拒 AUTH。465（隐式 SSL）置 SPRING_MAIL_SSL_ENABLE=true；
+      # 587（STARTTLS）置 SPRING_MAIL_STARTTLS_ENABLE=true。默认 false 以兼容明文 Mailpit。
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE: ${SPRING_MAIL_SSL_ENABLE:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SPRING_MAIL_STARTTLS_ENABLE:-false}
     ports:
       - "8083:8083"
     healthcheck:
