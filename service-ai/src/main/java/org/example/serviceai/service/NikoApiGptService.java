@@ -7,6 +7,7 @@ import org.example.serviceai.config.NikoApiGpt;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
 import org.example.serviceapi.exception.BizException;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -18,6 +19,8 @@ import java.util.function.Consumer;
 
 @Slf4j
 @Service
+// 可由 Nacos 下发 nikoapigpt.enabled=false 关闭该 Provider（matchIfMissing=true：默认开启）
+@ConditionalOnProperty(prefix = "nikoapigpt", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class NikoApiGptService implements CallAi {
 
     private final NikoApiGpt config;

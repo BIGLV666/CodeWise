@@ -9,6 +9,7 @@ import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
 import org.example.serviceapi.exception.BizException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.regex.Matcher;
@@ -16,6 +17,8 @@ import java.util.regex.Pattern;
 
 @Slf4j
 @Service
+// 可由 Nacos 下发 qianwen.enabled=false 关闭该 Provider（matchIfMissing=true：默认开启）
+@ConditionalOnProperty(prefix = "qianwen", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class QwenService implements CallAi {
 
     @Autowired

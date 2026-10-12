@@ -7,6 +7,7 @@ import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
 import org.example.serviceapi.exception.BizException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -21,6 +22,16 @@ import java.util.concurrent.TimeUnit;
 public class AIServiceManager {
     @Autowired(required = false)
     private List<CallAi> aiServices;
+
+    /**
+     * 是否启用 Provider 健康探测定时任务。
+     *
+     * <p>由 Nacos 下发 {@code ai.health-check.enabled}（默认 true）。置为 false 后不再起
+     * 后台周期探测线程，改为在真实调用时靠失败计数与切换机制按需发现故障——这样未部署的
+     * Provider（如 Ollama）不会持续刷连接失败日志。</p>
+     */
+    @Value("${ai.health-check.enabled:true}")
+    private boolean healthCheckEnabled;
 
     // 所有服务（按优先级排序）
     private List<CallAi> availableServices = new ArrayList<>();
@@ -68,8 +79,18 @@ public class AIServiceManager {
                     service.getModelName(), service.getPriority());
         }
 
-        // 启动健康检查
-        startHealthCheck();
+        if (healthCheckEnabled) {
+            // 启动健康检查
+            startHealthCheck();
+        } else {
+            // 探测定时任务已关闭：乐观地把全部 Provider 标记为可用，交给调用时的失败计数
+            // （MAX_FAIL_COUNT）与 switchToNext 按需发现故障。若仍保持初始的 false，
+            // getAvailableService() 会因为「没有任何健康服务」而直接返回 null（降级），AI 会不可用。
+            for (CallAi service : availableServices) {
+                healthCache.put(service.getModelName(), true);
+            }
+            log.info("AI 健康探测定时任务已关闭（ai.health-check.enabled=false），改为调用时按需发现故障");
+        }
 
         log.info("AI服务管理器初始化完成，共 {} 个服务", availableServices.size());
     }
