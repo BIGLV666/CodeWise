@@ -32,5 +32,8 @@
   },
   "devDependencies": {
     "typescript": "^5.5.0"
+  },
+  "overrides": {
+    "@deepseek-ai/cordis-plugin-timer": "1.1.4"
   }
 }

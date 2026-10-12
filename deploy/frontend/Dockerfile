@@ -1,5 +1,5 @@
-# 前端构建 + Nginx 托管。构建上下文为前端仓库目录：
-#   docker build -t codewise/frontend:latest ../../CodeWise-frontend/CodeWise-frontend
+# 前端构建 + Nginx 托管。构建上下文为前端仓库目录（与 CodeWise 同级）：
+#   docker build -t codewise/frontend:latest ../../CodeWise-frontend
 # 注意：nginx 站点配置 deploy/nginx.conf 由 docker-compose 挂载覆盖，
 # 单独运行本镜像时只提供静态文件，不带 API 反代。
 # 前端仓库使用 pnpm（pnpm-lock.yaml），corepack 随 node:20 自带。

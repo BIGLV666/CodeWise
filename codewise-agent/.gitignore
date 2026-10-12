@@ -16,7 +16,8 @@ agent-runtime/node_modules/
 agent-runtime/plugins/*/node_modules/
 agent-runtime/plugins/codewise-tools/dist/
 agent-runtime/plugins/codewise-web/dist/
-agent-runtime/package-lock.json
+# 注：agent-runtime/package-lock.json 必须入库。codewise-agent/Dockerfile 用 `npm ci` 安装，
+# 缺 lockfile 时干净 clone 上构建必然失败（此前该文件被本行忽略，属仓库缺陷）。
 
 # 环境配置（含密钥）
 .env

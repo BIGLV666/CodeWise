@@ -386,10 +386,10 @@ services:
   frontend:
     mem_limit: 64m
     image: ${CODEWISE_IMAGE_PREFIX:-codewise/}frontend:latest
-    # 前端源码在兄弟仓库 CodeWise-frontend/CodeWise-frontend，用 dockerfile_inline 构建，
-    # 与 deploy/frontend/Dockerfile 内容一致（后者作为独立构建参考）
+    # 前端源码在兄弟仓库 CodeWise-frontend（须与 CodeWise 同级：clone 到 ../CodeWise-frontend），
+    # 用 dockerfile_inline 构建，与 deploy/frontend/Dockerfile 内容一致（后者作为独立构建参考）
     build:
-      context: ../../CodeWise-frontend/CodeWise-frontend
+      context: ../../CodeWise-frontend
       dockerfile_inline: |
         FROM node:22-alpine AS build
         WORKDIR /fe

@@ -15,8 +15,14 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 
-COPY agent-runtime/package.json agent-runtime/package-lock.json ./agent-runtime/
-RUN cd agent-runtime && npm ci
+# 注：agent-runtime/package-lock.json 此前未提交（npm ci 必需），已补入仓库。
+# 另：lockfile 含 file:plugins/* 本地依赖，故 npm ci 前必须整目录拷入，不能只拷两个文件。
+COPY agent-runtime/ ./agent-runtime/
+RUN cd agent-runtime && npm ci \
+ # codewise-tools 的 main 指向未提交的 dist/，需在镜像内编译。
+ # 只编译它：codewise-web 的 dist 已提交，且其 src 对 @deepseek-ai/dsh-web@0.1.0-rc.8
+ # 存在类型不匹配（guard.ts 的 WebError 构造签名），tsconfig 又是 noEmitOnError，编译必失败。
+ && npx tsc -p plugins/codewise-tools/tsconfig.json
 
 COPY . .
 
