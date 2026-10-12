@@ -7,7 +7,7 @@ import org.example.serviceai.config.GLMConfig;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
 import org.example.serviceapi.exception.BizException;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -19,14 +19,21 @@ import java.util.function.Consumer;
 
 @Slf4j
 @Service
-// 可由 Nacos 下发 glm.enabled=false 关闭该 Provider（matchIfMissing=true：默认开启，保持原行为）
-@ConditionalOnProperty(prefix = "glm", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class GLMService implements CallAi {
+
+    /** 由 Nacos 下发 glm.enabled=false 时不参与轮转与探测；Bean 仍保留（见 CallAi#isEnabled）。 */
+    @Value("${glm.enabled:true}")
+    private boolean enabled;
 
     private final GLMConfig config;
 
     public GLMService(GLMConfig config) {
         this.config = config;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return enabled;
     }
 
     @Override

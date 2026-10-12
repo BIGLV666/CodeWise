@@ -66,9 +66,22 @@ public class AIServiceManager {
             return;
         }
 
-        // 按优先级排序
-        availableServices = new ArrayList<>(aiServices);
+        // 先剔除被 Nacos 关闭的 Provider（如 ollama.enabled=false），再按优先级排序。
+        // 只影响「是否参与轮转与探测」；Provider Bean 一律保留——业务类对其是硬依赖注入
+        // （AiConversationMemaryService 依赖 OllamaService），删 Bean 会让上下文启动失败。
+        availableServices = new ArrayList<>();
+        for (CallAi service : aiServices) {
+            if (service.isEnabled()) {
+                availableServices.add(service);
+            } else {
+                log.info("AI 服务已由配置关闭，不参与轮转与探测: {}", service.getModelName());
+            }
+        }
         availableServices.sort(Comparator.comparingInt(CallAi::getPriority));
+
+        if (availableServices.isEmpty()) {
+            log.error("所有 AI 服务都被配置关闭（检查 glm/qianwen/nikoapigpt/ollama 的 enabled），AI 功能将不可用");
+        }
 
         // 初始化状态
         for (CallAi service : availableServices) {

@@ -3,18 +3,25 @@ package org.example.serviceai.service;
 import org.example.serviceai.intifer.CallAi;
 import org.example.serviceai.intifer.Ollama;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.function.Consumer;
 
 @Service
-// 可由 Nacos 下发 ollama.enabled=false 静音该 Provider：未部署 Ollama 时，周期性探测
-// 会持续输出 "Failed to connect to localhost:11434" 的噪音日志。matchIfMissing=true 默认开启。
-@ConditionalOnProperty(prefix = "ollama", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class OllamaService implements CallAi {
     @Autowired
     private Ollama ollama;
+
+    /** 由 Nacos 下发 ollama.enabled=false 时不参与轮转与探测；Bean 仍保留（见 CallAi#isEnabled）。 */
+    @Value("${ollama.enabled:true}")
+    private boolean enabled;
+
+    @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+
     @Override
     public String getModelName() {
         return "ollama";

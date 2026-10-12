@@ -9,6 +9,19 @@ public interface CallAi {
     String getModelName();
 
     /**
+     * 是否参与轮转与健康探测。
+     *
+     * <p>这里只控制「是否参与」，<b>不控制 Bean 是否存在</b>：Provider Bean 必须始终存在，
+     * 因为业务类对它们是硬依赖注入（例如 AiConversationMemaryService 依赖 OllamaService），
+     * 用 {@code @ConditionalOnProperty} 直接删 Bean 会导致整个应用上下文启动失败
+     * （UnsatisfiedDependencyException）。关闭 Provider 请由实现类读取配置后覆盖本方法，
+     * 再由 AIServiceManager 在装配时过滤。</p>
+     */
+    default boolean isEnabled() {
+        return true;
+    }
+
+    /**
      * 调用AI服务
      */
     String callAi(String prompt);
