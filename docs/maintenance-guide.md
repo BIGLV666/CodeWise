@@ -152,7 +152,7 @@ MySQL / Redis / RabbitMQ / Nacos / Docker
 | 其他非零值 | 通常判为 RE |
 | `stdout.txt` | 用户标准输出 |
 | `stderr.txt` | 编译错误或异常堆栈 |
-| `exitcode.txt` | 编译或运行退出码 |
+| `exitcode.txt` | 首行编译/运行退出码，次行本次运行峰值内存（KB，需沙箱镜像内置 GNU time） |
 
 错误摘要会做格式化，完整 JVM 异常仍保存在日志字段。修改错误展示时同时检查 `JudgeService` 和 `BuildResult`，避免两层重复处理。
 
@@ -168,6 +168,17 @@ MySQL / Redis / RabbitMQ / Nacos / Docker
 - 限制输出文件与临时磁盘大小（/tmp 已限，stdout/stderr 文件尚无显式上限）。
 
 exec 超时或异常会把容器标记为污染（tainted），归还时销毁重建、整棵进程树随之清理——超时残留后台子进程不会污染下一个用例。语言容器平时复用，`cleanContainerWorkspace()` 只清理工作目录，这正是「超时即污染重建」存在的原因。判题节点不应与数据库、消息队列等核心服务部署在同一宿主机。
+
+### 工作区属主与内存指标
+
+`docker cp` 由守护进程以 root 身份解包，tar 条目不带属主时落地为 `root:root`；判题用户（uid 1000）删不掉 root 属主子目录里的文件，于是 `cleanContainerWorkspace()` 的 `find -exec rm -rf` 以退出码 1 失败，函数模式（固定写 `/workspace/cases/`）**每次判题都会销毁重建容器**（实测每次多花约 2.2 秒，且容器永不复用、javac 永远冷启动）。所以 `DockerExecTemplate.copyWorkspaceToContainer()` 必须同时满足两条，缺一不可：
+
+- 每个 tar 条目显式设置 `uid/gid = 1000:1000`（与 `JUDGE_USER` 同源）；
+- 显式打包目录条目（名字以 `/` 结尾），否则子目录仍由守护进程隐式创建为 root 属主。
+
+`memory_used` 由 run 脚本里的 GNU time（`/usr/bin/time -f %M`，单位 KB）产出，要求沙箱镜像内置 `time` 包（`deploy/judge-base/Dockerfile` 已安装）：ACM 模式写进 `exitcode.txt` 第二行，函数模式以 `__CODEWISE_MEM_KB__` 标记追加在 `batch-result.txt` 末尾，`JudgeService` 读取这两个文件时一并解析，不额外增加 Docker 调用。GNU time 缺失时判题照常，内存记 0 并打 WARN（当前 python/gcc 镜像未内置，且它们本身也还没部署）。
+
+不要用 Docker stats 取内存：`statsCmd` 是流式异步命令、`.exec()` 立刻返回，读到的值恒为 0；cgroup v2 下 daemon 也不返回 `max_usage`，而容器 `memory.peak` 会被 javac 污染且随复用单调上升。用 `docker restart` 重置峰值同样不可行——实测单次 10.8 秒。
 
 ### 容器池运维
 

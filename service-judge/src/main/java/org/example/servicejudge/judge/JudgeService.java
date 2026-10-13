@@ -19,6 +19,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 判题门面：实现 {@link JudgeInterface} 的四个判题入口（单次运行、ACM 批量、
@@ -39,6 +41,9 @@ public class JudgeService implements JudgeInterface {
 
     private final ContainerPoolManager containerPoolManager;
     private final DockerExecTemplate dockerExecTemplate;
+
+    /** 批量结果末尾的峰值内存标记（KB）。 */
+    private static final Pattern BATCH_MEMORY_PATTERN = Pattern.compile("__CODEWISE_MEM_KB__(\\d+)");
 
     public JudgeService(ContainerPoolManager containerPoolManager, DockerExecTemplate dockerExecTemplate) {
         this.containerPoolManager = containerPoolManager;
@@ -137,19 +142,20 @@ public class JudgeService implements JudgeInterface {
 
                 String stdout = dockerExecTemplate.readFileFromContainer(containerId, "/workspace/stdout.txt");
                 String stderr = dockerExecTemplate.readFileFromContainer(containerId, "/workspace/stderr.txt");
-                int memoryUsed = dockerExecTemplate.getContainerMemory(containerId);
+
+                // exitcode.txt 首行是退出码、次行是本次运行的峰值内存（KB，脚本内 GNU time 产出）
+                String[] runMetrics = readRunMetricsLines(containerId);
 
                 // 如果 exec 没有返回 124（TLE），我们再尝试从文件读取以确保准确捕获 Java/Python 内部抛出的异常退出码
                 if (exitCode == null || exitCode != 124) {
-                    String exitCodeText = dockerExecTemplate
-                            .readFileFromContainer(containerId, "/workspace/exitcode.txt").trim();
-                    if (!exitCodeText.isEmpty()) {
+                    if (!runMetrics[0].isEmpty()) {
                         try {
-                            exitCode = Integer.parseInt(exitCodeText);
+                            exitCode = Integer.parseInt(runMetrics[0]);
                         } catch (NumberFormatException ignored) {
                         }
                     }
                 }
+                int memoryUsed = parsePeakMemoryKb(runMetrics[1], containerId);
                 String cleanErr = JudgeResults.formatRuntimeError(stderr, language);
                 JudgeReturnDto judgeReturnDto = new JudgeReturnDto();
                 judgeReturnDto.setExitCode(exitCode);
@@ -254,6 +260,7 @@ public class JudgeService implements JudgeInterface {
                 int timeUsed = (int) (System.currentTimeMillis() - caseStart);
                 String stdout = dockerExecTemplate.readFileFromContainer(containerId, "/workspace/stdout.txt");
                 String stderr = dockerExecTemplate.readFileFromContainer(containerId, "/workspace/stderr.txt");
+                int memoryUsed = readPeakMemoryKb(containerId);
 
                 JudgeReturnDto judgeReturnDto = JudgeResults.formatJudgeReturnDto(
                         runExitCode,
@@ -261,7 +268,7 @@ public class JudgeService implements JudgeInterface {
                         stderr,
                         JudgeResults.formatRuntimeError(stderr, language),
                         stdout,
-                        0
+                        memoryUsed
                 );
 
                 JudgeRecord judgeRecord = BuildResult.buildResult(judgeReturnDto, testCase.getCaseId(),
@@ -381,14 +388,14 @@ public class JudgeService implements JudgeInterface {
                 FunctionExecutionResult execution = i < executions.size()
                         ? executions.get(i)
                         : new FunctionExecutionResult(1, "", "", "批量执行未返回该测试用例结果",
-                                batchTimeUsed / testCases.size());
+                                batchTimeUsed / testCases.size(), 0);
                 JudgeReturnDto judgeReturnDto = JudgeResults.formatJudgeReturnDto(
                         execution.exitCode(),
                         execution.timeUsed(),
                         JudgeResults.mergeFunctionLog(execution.stdout(), execution.stderr()),
                         JudgeResults.formatRuntimeError(execution.stderr(), language),
                         execution.resultOutput(),
-                        0
+                        execution.memoryKb()
                 );
                 JudgeRecord judgeRecord = BuildResult.buildResult(
                         judgeReturnDto,
@@ -544,14 +551,14 @@ public class JudgeService implements JudgeInterface {
                 TestDto testCase = testCases.get(index);
                 FunctionExecutionResult execution = index < executions.size()
                         ? executions.get(index)
-                        : new FunctionExecutionResult(1, "", "", "批量执行未返回该测试用例结果", batchTimeUsed);
+                        : new FunctionExecutionResult(1, "", "", "批量执行未返回该测试用例结果", batchTimeUsed, 0);
                 JudgeReturnDto judgeReturnDto = JudgeResults.formatJudgeReturnDto(
                         execution.exitCode(),
                         execution.timeUsed(),
                         JudgeResults.mergeFunctionLog(execution.stdout(), execution.stderr()),
                         JudgeResults.formatRuntimeError(execution.stderr(), language),
                         execution.resultOutput(),
-                        0
+                        execution.memoryKb()
                 );
                 JudgeRecord result = BuildResult.buildResult(
                         judgeReturnDto,
@@ -599,6 +606,7 @@ public class JudgeService implements JudgeInterface {
             int timeUsed
     ) {
         String batchOutput = dockerExecTemplate.readFileFromContainer(containerId, "/workspace/batch-result.txt");
+        int batchMemoryKb = parseBatchMemoryKb(batchOutput, containerId);
         List<FunctionExecutionResult> results = new ArrayList<>();
         String beginMarker = "__CODEWISE_CASE_BEGIN__";
         String resultMarker = "__CODEWISE_RESULT_BEGIN__\n";
@@ -624,7 +632,7 @@ public class JudgeService implements JudgeInterface {
             String resultOutput = readBatchSection(record, resultMarker, stdoutMarker);
             String stdout = readBatchSection(record, stdoutMarker, stderrMarker);
             String stderr = readBatchSection(record, stderrMarker, endMarker);
-            results.add(new FunctionExecutionResult(exitCode, resultOutput, stdout, stderr, timeUsed));
+            results.add(new FunctionExecutionResult(exitCode, resultOutput, stdout, stderr, timeUsed, batchMemoryKb));
         }
         return results;
     }
@@ -651,13 +659,64 @@ public class JudgeService implements JudgeInterface {
         return text.substring(start, end).stripTrailing();
     }
 
-    /** 函数模式单用例批量执行结果。 */
+    /**
+     * 函数模式单用例批量执行结果。
+     *
+     * @param memoryKb 整批 JVM 的峰值内存（KB），同一批次的每个用例取同一个值
+     *                 （与「批量总耗时按用例平均」的口径一致）
+     */
     private record FunctionExecutionResult(
             int exitCode,
             String resultOutput,
             String stdout,
             String stderr,
-            int timeUsed
+            int timeUsed,
+            int memoryKb
     ) {
+    }
+
+    /**
+     * 读取 run.sh 写入的 exitcode.txt 并切成两行：{@code [0]} 退出码、{@code [1]} 峰值内存（KB）。
+     * 文件缺失或只有一行时对应位置为空串（镜像内无 GNU time 时第二行就是空的）。
+     */
+    private String[] readRunMetricsLines(String containerId) {
+        String content = dockerExecTemplate.readFileFromContainer(containerId, "/workspace/exitcode.txt");
+        String[] lines = content == null ? new String[0] : content.strip().split("\\R", -1);
+        String exitCode = lines.length > 0 ? lines[0].trim() : "";
+        String memoryKb = lines.length > 1 ? lines[1].trim() : "";
+        return new String[]{exitCode, memoryKb};
+    }
+
+    /** 读取本次运行的峰值内存（KB）；缺失时返回 0 并告警。 */
+    private int readPeakMemoryKb(String containerId) {
+        return parsePeakMemoryKb(readRunMetricsLines(containerId)[1], containerId);
+    }
+
+    /** 从批量结果末尾的 {@code __CODEWISE_MEM_KB__} 标记取整批峰值内存（KB）。 */
+    private int parseBatchMemoryKb(String batchOutput, String containerId) {
+        Matcher matcher = BATCH_MEMORY_PATTERN.matcher(batchOutput == null ? "" : batchOutput);
+        if (!matcher.find()) {
+            return parsePeakMemoryKb("", containerId);
+        }
+        return parsePeakMemoryKb(matcher.group(1), containerId);
+    }
+
+    /**
+     * 解析峰值内存（KB），缺失或非法时记 0 并告警。
+     *
+     * <p>沙箱镜像里没有 {@code /usr/bin/time} 时脚本无法产出该值，属于镜像配置问题，
+     * 不影响判题结论，只让内存展示缺失，因此这里不抛异常。</p>
+     */
+    private int parsePeakMemoryKb(String raw, String containerId) {
+        if (raw == null || raw.isEmpty()) {
+            log.warn("判题脚本未返回峰值内存，请确认沙箱镜像内置 /usr/bin/time: containerId={}", containerId);
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(raw));
+        } catch (NumberFormatException exception) {
+            log.warn("峰值内存解析失败: containerId={}, value={}", containerId, raw);
+            return 0;
+        }
     }
 }
