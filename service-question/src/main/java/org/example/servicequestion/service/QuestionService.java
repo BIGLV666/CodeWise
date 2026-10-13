@@ -32,6 +32,9 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
+import org.springframework.util.StringUtils;
+
+import java.nio.charset.StandardCharsets;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -96,6 +99,7 @@ public class QuestionService {
         if(userId==null){
             throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
+        validateOrdinaryQuestion(insertQuestionDto);
         String LockKey=LOCK_ADD_QUESTION+userId;
         RLock lock=redissonClient.getLock(LockKey);
         try{
@@ -130,6 +134,9 @@ public class QuestionService {
             }
         }
        }
+
+
+
 
 
     public QuestionVo getQuestionById(Long questionId) {
@@ -250,16 +257,11 @@ public class QuestionService {
 
     @Transactional
     public Question updateQuestion(InsertQuestionDto insertQuestionDto,Long questionId) {
-        Result<UserDto> userDto=userFeignClient.getUserInfo(UserContext.getUserId());
-        if(Objects.isNull(userDto)){
-            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
-        }
+        requireQuestionAdmin();
+        validateOrdinaryQuestion(insertQuestionDto);
         Question updatequestion= questionMapper.selectById(questionId);
         if(Objects.isNull(updatequestion)){
             throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
-        }
-        if(!updatequestion.getCreateUserId().equals(UserContext.getUserId())&&!userDto.getData().getRoleId().equals(2)){
-            throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
         updatequestion.setTitle(insertQuestionDto.getTitle());
         updatequestion.setDescription(insertQuestionDto.getDescription());
@@ -282,24 +284,75 @@ public class QuestionService {
 
     @Transactional
     public void deleteQuestion(Long questionId) {
-        Result<UserDto> userDto= userFeignClient.getUserInfo(UserContext.getUserId());
-        if(userDto.getCode()!=200){
-            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
-        }
-        if(userDto.getData()==null){
-            throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
-        }
+        requireQuestionAdmin();
         Question question= questionMapper.selectById(questionId);
         if(Objects.isNull(question)){
             throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
-        }
-        if(!Objects.equals(question.getCreateUserId(), UserContext.getUserId())&&!userDto.getData().getRoleId().equals(2)){
-                throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
 
         int delete = questionMapper.deleteById(questionId);
         if (delete <= 0) {
             throw new BizException(QuestionErrorCode.QUESTION_DELETE_FAILED);
+        }
+    }
+
+    private void requireQuestionAdmin() {
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
+            throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
+        }
+        Result<UserDto> userResult;
+        try {
+            userResult = userFeignClient.getUserInfo(userId);
+        } catch (Exception e) {
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE, e);
+        }
+        if (userResult == null || !Integer.valueOf(200).equals(userResult.getCode())) {
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+        }
+        if (userResult.getData() == null) {
+            throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
+        }
+        Integer roleId = userResult.getData().getRoleId();
+        if (!Integer.valueOf(2).equals(roleId) && !Integer.valueOf(0).equals(roleId)) {
+            throw new BizException(CommonErrorCode.ADMIN_ONLY);
+        }
+    }
+
+    /** 普通题目新增、更新共用校验，与 question 表的字符/字节容量保持一致。 */
+    private void validateOrdinaryQuestion(InsertQuestionDto dto) {
+        if (dto == null) {
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
+        }
+        if (!StringUtils.hasText(dto.getTitle())) {
+            throw new BizException(QuestionErrorCode.QUESTION_TITLE_REQUIRED);
+        }
+        if (!StringUtils.hasText(dto.getDescription())) {
+            throw new BizException(QuestionErrorCode.QUESTION_CONTENT_REQUIRED);
+        }
+        if (dto.getTitle().codePointCount(0, dto.getTitle().length()) > 200) {
+            throw new BizException(QuestionErrorCode.QUESTION_TITLE_TOO_LONG, 200);
+        }
+        if (dto.getTags() != null && dto.getTags().codePointCount(0, dto.getTags().length()) > 255) {
+            throw new BizException(QuestionErrorCode.QUESTION_TAGS_TOO_LONG, 255);
+        }
+        validateTextLength(dto.getInputDesc(), "输入描述");
+        validateTextLength(dto.getOutputDesc(), "输出描述");
+        validateTextLength(dto.getSampleInput(), "样例输入");
+        validateTextLength(dto.getSampleOutput(), "样例输出");
+        validateTextLength(dto.getHint(), "提示");
+        if (dto.getTimeLimit() == null || dto.getTimeLimit() <= 0) {
+            throw new BizException(QuestionErrorCode.QUESTION_TIME_LIMIT_INVALID);
+        }
+        if (dto.getMemoryLimit() == null || dto.getMemoryLimit() <= 0) {
+            throw new BizException(QuestionErrorCode.QUESTION_MEMORY_LIMIT_INVALID);
+        }
+    }
+
+    private void validateTextLength(String value, String fieldName) {
+        // MySQL TEXT 的容量是字节数；中文与四字节字符不能按 String.length() 判断。
+        if (value != null && value.getBytes(StandardCharsets.UTF_8).length > 65_535) {
+            throw new BizException(QuestionErrorCode.QUESTION_TEXT_TOO_LONG, fieldName);
         }
     }
 

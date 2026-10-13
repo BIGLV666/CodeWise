@@ -46,6 +46,11 @@ public enum QuestionErrorCode implements ErrorCode {
     RANDOM_NO_PARAM_UNSUPPORTED(4000226, "无参数的函数题暂不支持随机测试生成，请手动补充测试用例"),
     RANDOM_TYPE_UNSUPPORTED(4000227, "参数类型 %s 暂不支持随机测试生成"),
     QUESTION_FILE_UNRECOGNIZED(4000228, "题目文件内容无法识别，请检查文件后重新导入"),
+    QUESTION_TITLE_TOO_LONG(4000229, "标题长度不能超过 %s 个字符"),
+    QUESTION_TAGS_TOO_LONG(4000230, "标签长度不能超过 %s 个字符"),
+    QUESTION_TEXT_TOO_LONG(4000231, "%s内容过长，请缩短后重试"),
+    QUESTION_TIME_LIMIT_INVALID(4000232, "时间限制必须为正整数"),
+    QUESTION_MEMORY_LIMIT_INVALID(4000233, "内存限制必须为正整数"),
 
     // ---- 权限/可见性（403，账号状态语义为本服务自有）----
     ACCOUNT_UNAVAILABLE(4030201, "当前账号不可用，请联系管理员"),

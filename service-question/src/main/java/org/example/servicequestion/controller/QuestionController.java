@@ -1,6 +1,7 @@
 package org.example.servicequestion.controller;
 
 import org.example.serviceapi.dto.Result;
+import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicequestion.dto.CursorPageResult;
 import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.dto.ReturnQuestionDto;
@@ -24,6 +25,7 @@ public class QuestionController {
     @Autowired
     private QuestionService questionService;
     @PostMapping("/addquestion")
+    @RequireAdmin
     @RateLimit(limit = 20, window = 60)
     public Result<Question> addQuestion(@RequestBody InsertQuestionDto insertQuestionDto) {
         Question question = questionService.addQuestion(insertQuestionDto);
@@ -39,6 +41,7 @@ public class QuestionController {
     }
 
     @PutMapping("/updatequestion")
+    @RequireAdmin
     @RateLimit(limit = 20, window = 60)
     public Result<Question> updateQuestion(@RequestBody InsertQuestionDto insertQuestionDto,@RequestParam Long questionId) {
         Question updated = questionService.updateQuestion(insertQuestionDto,questionId);
@@ -46,6 +49,7 @@ public class QuestionController {
     }
 
     @DeleteMapping("/deletequestion")
+    @RequireAdmin
     @RateLimit(limit = 20, window = 60)
     public Result<Void> deleteQuestion(@RequestParam Long questionId) {
         questionService.deleteQuestion(questionId);
