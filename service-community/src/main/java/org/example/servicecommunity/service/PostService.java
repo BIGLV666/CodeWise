@@ -171,11 +171,35 @@ public class PostService {
                 .build();
     }
 
+    /**
+     * 读取该帖在「当前开放桶」中尚未落库的点赞增量。
+     *
+     * <p>桶内 hash 的 field 必须与写入方 {@code LikeRecordService} 保持一致，用
+     * {@code postId.toString()}：这里曾把 Long 直接当 field 传给 hash 操作，而模板的
+     * key 序列化器是 {@code StringRedisSerializer}，于是命中缓存即抛
+     * {@code ClassCastException: Long cannot be cast to String}。</p>
+     *
+     * <p>表现为「帖子详情时好时坏」的根因：{@code getPostById} 在 DB 分支末尾会把帖子写进
+     * {@code POST_KEY} 缓存，而 {@code HotPostTask} 每 5 分钟清一次该缓存——缓存空时读 DB
+     * 正常（并顺手缓存自己），缓存有数据时必然 500，直到下一次清缓存，如此往复。</p>
+     *
+     * @param postId 帖子 ID
+     * @return 尚未合并进 DB like_count 的点赞增量；桶或计数缺失时按 0 处理
+     */
+    private long pendingPostLikeDelta(Long postId) {
+        Number bucket = (Number) redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY);
+        if (bucket == null) {
+            return 0L;
+        }
+        Object delta = redisTemplate.opsForHash().get(RedisContext.LIKE_POST_KEY + "-" + bucket, postId.toString());
+        return delta == null ? 0L : Long.parseLong(delta.toString());
+    }
+
     public PostVo getPostById(Long postId) {
-        Post post = (Post) redisTemplate.opsForHash().get(RedisContext.POST_KEY,postId.toString());
-        if(post != null) {
-            post.setLikeCount(Long.parseLong(redisTemplate.opsForHash().get(RedisContext.LIKE_POST_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId)==null? String.valueOf(0L) : redisTemplate.opsForHash().get(RedisContext.LIKE_POST_KEY + "-" + (Number)redisTemplate.opsForValue().get(RedisContext.LIKE_POST_BUCKET_KEY), postId).toString())+post.getLikeCount());
-            Long r= likeRecordMapper.selectCount(new QueryWrapper<LikeRecord>().eq("user_id",UserContext.getUserId()).eq("post_id",post.getPostId()).eq("type","POST"));
+        Post post = (Post) redisTemplate.opsForHash().get(RedisContext.POST_KEY, postId.toString());
+        if (post != null) {
+            post.setLikeCount(post.getLikeCount() + pendingPostLikeDelta(postId));
+            Long r = likeRecordMapper.selectCount(new QueryWrapper<LikeRecord>().eq("user_id", UserContext.getUserId()).eq("post_id", post.getPostId()).eq("type", "POST"));
             PostVo postvo = new PostVo(post);
             postvo.setIsLike(r != 0);
             return postvo;
