@@ -44,8 +44,11 @@ RUN (getent passwd 1000 >/dev/null && userdel -r "$(id -nu 1000)") || true \
 WORKDIR /app
 COPY --from=build /repo/${MODULE}/target/*.jar /app/app.jar
 # /app/logs 供 GC 日志落盘：compose 以 service-logs 卷挂载到该路径，重建容器不丢历史
-# （目录连同属主建在镜像里，空卷首次挂载会继承该属主，非 root 用户才写得进去）
-RUN mkdir -p /app/data /app/logs \
+# /app/data/uploads 是 service-user 的上传目录（compose 挂 user-uploads 卷）。
+# 两者的目录与属主都必须先建在镜像里：空命名卷首次挂载会继承镜像目录的属主，
+# 若镜像里没有该目录，Docker 会以 root:root 新建挂载点，非 root 的服务进程写不进去
+# （曾导致头像/题目配图上传一律报「文件保存失败」）。
+RUN mkdir -p /app/data /app/data/uploads /app/logs \
  && chown -R codewise:codewise /app
 ENV TZ=Asia/Shanghai
 # GC 日志文件名按模块区分（各服务共用一个卷，同目录下互不覆盖）
