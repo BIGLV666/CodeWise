@@ -87,7 +87,7 @@ docker compose -f deploy/docker-compose.yml exec service-judge ls -la /app/logs
 docker compose -f deploy/docker-compose.yml exec service-judge tail -200 /app/logs/gc-service-judge.log
 ```
 
-日志随卷持久化，重建容器不丢历史；如需在宿主直接看，卷落在 `/var/lib/docker/volumes/codewise_service-logs/_data/`。
+日志随卷持久化，宿主也可直接在 `/var/lib/docker/volumes/codewise_service-logs/_data/` 读到。注意统一日志的 `file=` 输出**每次 JVM 启动会重置当前文件**（同一轮内按 filecount/filesize 轮转，已滚动出的旧文件保留），所以要看上一轮容器的 GC 数据需在重启前取走。
 
 仍需 Nacos 下发（可选，缺失即功能降级而非启动失败）：真实 SMTP 发信账号（`service-email.yaml`，容器部署直接在 `.env` 配 `SPRING_MAIL_*` 即可）、AI Provider 列表、Ollama 摘要模型地址。
 
