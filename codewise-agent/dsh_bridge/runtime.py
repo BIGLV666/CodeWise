@@ -89,6 +89,17 @@ def build_session_id(conversation_id: int, settings: "DshSettings", ai_config: A
     return f"cw-{conversation_id}-{digest}-{instance_nonce}"
 
 
+def compose_prompt(question: str, history: str | None = None) -> str:
+    """把可选的前情提要拼在当前输入之前。
+
+    同一运行时实例的后续轮次不带 history，此时原样返回输入——不给每轮提示词加噪声。
+    """
+
+    if not history or not history.strip():
+        return question
+    return f"{history}\n\n【当前用户输入】\n{question}"
+
+
 class DshConversationRuntime:
     """一个会话的 dsh 运行时生命周期与轮次执行。"""
 
@@ -110,6 +121,9 @@ class DshConversationRuntime:
         # 同一会话，上下文连续；实例被回收后开新会话，避免去 adopt 旧日志而整会话失效。
         self.session_id = build_session_id(conversation_id, settings, ai_config, uuid.uuid4().hex[:8])
         self.session_root = settings.session_root_base / str(conversation_id)
+        # 实例重建后模型上下文为空（dsh 无法跨进程恢复会话），首轮需要门面用 MySQL 里的
+        # 消息历史把上下文接回去；接过一次即可，之后由 dsh 自己的会话记忆承担。
+        self.needs_context_replay = True
         self.last_used = time.monotonic()
         self.turn_timeout_seconds = float(os.getenv("DSH_TURN_TIMEOUT_SECONDS", "300"))
 
@@ -120,6 +134,7 @@ class DshConversationRuntime:
         on_event,
         *,
         cancel_event: threading.Event | None = None,
+        history: str | None = None,
     ) -> RunResult:
         """执行一轮对话；on_event 会被实时回调，参数是 dsh session event 字典。
 
@@ -127,6 +142,8 @@ class DshConversationRuntime:
             question: 用户输入文本。
             token: 该用户当前 Bearer token；写入会话私有文件供工具读取。
             on_event: 回调 ``Callable[[JsonObject], None]``，在运行时线程内同步调用。
+            history: 可选的前情提要（历史对话文本）。仅在本实例首轮传入：实例重建后
+                dsh 会话是全新的，模型不记得之前几轮，需要靠它接回上下文。
 
         Raises:
             RuntimeBusyError: 上一轮尚未结束。
@@ -144,11 +161,15 @@ class DshConversationRuntime:
             self.last_used = time.monotonic()
             if cancel_event.is_set():
                 raise RuntimeError("Agent 轮次已取消")
-            return harness.run(
-                question,
+            prompt = compose_prompt(question, history)
+            result = harness.run(
+                prompt,
                 session_id=self.session_id,
                 on_notification=_make_event_forwarder(on_event, cancel_event),
             )
+            # 成功跑完一轮说明该会话里已经有上下文，后续轮次不必再回放。
+            self.needs_context_replay = False
+            return result
         finally:
             if cancel_event.is_set():
                 self.close()

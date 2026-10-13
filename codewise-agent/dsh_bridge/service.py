@@ -4,7 +4,8 @@
 1. 校验请求与会话归属，解析并解密用户 AI 配置；
 2. 持久化 USER / ASSISTANT 消息（前端历史列表数据源，与旧版一致）；
 3. 通过 RuntimeManager 取得会话运行时，执行一轮对话并实时转发 dsh 事件；
-4. 终止帧（done / error）与运行时故障恢复（子进程丢弃后按 JSONL 会话重建）。
+4. 终止帧（done / error）与运行时故障恢复：子进程丢弃后**用 MySQL 里的消息历史回放**
+   把模型上下文接回去（dsh 的 JSONL 会话日志无法跨进程恢复，见 runtime.build_session_id）。
 
 dsh 侧负责的：agent 循环、工具执行、JSONL 会话日志与自动压缩。
 """
@@ -120,6 +121,19 @@ class DshAgentService:
             )
         )
 
+    def _context_replay(self, call_ai_dto: CallAiDto) -> str | None:
+        """取本会话最近若干轮消息拼成前情提要，供新运行时实例的首轮使用。
+
+        历史的事实来源是 MySQL（前端历史列表也读它）：dsh 的 JSONL 会话日志无法跨进程
+        恢复（恢复判定要求 seed 逐字节相等，见 runtime.build_session_id），实例重建后
+        模型上下文为空，靠这段提要把它接回去。
+        """
+
+        messages = self.agent_message_mapper.get_agent_message_20(
+            call_ai_dto.conversation_id, call_ai_dto.user_id
+        )
+        return build_context_replay(messages)
+
     def stream_turn(
         self,
         call_ai_dto: CallAiDto,
@@ -150,6 +164,10 @@ class DshAgentService:
             manager.release_turn(call_ai_dto.conversation_id, owner)
             raise
 
+        # 新实例首轮：模型上下文为空，用 MySQL 里的历史把上下文接回去。必须在请求线程
+        # 里读库（SQLAlchemy 会话非线程安全，worker 线程只跑运行时）。
+        history = self._context_replay(call_ai_dto) if runtime.needs_context_replay else None
+
         events: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=128)
         worker_done = threading.Event()
 
@@ -166,7 +184,8 @@ class DshAgentService:
 
         def drive() -> None:
             try:
-                result = runtime.run_turn(question, token, on_event, cancel_event=cancel_event)
+                result = runtime.run_turn(question, token, on_event, cancel_event=cancel_event,
+                                          history=history)
                 enqueue("done", result)
             except BaseException as exc:  # noqa: BLE001 - 必须把失败传回消费线程
                 enqueue("error", exc)
@@ -264,6 +283,41 @@ def _user_message(exc: BaseException) -> str:
     if isinstance(exc, TransportClosedError):
         return AgentErrorCode.RUNTIME_INTERRUPTED.message
     return AgentErrorCode.AGENT_CALL_FAILED.message
+
+
+_CONTEXT_REPLAY_HEADER = (
+    "【本会话早前的对话记录，仅供你延续上下文：其中的问题都已回答过，"
+    "不要重复回答，也不要把它当成新的用户输入】"
+)
+
+
+def build_context_replay(messages: list[Any], char_budget: int = 12000) -> str | None:
+    """把历史消息拼成前情提要：从最近往前取，按字符预算收口。
+
+    预算是必要的：系统提示词 + 51 个网关工具定义已经占掉约 1.2 万 token，回放再多会把
+    上下文窗口挤满、提前触发压缩甚至超窗。字符数按中文约 1 token/字粗估，故取 12000。
+
+    Returns:
+        形如「【本会话早前的对话记录…】\\n用户：…\\n助手：…」的文本；没有可用消息时 None。
+    """
+
+    lines: list[str] = []
+    used = 0
+    for message in reversed(list(messages)):
+        content = str(getattr(message, "content", "") or "").strip()
+        if not content:
+            continue
+        role = str(getattr(message, "role", "") or "").upper()
+        line = f"{'用户' if role == 'USER' else '助手'}：{content}"
+        # 至少保留最近一条，避免单条超预算时把整段提要变成空。
+        if lines and used + len(line) > char_budget:
+            break
+        lines.append(line)
+        used += len(line)
+    if not lines:
+        return None
+    lines.reverse()
+    return "\n".join([_CONTEXT_REPLAY_HEADER, *lines])
 
 
 def _upstream_failure_detail(events: Any, limit: int = 500) -> str | None:

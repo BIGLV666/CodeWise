@@ -30,6 +30,7 @@ def runtime_env(tmp_paths, monkeypatch):
             self.closed = False
             self.close_calls = 0
             self.run_calls = 0
+            self.prompts = []
             self.behavior = None
             created.append(self)
 
@@ -38,6 +39,7 @@ def runtime_env(tmp_paths, monkeypatch):
 
         def run(self, question, *, session_id, on_notification):
             self.run_calls += 1
+            self.prompts.append(question)
             if self.behavior:
                 self.behavior(on_notification)
             return SimpleNamespace(final_response="answer", finish_reason="completed")
@@ -71,6 +73,28 @@ def test_success_refreshes_token_reuses_harness_and_close_cleans_file(runtime_en
     assert created[0].close_calls == 1
     assert not store.token_path(42).exists()
     assert not store.token_path(42).with_suffix(".token.tmp").exists()
+
+
+def test_first_turn_injects_context_replay_and_later_turns_do_not(runtime_env):
+    """新实例首轮把前情提要拼进提示词；之后不再回放（dsh 会话里已有上下文）。"""
+
+    runtime, _, created = runtime_env
+
+    runtime.run_turn("现在的问题", "tok", lambda _: None, cancel_event=threading.Event(),
+                     history="【本会话早前的对话记录…】\n用户：早前的问题")
+
+    assert runtime.needs_context_replay is False
+    runtime.run_turn("第二个问题", "tok", lambda _: None, cancel_event=threading.Event())
+
+    prompts = created[0].prompts
+    assert "早前的问题" in prompts[0] and "现在的问题" in prompts[0]
+    assert prompts[1] == "第二个问题"
+
+
+def test_compose_prompt_passes_bare_input_when_no_history():
+    assert runtime_module.compose_prompt("hi") == "hi"
+    assert runtime_module.compose_prompt("hi", history=None) == "hi"
+    assert runtime_module.compose_prompt("hi", history="   ") == "hi"
 
 
 def test_pre_cancelled_turn_never_starts_harness_and_removes_existing_token(runtime_env):

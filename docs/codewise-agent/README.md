@@ -79,7 +79,9 @@ python main.py                      # 本地默认 127.0.0.1:8000
 | `agent_memory` | **已弃用**（2026-09） | 旧对话摘要表；摘要已由 dsh compaction（JSONL 会话日志）接管，仅为回滚保留 |
 | `user_ai_config` | 在用（只读） | 用户自定义模型配置（group_name、model_names JSON、ai_url、加密 api_key）；DDL 由 `service-ai/src/main/resources/sql/codewise_ai.sql` 拥有，Agent 侧按 `user_ai_config_id + user_id` 校验归属后解密使用 |
 
-运行期还会在 `data/` 下落地非数据库状态：会话 JSONL 日志（dsh 记忆载体，按 `cw-<conversation_id>` 确定性 session id 恢复）与 token 临时文件。
+运行期还会在 `data/` 下落地非数据库状态：会话 JSONL 日志与 token 临时文件。JSONL 只是运行期工作日志——
+**dsh 无法跨进程恢复会话**（恢复判定要求 seed 逐字节相等），故会话 id 为 `cw-<会话号>-<配置摘要>-<实例后缀>`，
+且每个新实例的首轮由门面回放 MySQL 里的 `agent_message` 历史来接续上下文（历史事实来源是数据库）。
 
 ## 5. HTTP 端点（7 个，前缀 `/api/agent`）
 
@@ -203,7 +205,7 @@ OpenAI 兼容协议，双适配器并存于 `cordis.yml`，由 `DSH_PROVIDER` �
 - 镜像：`Dockerfile` 基于 `node:22-bookworm-slim` 双运行时（apt 装 python3.11 + pip；`npm ci` 预装 agent-runtime 闭包），非 root `node` 用户运行，`EXPOSE 8000`，健康检查 `curl /docs`。构建：`docker build -t codewise/codewise-agent:latest codewise-agent/`。
 - compose（`deploy/docker-compose.yml`）：服务 `codewise-agent`，不映射宿主端口；注入 `DATABASE_URL`、`JWT_SECRET`、`API_KEY_MASTER_KEY`、`CODEWISE_GATEWAY_URL=http://service-gateway:8082`、DSH 相关变量。
 - nginx（`deploy/nginx.conf`）：`location /agentapi/` 剥前缀反代 `codewise-agent:8000`，禁缓冲 + `proxy_read_timeout 300s`（SSE）。前端以 `VITE_AGENT_BASE_URL=/agentapi` 构建。
-- `data/`（会话 JSONL、token 文件）为运行态可丢弃数据：token 每轮刷新、JSONL 丢失仅影响单会话记忆；compose 未给它挂卷，升级重建即清空。
+- `data/`（会话 JSONL、token 文件）为运行态可丢弃数据：token 每轮刷新；JSONL 丢失**不再影响**会话记忆（记忆由门面回放 MySQL 历史接续，只损失本轮之前 dsh 未落库的过程细节）；compose 未给它挂卷，升级重建即清空。
 
 ## 10. 测试
 
@@ -223,4 +225,4 @@ pytest 用临时 SQLite 与占位密钥（`tests/conftest.py` 在导入项目模
 - **SSRF 双防线**：网关工具钉死部署配置的 origin + 静态路径白名单（fail-closed）；模型可控 URL 只出现在 `web_fetch`，由 `codewise-web` 守卫拦截环回/私有/保留地址（含 DNS 重绑定前缀、IPv4-mapped、NAT64、6to4 变体，解析失败即拒绝）。
 - **写操作**：收藏/笔记/计划/社区/复习配置均为真实写接口，以用户自身 JWT 执行，权限等同网页端本人操作；当前默认放行，dsh 审批（permission-presets）可在不改工具定义的前提下接入。
 - **run_code 信任边界**：worker 线程是 containment 而非 security boundary（可读 `.env`、`data/tokens/*`、发任意外网请求），对外暴露前必须 OS 层隔离；cordis.yml 已收紧单次预算（computeMs 10s / maxWallMs 60s / 输出 1 MiB / 堆 256 MB）。
-- **限制**：同会话并发轮次被拒；CORS 仅开发源 `http://localhost:5173`；无 `/health`（健康检查用 `/docs`）；`agent_memory` 表已弃用；会话记忆随 `data/` 目录丢失而丢（token/JSONL 均为运行态数据）。
+- **限制**：同会话并发轮次被拒；CORS 仅开发源 `http://localhost:5173`；无 `/health`（健康检查用 `/docs`）；`agent_memory` 表已弃用；会话记忆不再依赖 `data/`（新实例首轮由门面回放 MySQL 历史，见上文），`data/` 丢失只损失 JSONL 过程细节。

@@ -26,7 +26,10 @@ agent-runtime/
    `node node_modules/@deepseek-ai/dsh-sdk-jsonrpc-demo/lib/packaged-bin.js`
 2. 进程 env 注入会话专属配置（见下表），运行时按 `DSH_CORDIS_CONFIG` 装载本目录
    的 `cordis.yml`；
-3. JSONL 会话日志写入 `DSH_SESSION_ROOT`，进程重启后按同 session id 恢复。
+3. JSONL 会话日志写入 `DSH_SESSION_ROOT`。注意 **dsh 的恢复判定要求已存前缀与活会话 seed
+   逐字节相等（`seedCoversPrefix`），新进程永远无法复现（seed 含时间戳），因此跨进程无法
+   恢复同一会话** —— 门面改为每个运行时实例用独立 session id，并在首轮回放 MySQL 消息历史
+   来接续上下文（见 `dsh_bridge/runtime.py` 的 `build_session_id` 与 `service.py` 的 `_context_replay`）。
 
 | 环境变量 | 来源 | 用途 |
 |---|---|---|

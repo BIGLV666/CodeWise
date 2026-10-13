@@ -30,12 +30,16 @@ class FakeRuntime:
     def __init__(self, behavior="ok"):
         self.behavior = behavior
         self.calls = []
+        self.histories = []
         self.cancel_event = None
         self.finished = threading.Event()
         self.turn_timeout_seconds = 2
+        # 与真实运行时一致：实例首轮需要门面回放历史（真实运行时的语义见 runtime.build_session_id）
+        self.needs_context_replay = True
 
-    def run_turn(self, question, token, on_event, *, cancel_event):
+    def run_turn(self, question, token, on_event, *, cancel_event, history=None):
         self.calls.append((question, token))
+        self.histories.append(history)
         self.cancel_event = cancel_event
         try:
             if self.behavior == "busy":
@@ -329,7 +333,7 @@ def test_bounded_queue_unblocks_flooding_worker_on_close(db_session, seeded, mon
         return result
 
     class FloodRuntime(FakeRuntime):
-        def run_turn(self, question, token, on_event, *, cancel_event):
+        def run_turn(self, question, token, on_event, *, cancel_event, history=None):
             self.cancel_event = cancel_event
             try:
                 for _ in range(10000):
@@ -417,3 +421,83 @@ def test_ai_config_resolved_and_decrypted(db_session, seeded):
     assert config.model_name == "test-model"
     assert config.api_key == "sk-test"
     assert config.ai_url == "http://model.local/v1"
+
+
+# ── 跨实例上下文回放：dsh 无法跨进程恢复会话（见 runtime.build_session_id），
+#    新实例首轮必须用 MySQL 历史把模型上下文接回去，否则 agent「不记得」之前的对话。
+
+class _Msg:
+    def __init__(self, role, content):
+        self.role = role
+        self.content = content
+
+
+def _seed_history(db_session, seeded, turns):
+    from entry.AgentMessage import AgentMessage
+
+    mapper = AgentMessageMapper(db_session)
+    for role, content in turns:
+        mapper.add_agent_message(AgentMessage(
+            agent_conversation_id=seeded["conversation_id"], user_id=USER_ID,
+            role=role, content=content,
+        ))
+    db_session.commit()
+
+
+def test_first_turn_replays_mysql_history(db_session, seeded, monkeypatch):
+    _seed_history(db_session, seeded, [
+        ("USER", "你还记得三级缓存吗"),
+        ("ASSISTANT", "记得：本地缓存 + 分布式缓存 + 进程内缓存"),
+    ])
+    runtime = FakeRuntime()
+    _install(monkeypatch, runtime)
+
+    frames = list(service_module.DshAgentService(db_session).stream_turn(_dto(seeded), "tok"))
+
+    assert frames[-1][0] == "done"
+    history = runtime.histories[0]
+    assert history is not None
+    assert "你还记得三级缓存吗" in history
+    assert "本地缓存 + 分布式缓存 + 进程内缓存" in history
+    assert "用户：" in history and "助手：" in history
+
+
+def test_later_turn_does_not_replay_history(db_session, seeded, monkeypatch):
+    _seed_history(db_session, seeded, [("USER", "早前的问题")])
+    runtime = FakeRuntime()
+    runtime.needs_context_replay = False
+    _install(monkeypatch, runtime)
+
+    list(service_module.DshAgentService(db_session).stream_turn(_dto(seeded), "tok"))
+
+    assert runtime.histories == [None]
+
+
+def test_build_context_replay_orders_chronologically_and_labels_roles():
+    text = service_module.build_context_replay([_Msg("USER", "第一个问题"), _Msg("ASSISTANT", "第一个回答")])
+
+    assert text is not None
+    assert text.index("第一个问题") < text.index("第一个回答")
+    assert "用户：第一个问题" in text and "助手：第一个回答" in text
+
+
+def test_build_context_replay_returns_none_without_usable_messages():
+    assert service_module.build_context_replay([]) is None
+    assert service_module.build_context_replay([_Msg("USER", "   ")]) is None
+
+
+def test_build_context_replay_drops_oldest_beyond_budget_but_keeps_latest():
+    messages = [_Msg("USER", "A" * 100), _Msg("ASSISTANT", "B" * 100), _Msg("USER", "最近的话")]
+
+    text = service_module.build_context_replay(messages, char_budget=120)
+
+    assert text is not None
+    assert "最近的话" in text
+    assert "A" * 100 not in text
+    assert "B" * 100 in text
+
+
+def test_build_context_replay_keeps_single_oversized_message():
+    text = service_module.build_context_replay([_Msg("USER", "X" * 500)], char_budget=10)
+
+    assert text is not None and "X" * 500 in text

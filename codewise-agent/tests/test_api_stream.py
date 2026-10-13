@@ -31,8 +31,9 @@ class FakeRuntime:
         self.behavior = behavior
         self.cancel_event = None
         self.finished = threading.Event()
+        self.needs_context_replay = True
 
-    def run_turn(self, question, token, on_event, *, cancel_event):
+    def run_turn(self, question, token, on_event, *, cancel_event, history=None):
         self.cancel_event = cancel_event
         try:
             if self.behavior == "error":
