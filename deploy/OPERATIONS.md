@@ -129,6 +129,8 @@ docker compose -f deploy/docker-compose.yml exec mysql \
 | --- | --- |
 | 服务间 Feign 503/超时 | Nacos 控制台（`127.0.0.1:8848/nacos`，仅宿主回环可达）确认各服务注册的是容器网段 IP 而非 127.0.0.1 |
 | 判题一直 PENDING | judge 是否 healthy；宿主是否有判题镜像（`docker images \| grep codewise`）；`logs -f service-judge` |
+| **前端全站 502 / 页面提示「服务正在升级或维护」** | 先分辨：宿主机 `curl 127.0.0.1:8082/actuator/health` 正常就**不是后端**，而是前端 nginx 的上游地址过期。`docker logs codewise-frontend` 若满屏 `connect() failed (111: Connection refused) ... upstream: "http://<IP>:8082"`，把那个 IP 与 `docker inspect codewise-service-gateway-1` 的当前 IP 比一下即可确认。nginx 已改为 `resolver 127.0.0.11 valid=10s` + 变量 `proxy_pass`（请求时解析，容器换 IP 最多 10s 自愈），若仍发生先 `docker exec codewise-frontend-1 nginx -s reload` |
+| **改了 `deploy/nginx.conf` 但没生效** | 该文件是 bind mount 单文件，而 `git pull` 用「新文件 + rename」替换：容器里的挂载仍指向**旧 inode**，`nginx -s reload` 重载的还是旧内容，`docker compose up -d` 也不会因挂载文件内容变化而重建容器。改完必须显式重建前端：`docker compose -f deploy/docker-compose.yml up -d --force-recreate frontend`（或 `docker restart codewise-frontend-1` 重新绑定挂载）。校验是否真的生效：`docker exec codewise-frontend-1 grep -n resolver /etc/nginx/conf.d/default.conf` |
 | AI 产物验收失败 | question 容器内 `docker ps` 是否可用（sock 挂载 + docker CLI） |
 | 登录跨域报错 | `CORS_ORIGINS` 未包含实际来源 |
 | 注册收不到邮件 | 看 Mailpit Web（127.0.0.1:8025）是否有信；真实 SMTP 检查 `.env` 的 `SPRING_MAIL_*` |
