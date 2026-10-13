@@ -1,10 +1,10 @@
-package PACKAGE_NAME;
-
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.junit.jupiter.api.Test;
 
 @SpringBootTest
-class ServiceUserApplication {
+@EnableAutoConfiguration
+class ServiceUserApplicationTests {
 
     @Test
     void contextLoads() {

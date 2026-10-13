@@ -55,6 +55,7 @@ public class UserService {
     /** 单个验证码允许的最大试错次数，超过后作废，避免被暴力枚举。 */
     private final static long MAX_VERIFY_ATTEMPTS = 5;
     private final static SecureRandom SECURE_RANDOM = new SecureRandom();
+    private final static int MAX_EMAIL_LENGTH = 254;
     /** 封禁提示中的解封时间展示格式，避免把 LocalDateTime 原始值透给用户。 */
     private final static DateTimeFormatter BAN_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
@@ -145,6 +146,13 @@ public class UserService {
     }
 
 
+    /** 仅限制长度，保留邮箱原值及现有空值、格式处理行为。 */
+    private void validateEmailLength(String email) {
+        if (email != null && email.length() > MAX_EMAIL_LENGTH) {
+            throw new BizException(UserErrorCode.EMAIL_TOO_LONG, MAX_EMAIL_LENGTH);
+        }
+    }
+
     public Map<String,Object> login(String username, String password){
         QueryWrapper<User> queryWrapper = new QueryWrapper<User>();
         if(username==null||password==null){
@@ -153,6 +161,11 @@ public class UserService {
         queryWrapper.eq("user_name",username);
 
         User user=userMapper.selectOne(queryWrapper);
+        // 用户名优先；仅用户名不存在时尝试邮箱，密码错误不能切换到另一个账号。
+        if (user == null) {
+            validateEmailLength(username);
+            user = userMapper.selectOne(new QueryWrapper<User>().eq("email", username));
+        }
         // 账号不存在与密码错误返回同一文案，避免枚举有效账号
         if(user==null || !PasswordEncoding.matches(password,user.getPassword())){
             throw new BizException(UserErrorCode.LOGIN_FAILED);
@@ -168,11 +181,12 @@ public class UserService {
 
         Map<String,Object> map = new HashMap<>();
         map.put("user",userDto);
-        map.put("token",jwtUntil.generateToken(user.getUserId(),username));
+        map.put("token",jwtUntil.generateToken(user.getUserId(),user.getUserName()));
         return map;
     }
     //邮箱and密码登录
     public  Map<String,Object>emailLogin(String email,String password){
+        validateEmailLength(email);
         QueryWrapper<User> queryWrapper = new QueryWrapper<User>();
         if(email==null||password==null){
             throw new BizException(UserErrorCode.EMAIL_OR_PASSWORD_MISSING);
@@ -209,6 +223,7 @@ public class UserService {
      * 也会让期间的账号变更（改密、封禁）在登录时被忽略。
      */
     public String getEmailCode(String email){
+        validateEmailLength(email);
         if (email == null || email.isBlank()) {
             throw new BizException(UserErrorCode.EMAIL_MISSING);
         }
@@ -229,6 +244,7 @@ public class UserService {
     }
 
     public Map<String,Object> emailLoginForCode(String email,String code){
+        validateEmailLength(email);
         Map<String,Object> payload = consumeCode(CodeScene.LOGIN, email, code);
 
         Object cachedUserId = payload.get("userId");
@@ -253,6 +269,7 @@ public class UserService {
 
     //预注册
     public void email_regis(String email,String username,String password) {
+        validateEmailLength(email);
         System.out.println(UserContext.getIp());
         User user = userMapper.selectOne(new QueryWrapper<User>().eq("user_name",username));
         if(user!=null){
@@ -276,9 +293,12 @@ public class UserService {
 
     //激活
     public void register(String n,String code){
+        validateEmailLength(n);
         Map<String,Object> payload = consumeCode(CodeScene.REGISTER, n, code);
+        String email = String.valueOf(payload.get("email"));
+        validateEmailLength(email);
         User user = User.builder()
-                .email(String.valueOf(payload.get("email")))
+                .email(email)
                 .userName(String.valueOf(payload.get("userName")))
                 .nickName(String.valueOf(payload.get("userName")))
                 .password(String.valueOf(payload.get("password")))
@@ -311,6 +331,7 @@ public class UserService {
      * 新密码不在此步提交，避免未持有验证码的人为任意邮箱暂存一次改密。
      */
     public void updatePasswordForEmail(String email,String newPassword){
+        validateEmailLength(email);
         User user= userMapper.selectOne(new QueryWrapper<User>().eq("email",email));
         if(user==null){
             throw new BizException(UserErrorCode.USER_NOT_FOUND);
@@ -330,6 +351,7 @@ public class UserService {
      * 新密码在这一步随验证码一起提交，两者缺一不可。
      */
     public void updatePasswordForCode(String n, String code, String newPassword){
+        validateEmailLength(n);
         if (newPassword == null || newPassword.length() < 6) {
             throw new BizException(UserErrorCode.PASSWORD_TOO_SHORT, 6);
         }

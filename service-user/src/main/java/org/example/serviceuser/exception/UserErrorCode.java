@@ -25,6 +25,7 @@ public enum UserErrorCode implements ErrorCode {
     USERNAME_OR_PASSWORD_MISSING(4000104, "请填写用户名和密码后再登录"),
     EMAIL_OR_PASSWORD_MISSING(4000105, "请填写邮箱和密码后再登录"),
     EMAIL_MISSING(4000106, "请填写邮箱地址"),
+    EMAIL_TOO_LONG(4000126, "邮箱地址不能超过 %s 个字符，请调整后重新提交"),
     PASSWORD_MISSING(4000107, "请输入密码"),
     PASSWORD_TOO_SHORT(4000108, "密码长度不能少于 %s 位，请调整后重新提交"),
     PASSWORD_INCORRECT(4000109, "原密码不正确，请核对后重试"),
