@@ -80,6 +80,15 @@ community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF 
 
 容器内存：compose 为每服务设 `mem_limit`（384m–1.5g，judge 为吞吐主力建议 ≥1.5g），服务运行镜像 ENTRYPOINT 固定 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，堆上限按容器限额 45% 计，防止 JVM 常驻内存超限额被 OOM kill。
 
+GC 日志：同一个 ENTRYPOINT 开了 `-Xlog:gc*`，各服务写到共享卷 `service-logs` 的 `/app/logs/gc-<模块名>.log`（按构建参数 `MODULE` 命名，同卷不冲突），`filecount=5,filesize=10M` 轮转，上限约 60M/服务。读法：
+
+```bash
+docker compose -f deploy/docker-compose.yml exec service-judge ls -la /app/logs
+docker compose -f deploy/docker-compose.yml exec service-judge tail -200 /app/logs/gc-service-judge.log
+```
+
+日志随卷持久化，重建容器不丢历史；如需在宿主直接看，卷落在 `/var/lib/docker/volumes/codewise_service-logs/_data/`。
+
 仍需 Nacos 下发（可选，缺失即功能降级而非启动失败）：真实 SMTP 发信账号（`service-email.yaml`，容器部署直接在 `.env` 配 `SPRING_MAIL_*` 即可）、AI Provider 列表、Ollama 摘要模型地址。
 
 > 注意：Nacos 若已下发同名配置（如数据源），其优先级高于环境变量，切换部署方式时留意清理旧配置。
@@ -92,7 +101,15 @@ community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF 
 - 投递语义：Relay 认领后经 **Publisher Confirm** 确认才标记 SENT；失败按 1s 起指数退避重试 5 次后转 DEAD；
 - 共享连接工厂被开启 Confirm 模式（CORRELATED）：对非 Outbox 的直发只是增加异步确认开销，无行为变化；
 - question 与 judge 共用 codewise_question 的同一组 `outboxpro_*` 表，双实例 Relay 由
-  `FOR UPDATE SKIP LOCKED` 保证并发安全。
+  `FOR UPDATE SKIP LOCKED` 保证并发安全；
+- **Relay 的发布模板必须用「原样字节」转换器**（`CodewiseOutboxProAutoConfiguration`
+  覆盖了 `MessagePublisher`，见 `OutboxProRelaySupport`）：框架把**已序列化的信封字符串**
+  交给 `convertAndSend`，若让 Relay 复用应用侧那台带 `Jackson2JsonMessageConverter` 的模板，
+  信封会被再包一层 JSON 引号（JSON 引号套 JSON），消费端 `EnvelopeCodec.unwrap` 只解一层会
+  解析失败、消息全被判毒消息丢弃（表现为提交长期 PENDING、死信队列被静默放行）。
+  应用侧模板带 Jackson 是必需的（直发 `EventEnvelope`/`WebsocketSendDto` 等对象），
+  两者编码要求相反，故分开。回归护栏见 `OutboxProRelaySupportTest` 与
+  `OutboxProIntegrationTest`（后者复刻了带 Jackson 模板的生产者配置）。
 
 ## 6. 备份与恢复
 

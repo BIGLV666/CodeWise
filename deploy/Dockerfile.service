@@ -43,9 +43,13 @@ RUN (getent passwd 1000 >/dev/null && userdel -r "$(id -nu 1000)") || true \
  && useradd -r -u 1000 -m codewise
 WORKDIR /app
 COPY --from=build /repo/${MODULE}/target/*.jar /app/app.jar
-RUN mkdir -p /app/data \
+# /app/logs 供 GC 日志落盘：compose 以 service-logs 卷挂载到该路径，重建容器不丢历史
+# （目录连同属主建在镜像里，空卷首次挂载会继承该属主，非 root 用户才写得进去）
+RUN mkdir -p /app/data /app/logs \
  && chown -R codewise:codewise /app
 ENV TZ=Asia/Shanghai
+# GC 日志文件名按模块区分（各服务共用一个卷，同目录下互不覆盖）
+ENV GC_LOG_FILE=/app/logs/gc-${MODULE}.log
 USER codewise
 EXPOSE 8080
 # 判题/容器管理路径由 compose 单独覆盖（judge 需要访问 Docker daemon，以 root 运行）
@@ -54,4 +58,8 @@ EXPOSE 8080
 # - 堆上限按容器限额的 45% 计（Spring Boot 服务 384m-768m 限额对应 172m-345m 堆，足够）；
 # - Metaspace 封顶 160m，避免类元数据随限额水涨船高；
 # - 线程栈 512k（默认 1m），Spring 应用线程多，栈是 RSS 大头之一。
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=45.0", "-XX:MaxMetaspaceSize=160m", "-Xss512k", "-jar", "/app/app.jar"]
+#
+# GC 日志：统一日志（JDK 9+）落文件并轮转——filecount=5、filesize=10M，上限约
+# (5+1)×10M=60M/服务，不会无限追加；只保留 GC 事件（gc* 含堆详情），与 stdout 应用日志
+# 分离便于排查。用 sh -c + exec 启动：exec 让 java 仍是 PID 1，容器信号与退出码语义不变。
+ENTRYPOINT ["sh", "-c", "exec java -XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k -Xlog:gc*:file=${GC_LOG_FILE}:time,uptime,level,tags:filecount=5,filesize=10M -jar /app/app.jar"]

@@ -45,7 +45,7 @@ curl http://localhost:8082/actuator/health        # {"status":"UP"}
 
 ## 构建了什么
 
-- 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；容器内 Maven 多阶段构建按 `-N install` 根 POM → `service-api` → `service-common` → 目标模块的顺序执行（仓库无聚合 POM）；运行阶段固定 JVM 参数 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，与 compose 各服务 `mem_limit`（384m–1.5g）配合防止容器 OOM kill；
+- 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；容器内 Maven 多阶段构建按 `-N install` 根 POM → `service-api` → `service-common` → 目标模块的顺序执行（仓库无聚合 POM）；运行阶段固定 JVM 参数 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，与 compose 各服务 `mem_limit`（384m–1.5g）配合防止容器 OOM kill；另开启 GC 日志，落到 `service-logs` 卷里的 `/app/logs/gc-<模块名>.log`（`filecount=5,filesize=10M`，上限约 60M/服务，轮转不无限追加），查看方式见 [`OPERATIONS.md`](OPERATIONS.md) 排障清单；
 - 判题基础镜像：[`judge-base/Dockerfile`](judge-base/Dockerfile)（JDK17 + uid 1000 judge 用户 + jackson 2.15.x 函数题依赖三件套内置到 `/opt/judge/lib`）；
 - Python Agent 镜像：`codewise-agent/Dockerfile`（node:22-bookworm-slim 单镜像双运行时：Node 22 + Debian 自带 Python 3.11），nginx 以 `/agentapi/` 反代；
 - 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend`（pnpm + `VITE_AGENT_BASE_URL=/agentapi`）并挂载 [`nginx.conf`](nginx.conf)；[`frontend/Dockerfile`](frontend/Dockerfile) 为内容一致的独立构建参考。**前端仓库须与 CodeWise 同级**（`git clone https://github.com/BIGLV666/CodeWise-frontend.git` 到 CodeWise 的上级目录），否则前端镜像构建会因构建上下文不存在而失败。

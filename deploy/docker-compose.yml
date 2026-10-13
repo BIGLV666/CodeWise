@@ -64,6 +64,9 @@ services:
   mysql:
     mem_limit: 1g
     image: mysql:8.4
+    # 基础服务没有 app-base 的重启策略：被 OOM kill 或 Docker 重启后不会自愈。
+    # 2026-10-13 线上 Nacos 正是因此长期失联（连带业务服务 DNS 解析不了 nacos）。
+    restart: unless-stopped
     <<: *infra-logging
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -131,6 +134,8 @@ services:
     # 原先XMN使用默认512m,导致新生代近似等于堆，老年代仅仅只剩下64kb，yg频繁cms空转，导致cpu使用率极高，必须显示覆盖xmn。
     mem_limit: 1g
     image: nacos/nacos-server:v2.3.2
+    # 同 mysql：无重启策略时被 OOM kill 后不会自愈，所有业务服务随之解析不到 nacos
+    restart: unless-stopped
     <<: *infra-logging
     environment:
       MODE: standalone
@@ -171,6 +176,8 @@ services:
       <<: [*common-env]
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS}
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8082:8082"
     healthcheck:
@@ -197,6 +204,7 @@ services:
       ROOT_EMAIL: ${ROOT_EMAIL:-}
     volumes:
       - user-uploads:/app/data/uploads
+      - service-logs:/app/logs
     ports:
       - "8081:8081"
     healthcheck:
@@ -227,6 +235,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - question-artifacts:/app/data/function-artifacts
+      - service-logs:/app/logs
     ports:
       - "8084:8084"
     healthcheck:
@@ -258,6 +267,7 @@ services:
       CODEWISE_JUDGE_CONSUMERCONCURRENCY: ${JUDGE_CONCURRENCY:-2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - service-logs:/app/logs
     ports:
       - "8086:8086"
     healthcheck:
@@ -279,6 +289,8 @@ services:
       <<: [*common-env, *db-env]
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_review?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
       JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8097:8097"
     healthcheck:
@@ -299,6 +311,8 @@ services:
     environment:
       <<: [*common-env, *db-env]
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_community?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8087:8087"
     healthcheck:
@@ -336,6 +350,8 @@ services:
       # 587（STARTTLS）置 SPRING_MAIL_STARTTLS_ENABLE=true。默认 false 以兼容明文 Mailpit。
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE: ${SPRING_MAIL_SSL_ENABLE:-false}
       SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SPRING_MAIL_STARTTLS_ENABLE:-false}
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8083:8083"
     healthcheck:
@@ -358,6 +374,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_ai?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
       # security.api-key-master-key 经 SPRING_APPLICATION_JSON 注入（属性名含中划线）
       SPRING_APPLICATION_JSON: '{"security":{"api-key-master-key":"${API_KEY_MASTER_KEY}"}}'
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8085:8085"
     healthcheck:
@@ -432,3 +450,5 @@ volumes:
   nacos-data:
   question-artifacts:
   user-uploads:
+  # 各业务服务共享一个卷，GC 日志按服务名分文件（gc-<module>.log），互不覆盖
+  service-logs:
