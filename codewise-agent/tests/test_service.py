@@ -52,6 +52,20 @@ class FakeRuntime:
                 assert cancel_event.wait(2), "service failed to cancel runtime"
             if self.behavior == "empty":
                 return SimpleNamespace(final_response="", finish_reason="completed")
+            if self.behavior == "upstream_error":
+                # 复刻 dsh 的失败形状：单步 failure + turn/end 的 reason.error
+                message = '503: {"code":"model_not_found","message":"No available channel for model x"}'
+                return SimpleNamespace(
+                    final_response="",
+                    finish_reason="error",
+                    events=[
+                        {"type": "assistant/chunk",
+                         "data": {"chunk": {"finish": {"reason": {"kind": "error",
+                                                                 "failure": {"message": message}}}}}},
+                        {"type": "turn/end",
+                         "data": {"reason": {"kind": "error", "error": {"message": message}}}},
+                    ],
+                )
             return SimpleNamespace(
                 final_response="完整回答",
                 finish_reason="failed" if self.behavior == "incomplete" else "completed",
@@ -190,6 +204,45 @@ def test_nonbusy_failure_closes_runtime_without_writing_messages(db_session, see
     assert manager.releases == [(seeded["conversation_id"], manager.owner)]
     assert _messages(db_session, seeded) == []
     commit.assert_not_called()
+
+
+def test_upstream_failure_detail_is_logged(db_session, seeded, monkeypatch, caplog):
+    """模型侧失败必须把上游原文写进日志：否则「模型未返回有效内容」无从排查。"""
+
+    _install(monkeypatch, FakeRuntime("upstream_error"))
+    with caplog.at_level(logging.ERROR, logger=service_module.__name__):
+        frames = list(service_module.DshAgentService(db_session).stream_turn(_dto(seeded), "tok"))
+
+    assert frames[-1][0] == "error"
+    assert frames[-1][1]["message"] == AgentErrorCode.EMPTY_RESPONSE.message
+    logged = next(record.getMessage() for record in caplog.records if "无有效完成结果" in record.getMessage())
+    assert "upstream=" in logged
+    assert "model_not_found" in logged
+    assert "finish_reason=error" in logged
+
+
+@pytest.mark.parametrize("events", [
+    None, [], "not-a-list", [None], [{"data": None}], [{"data": {"chunk": "x"}}],
+    [{"data": {"reason": {"kind": "error"}}}], [{"data": {"reason": {"error": {}}}}],
+])
+def test_upstream_failure_detail_tolerates_odd_events(events):
+    """事件缺失/畸形时返回 None，不能在错误路径上再抛异常。"""
+
+    assert service_module._upstream_failure_detail(events) is None
+
+
+def test_upstream_failure_detail_truncates_and_prefers_last():
+    long_message = "x" * 900
+    events = [
+        {"data": {"reason": {"error": {"message": "早期错误"}}}},
+        {"data": {"chunk": {"finish": {"reason": {"failure": {"message": long_message}}}}}},
+    ]
+
+    detail = service_module._upstream_failure_detail(events, limit=100)
+
+    assert detail is not None
+    assert len(detail) == 101 and detail.endswith("…")
+    assert detail.startswith("x" * 10)
 
 
 @pytest.mark.parametrize("behavior, exception_type", [("transport", TransportClosedError), ("error", RuntimeError)])

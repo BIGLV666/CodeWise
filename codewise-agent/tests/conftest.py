@@ -23,7 +23,10 @@ _TMP_DIR = tempfile.mkdtemp(prefix="codewise-agent-test-")
 _DB_PATH = Path(_TMP_DIR) / "test.sqlite3"
 
 # entry.database 在导入期读取；JWT_SECRET 需 >= 32 字节；主密钥需 32 字节 base64。
-os.environ.setdefault("DATABASE_URL", f"sqlite+pysqlite:///{_DB_PATH.as_posix()}")
+# 数据库必须**强制覆盖**而不是 setdefault：容器/CI 里 DATABASE_URL 指向真实 codewise_ai，
+# setdefault 不会生效，夹具数据会被写进线上库（实测插入 user_ai_config 夹具行、并因
+# uk_user_ai_config_group 撞唯一键，导致整批用例报 IntegrityError）。
+os.environ["DATABASE_URL"] = f"sqlite+pysqlite:///{_DB_PATH.as_posix()}"
 os.environ.setdefault("JWT_SECRET", "unit-test-jwt-secret-key-must-be-at-least-32-bytes!")
 os.environ.setdefault("API_KEY_MASTER_KEY", base64.b64encode(b"0" * 32).decode("ascii"))
 os.environ.setdefault("CODEWISE_GATEWAY_URL", "http://127.0.0.1:1")

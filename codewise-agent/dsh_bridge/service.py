@@ -201,9 +201,11 @@ class DshAgentService:
                     finish_reason = payload.finish_reason
                     if not response_text or finish_reason != "completed":
                         logger.error(
-                            "Agent 无有效完成结果 conversation_id=%s config_id=%s model=%s finish_reason=%s",
+                            "Agent 无有效完成结果 conversation_id=%s config_id=%s model=%s finish_reason=%s upstream=%s",
                             call_ai_dto.conversation_id, ai_config.user_config_id,
                             ai_config.model_name, finish_reason,
+                            _upstream_failure_detail(getattr(payload, "events", None))
+                            or "(上游未返回错误正文)",
                         )
                         manager.drop(call_ai_dto.conversation_id, invalidate_only=False)
                         yield ("error", error_payload(call_ai_dto.conversation_id, AgentErrorCode.EMPTY_RESPONSE.message))
@@ -262,3 +264,35 @@ def _user_message(exc: BaseException) -> str:
     if isinstance(exc, TransportClosedError):
         return AgentErrorCode.RUNTIME_INTERRUPTED.message
     return AgentErrorCode.AGENT_CALL_FAILED.message
+
+
+def _upstream_failure_detail(events: Any, limit: int = 500) -> str | None:
+    """从 dsh 会话事件里提取模型侧失败的上游原文，只用于日志留痕。
+
+    dsh 把上游响应正文放在 ``turn/end`` 的 ``reason.error.message``（例如
+    ``503: {"code":"model_not_found", ...}``）；单步失败则出现在 ``assistant/chunk``
+    的 ``chunk.finish.reason.failure.message``。此前只记录 finish_reason，上游原话被
+    丢弃，用户看到「模型未返回有效内容」时运维侧无从判断是模型名、额度还是中转故障。
+    """
+
+    detail: str | None = None
+    for event in events if isinstance(events, (list, tuple)) else ():
+        if not isinstance(event, dict):
+            continue
+        data = event.get("data")
+        if not isinstance(data, dict):
+            continue
+        reason = data.get("reason")
+        if not isinstance(reason, dict):
+            chunk = data.get("chunk")
+            finish = chunk.get("finish") if isinstance(chunk, dict) else None
+            reason = finish.get("reason") if isinstance(finish, dict) else None
+        if not isinstance(reason, dict):
+            continue
+        for key in ("error", "failure"):
+            node = reason.get(key)
+            if isinstance(node, dict) and node.get("message"):
+                detail = str(node["message"])
+    if detail is None:
+        return None
+    return detail if len(detail) <= limit else detail[:limit] + "…"
