@@ -14,6 +14,10 @@ class AgentErrorCode(Enum):
     CONVERSATION_NOT_FOUND = (4041001, "对话不存在或已被删除")
     AGENT_CALL_FAILED = (4001001, "这次回复没有成功，请稍后重试")
     INTERNAL_ERROR = (5001001, "服务繁忙，请稍后重试")
+    TURN_BUSY = (4091001, "上一轮对话还在进行中，请稍候再发送新消息")
+    RUNTIME_INTERRUPTED = (5001002, "Agent 服务中断，请重试")
+    EMPTY_RESPONSE = (5001003, "模型未返回有效内容")
+    TURN_TIMEOUT = (5001004, "回复超时，请稍后重试")
 
     def __init__(self, code: int, message: str):
         self.code = code

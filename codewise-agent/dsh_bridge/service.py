@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -29,6 +30,7 @@ from entry.AgentMessage import AgentMessage
 from mapper import AgentConversationMapper, AgentMessageMapper
 from mapper import UserAiConfigMapper
 from util import ApiKeyCrypto
+from util.error_codes import AgentErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +124,7 @@ class DshAgentService:
         self,
         call_ai_dto: CallAiDto,
         token: str,
+        cancel_event: threading.Event | None = None,
     ) -> Iterator[tuple[str, dict[str, Any]]]:
         """执行一轮对话，实时产出 ``(sse 事件名, 数据帧)`` 元组。
 
@@ -133,67 +136,129 @@ class DshAgentService:
 
         question = self._validate(call_ai_dto)
         ai_config = self._resolve_ai_config(call_ai_dto)
-        self._persist_message(call_ai_dto, "USER", question)
-
         manager = get_runtime_manager()
-        runtime = manager.obtain(call_ai_dto.conversation_id, ai_config)
+        cancel_event = cancel_event or threading.Event()
+        try:
+            owner = manager.claim_turn(call_ai_dto.conversation_id)
+        except RuntimeBusyError as exc:
+            self._handle_failure(call_ai_dto.conversation_id, exc, ai_config)
+            yield ("error", error_payload(call_ai_dto.conversation_id, _user_message(exc)))
+            return
+        try:
+            runtime = manager.obtain(call_ai_dto.conversation_id, ai_config)
+        except BaseException:
+            manager.release_turn(call_ai_dto.conversation_id, owner)
+            raise
 
-        events: queue.Queue[tuple[str, Any]] = queue.Queue()
+        events: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=128)
+        worker_done = threading.Event()
+
+        def enqueue(kind: str, payload: Any) -> None:
+            while not cancel_event.is_set():
+                try:
+                    events.put((kind, payload), timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
 
         def on_event(event: dict[str, Any]) -> None:
-            events.put(("event", event))
+            enqueue("event", event)
 
         def drive() -> None:
             try:
-                result = runtime.run_turn(question, token, on_event)
-                events.put(("done", result))
+                result = runtime.run_turn(question, token, on_event, cancel_event=cancel_event)
+                enqueue("done", result)
             except BaseException as exc:  # noqa: BLE001 - 必须把失败传回消费线程
-                events.put(("error", exc))
+                enqueue("error", exc)
+            finally:
+                worker_done.set()
 
         worker = threading.Thread(target=drive, name=f"dsh-turn-{call_ai_dto.conversation_id}", daemon=True)
         worker.start()
+        terminal_received = False
+        deadline = time.monotonic() + getattr(runtime, "turn_timeout_seconds", 300)
+        committed = False
 
-        while True:
-            kind, payload = events.get()
-            if kind == "event":
-                yield ("session.event", sse_payload(call_ai_dto.conversation_id, payload))
-                continue
-            if kind == "done":
-                response_text = payload.final_response
-                finish_reason = payload.finish_reason
-                if not response_text:
-                    # turn 已结束但没有可展示文本：按错误收尾，避免前端拿到空回答。
-                    manager.drop(call_ai_dto.conversation_id, invalidate_only=True)
-                    yield ("error", error_payload(call_ai_dto.conversation_id, "模型未返回有效内容"))
-                    break
-                self._persist_message(call_ai_dto, "ASSISTANT", response_text)
-                yield ("done", done_payload(call_ai_dto.conversation_id, finish_reason, response_text))
-                break
+        try:
+            while True:
+                if cancel_event.is_set():
+                    return
+                if time.monotonic() >= deadline:
+                    exc = TimeoutError("Agent 整轮执行超时")
+                    self._handle_failure(call_ai_dto.conversation_id, exc, ai_config)
+                    yield ("error", error_payload(call_ai_dto.conversation_id, AgentErrorCode.TURN_TIMEOUT.message))
+                    return
+                try:
+                    kind, payload = events.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if kind == "event":
+                    yield ("session.event", sse_payload(call_ai_dto.conversation_id, payload))
+                    continue
+                terminal_received = True
+                if kind == "done":
+                    response_text = payload.final_response
+                    finish_reason = payload.finish_reason
+                    if not response_text or finish_reason != "completed":
+                        logger.error(
+                            "Agent 无有效完成结果 conversation_id=%s config_id=%s model=%s finish_reason=%s",
+                            call_ai_dto.conversation_id, ai_config.user_config_id,
+                            ai_config.model_name, finish_reason,
+                        )
+                        manager.drop(call_ai_dto.conversation_id, invalidate_only=False)
+                        yield ("error", error_payload(call_ai_dto.conversation_id, AgentErrorCode.EMPTY_RESPONSE.message))
+                        return
+                    self._persist_message(call_ai_dto, "USER", question)
+                    self._persist_message(call_ai_dto, "ASSISTANT", response_text)
+                    self.db.commit()
+                    committed = True
+                    yield ("done", done_payload(call_ai_dto.conversation_id, finish_reason, response_text))
+                    return
 
-            # kind == "error"
-            self._handle_failure(call_ai_dto.conversation_id, payload)
-            yield ("error", error_payload(call_ai_dto.conversation_id, _user_message(payload)))
-            break
+                self._handle_failure(call_ai_dto.conversation_id, payload, ai_config)
+                yield ("error", error_payload(call_ai_dto.conversation_id, _user_message(payload)))
+                return
+        except BaseException:
+            self.db.rollback()
+            if terminal_received and not committed:
+                manager.drop(call_ai_dto.conversation_id, invalidate_only=False)
+            raise
+        finally:
+            if cancel_event.is_set() or not terminal_received:
+                cancel_event.set()
+                manager.drop(call_ai_dto.conversation_id, invalidate_only=False)
+                worker.join(timeout=5)
+                logger.info("Agent 轮次已取消 conversation_id=%s worker_stopped=%s",
+                            call_ai_dto.conversation_id, not worker.is_alive())
+            if worker.is_alive():
+                def release_when_stopped() -> None:
+                    worker.join()
+                    manager.release_turn(call_ai_dto.conversation_id, owner)
 
-    def _handle_failure(self, conversation_id: int, exc: BaseException) -> None:
-        """运行时通信故障时丢弃子进程，下一轮自动按 JSONL 会话重建。"""
+                threading.Thread(target=release_when_stopped, daemon=True,
+                                 name=f"dsh-cleanup-{call_ai_dto.conversation_id}").start()
+            else:
+                manager.release_turn(call_ai_dto.conversation_id, owner)
 
-        if isinstance(exc, TransportClosedError):
-            logger.error("dsh 运行时中断 conversation_id=%s：%s", conversation_id, exc)
-            get_runtime_manager().drop(conversation_id, invalidate_only=True)
-        elif isinstance(exc, RuntimeBusyError):
+    def _handle_failure(self, conversation_id: int, exc: BaseException, ai_config: AiRuntimeConfig) -> None:
+        """故障时重建运行时，并保留跨线程传递的原始异常堆栈。"""
+
+        if isinstance(exc, RuntimeBusyError):
             logger.warning("会话并发请求被拒绝 conversation_id=%s", conversation_id)
-        else:
-            logger.exception("Agent 轮次失败 conversation_id=%s", conversation_id)
+            return
+        logger.error(
+            "Agent 轮次失败 conversation_id=%s config_id=%s model=%s exception_type=%s",
+            conversation_id, ai_config.user_config_id, ai_config.model_name, type(exc).__name__,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+        get_runtime_manager().drop(conversation_id, invalidate_only=False)
 
 
 def _user_message(exc: BaseException) -> str:
     """把内部异常翻译成面向用户的安全文案（不携带堆栈与密钥）。"""
 
     if isinstance(exc, RuntimeBusyError):
-        return "上一轮对话还在进行中，请稍候再发送新消息"
+        return AgentErrorCode.TURN_BUSY.message
     if isinstance(exc, TransportClosedError):
-        return "Agent 服务中断，请重试"
-    if isinstance(exc, (ValueError, LookupError)):
-        return str(exc)
-    return "Agent 调用失败，请稍后重试"
+        return AgentErrorCode.RUNTIME_INTERRUPTED.message
+    return AgentErrorCode.AGENT_CALL_FAILED.message

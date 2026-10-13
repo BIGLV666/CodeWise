@@ -8,7 +8,7 @@ import threading
 import time
 from typing import Callable
 
-from dsh_bridge.runtime import AiRuntimeConfig, DshConversationRuntime
+from dsh_bridge.runtime import AiRuntimeConfig, DshConversationRuntime, RuntimeBusyError
 from dsh_bridge.settings import DshSettings
 from dsh_bridge.token_store import TokenStore
 
@@ -29,6 +29,10 @@ class RuntimeManager:
         self._reap_interval = reap_interval_seconds
         self._token_store = TokenStore(settings)
         self._runtimes: dict[int, DshConversationRuntime] = {}
+        self._turns: dict[int, object] = {}
+        # 关闭窗口内的会话：pop 与 close 之间必须拒绝新轮次，否则新运行时
+        # 会写入同名 token 文件，随后被旧运行时的 close 清理掉。
+        self._closing: set[int] = set()
         self._lock = threading.Lock()
         self._closed = False
         self._reaper = threading.Thread(target=self._reap_loop, name="dsh-runtime-reaper", daemon=True)
@@ -63,6 +67,19 @@ class RuntimeManager:
                 self._runtimes[conversation_id] = runtime
             return runtime
 
+    def claim_turn(self, conversation_id: int) -> object:
+        with self._lock:
+            if conversation_id in self._turns or conversation_id in self._closing:
+                raise RuntimeBusyError("该会话上一轮对话尚未结束")
+            owner = object()
+            self._turns[conversation_id] = owner
+            return owner
+
+    def release_turn(self, conversation_id: int, owner: object) -> None:
+        with self._lock:
+            if self._turns.get(conversation_id) is owner:
+                self._turns.pop(conversation_id)
+
     def drop(self, conversation_id: int, *, invalidate_only: bool = False) -> None:
         """移除指定会话的运行时。
 
@@ -73,12 +90,17 @@ class RuntimeManager:
 
         with self._lock:
             runtime = self._runtimes.pop(conversation_id, None)
-        if runtime is None:
-            return
-        if invalidate_only:
-            runtime.invalidate()
-        else:
-            runtime.close()
+            if runtime is None:
+                return
+            self._closing.add(conversation_id)
+        try:
+            if invalidate_only:
+                runtime.invalidate()
+            else:
+                runtime.close()
+        finally:
+            with self._lock:
+                self._closing.discard(conversation_id)
 
     def _default_factory(self, conversation_id: int, ai_config: AiRuntimeConfig) -> DshConversationRuntime:
         return DshConversationRuntime(conversation_id, self._settings, self._token_store, ai_config)
@@ -99,12 +121,21 @@ class RuntimeManager:
             expired = [
                 conversation_id
                 for conversation_id, runtime in self._runtimes.items()
-                if runtime.last_used < deadline
+                if conversation_id not in self._turns
+                and conversation_id not in self._closing
+                and runtime.last_used < deadline
             ]
-            runtimes = [self._runtimes.pop(conversation_id) for conversation_id in expired]
-        for runtime in runtimes:
-            logger.info("回收空闲 dsh 运行时 conversation_id=%s", runtime.conversation_id)
-            runtime.close()
+            runtimes = []
+            for conversation_id in expired:
+                self._closing.add(conversation_id)
+                runtimes.append(self._runtimes.pop(conversation_id))
+        for conversation_id, runtime in zip(expired, runtimes, strict=True):
+            try:
+                logger.info("回收空闲 dsh 运行时 conversation_id=%s", runtime.conversation_id)
+                runtime.close()
+            finally:
+                with self._lock:
+                    self._closing.discard(conversation_id)
 
     def shutdown_all(self) -> None:
         """关闭全部运行时子进程；atexit 与测试清理共用。"""

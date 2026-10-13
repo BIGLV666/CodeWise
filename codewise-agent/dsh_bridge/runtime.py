@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import threading
 import time
 import uuid
@@ -80,12 +81,15 @@ class DshConversationRuntime:
         self.session_id = f"cw-{conversation_id}"
         self.session_root = settings.session_root_base / str(conversation_id)
         self.last_used = time.monotonic()
+        self.turn_timeout_seconds = float(os.getenv("DSH_TURN_TIMEOUT_SECONDS", "300"))
 
     def run_turn(
         self,
         question: str,
         token: str,
         on_event,
+        *,
+        cancel_event: threading.Event | None = None,
     ) -> RunResult:
         """执行一轮对话；on_event 会被实时回调，参数是 dsh session event 字典。
 
@@ -101,16 +105,23 @@ class DshConversationRuntime:
 
         if not self._busy_lock.acquire(blocking=False):
             raise RuntimeBusyError("该会话上一轮对话尚未结束")
+        cancel_event = cancel_event or threading.Event()
         try:
+            if cancel_event.is_set():
+                raise RuntimeError("Agent 轮次已取消")
             token_path = self._token_store.write(self.conversation_id, token)
             harness = self._ensure_harness(token_path)
             self.last_used = time.monotonic()
+            if cancel_event.is_set():
+                raise RuntimeError("Agent 轮次已取消")
             return harness.run(
                 question,
                 session_id=self.session_id,
-                on_notification=_make_event_forwarder(on_event),
+                on_notification=_make_event_forwarder(on_event, cancel_event),
             )
         finally:
+            if cancel_event.is_set():
+                self.close()
             self._busy_lock.release()
             self.last_used = time.monotonic()
 
@@ -167,8 +178,13 @@ class DshConversationRuntime:
             ),
         )
         harness = DeepSeekHarness(config)
-        harness.start()
+        # 启动期也必须可取消：initialize 可能阻塞，关闭路径需要先拿到 harness。
         self._harness = harness
+        try:
+            harness.start()
+        except BaseException:
+            self.close()
+            raise
         logger.info(
             "dsh 运行时已启动 conversation_id=%s session=%s model=%s",
             self.conversation_id,
@@ -178,7 +194,7 @@ class DshConversationRuntime:
         return harness
 
 
-def _make_event_forwarder(on_event):
+def _make_event_forwarder(on_event, cancel_event: threading.Event | None = None):
     """把 SDK 通知转换成 dsh session event 回调。
 
     SDK 的 Session.run 会把根会话事件同时放进通知流；这里只挑出
@@ -186,6 +202,8 @@ def _make_event_forwarder(on_event):
     """
 
     def forward(notification) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            return
         if notification.method != "session.event":
             return
         event = notification.payload.get("event")
