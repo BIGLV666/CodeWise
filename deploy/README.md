@@ -54,6 +54,8 @@ curl http://localhost:8082/actuator/health        # {"status":"UP"}
 
 - 服务间 Feign 503、判题 PENDING、跨域报错等见 [`OPERATIONS.md`](OPERATIONS.md) 第 7 节排障清单；
 - `docker compose -f deploy/docker-compose.yml logs -f service-judge` 是判题问题的第一入口。
+- `service-judge` 的 8086 是明文 HTTP 管理端口，当前 Compose 将其映射到宿主机。直接向它发送 HTTPS 会触发 Tomcat「Invalid character found in method name」；这与 JSON 或 WebSocket 消息解析无关。生产环境应通过防火墙或 TLS 反向代理限制入口；若无需宿主机访问，可在部署前移除 judge 的 `ports` 映射，容器间通信及容器内健康检查仍使用 Docker 网络。本次修复保留映射，以免影响现有运维访问。
+- question/judge 本地配置默认启用公共 RabbitMQ 拓扑，并显式使用 JSON 消息转换器。Nacos 如覆盖 `codewise.mq.enabled` 为 `false`，需由运维预建队列/交换机/绑定；转换器仍独立启用。调试回调兼容历史裸 UUID 与新的 JSON 字符串，HTTP `/api/question/debug` 返回任务 UUID，最终结果由 WebSocket 推送。
 
 ## 发布说明（维护者）
 
