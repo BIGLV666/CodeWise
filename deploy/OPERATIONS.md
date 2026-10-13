@@ -134,6 +134,9 @@ docker compose -f deploy/docker-compose.yml exec mysql \
 | AI 产物验收失败 | question 容器内 `docker ps` 是否可用（sock 挂载 + docker CLI） |
 | 登录跨域报错 | `CORS_ORIGINS` 未包含实际来源 |
 | 注册收不到邮件 | 看 Mailpit Web（127.0.0.1:8025）是否有信；真实 SMTP 检查 `.env` 的 `SPRING_MAIL_*` |
+| 上传头像/配图返回「文件保存失败」(5000102) | 挂载点属主问题：命名卷挂载点若在镜像里不存在，Docker 会以 `root:root` 新建，而服务以 uid 1000 运行 → 写不进去。`docker exec -u root <c> chown -R codewise:codewise /app/data/uploads` 一次性修正；镜像已把该目录建好，新建卷不会再复现 |
+| 上传成功但图片 404 | `service-user` 的静态资源目录必须跟随 `file.upload.root`（容器内 `/app/data/uploads`）。镜像内已如此，若有人改了上传根目录要同步 `WebConfig#addResourceHandlers` |
+| 上传成功但图片 403「禁止直接访问，请通过网关访问」 | `/uploads/**` 必须**经网关**转发（网关 `AuthGlobalFilter` 已把该前缀列为公开路径、并注入下游必需的 `X-Internal-Token`）。nginx 直连 `service-user:8081` 会 403，别改回去 |
 | Agent 不可用 | `docker compose logs codewise-agent`；dsh 运行时需 node>=22.19（镜像已内置）|
 | 容器反复重启 | `docker compose logs <svc>`；多为密钥缺失启动失败（属预期：无 `CODEWISE_INTERNAL_TOKEN` 不允许起服务） |
 
