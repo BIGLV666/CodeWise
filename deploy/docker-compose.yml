@@ -128,14 +128,16 @@ services:
 
   nacos:
     # JVM_XMX 512m + 堆外/元空间实际 RSS 约 630m+，640m 限额只剩十几 MB 会被 OOM kill
+    # 原先XMN使用默认512m,导致新生代近似等于堆，老年代仅仅只剩下64kb，yg频繁cms空转，导致cpu使用率极高，必须显示覆盖xmn。
     mem_limit: 1g
     image: nacos/nacos-server:v2.3.2
     <<: *infra-logging
     environment:
       MODE: standalone
       NACOS_AUTH_ENABLE: "false"
-      JVM_XMS: 256m
+      JVM_XMS: 512m
       JVM_XMX: 512m
+      JVM_XMN: 256m
     volumes:
       - nacos-data:/home/nacos/data
     # 控制台仅映射宿主回环：SMTP/AI Provider 等功能配置与排障入口（不对公网暴露）

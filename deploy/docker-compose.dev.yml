@@ -1,0 +1,27 @@
+# 本地排障覆盖文件：把基础设施端口开放到宿主回环，供在 IDEA 里启动的服务连接。
+# 只追加基础文件里没有的映射（重复映射同一宿主端口会让 compose 报错）。
+#
+# 用法（在 deploy/ 目录）：
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d mysql redis rabbitmq nacos service-gateway frontend
+#
+# 暴露给宿主：
+#   3306 MySQL    —— IDEA 里的服务连 localhost:3306（账号见 .env 的 MYSQL_USER/MYSQL_PASSWORD）
+#   5672 RabbitMQ —— IDEA 里的服务连 localhost:5672
+# 基础文件已暴露：8848 Nacos / 15672 RabbitMQ 管理台 / 8025 Mailpit（均仅回环）
+name: codewise
+
+services:
+  mysql:
+    ports:
+      - "127.0.0.1:3306:3306"
+
+  rabbitmq:
+    ports:
+      - "127.0.0.1:5672:5672"
+
+  frontend:
+    # 本次不启动 Python Agent，但 nginx.conf 的 /agentapi/ 是字面主机名，
+    # nginx 启动期就要解析，解析不到会 [emerg] host not found 起不来。
+    # 给一个占位解析让 nginx 正常启动；/agentapi/ 请求会 502（本流程用不到）。
+    extra_hosts:
+      - "codewise-agent:127.0.0.1"
