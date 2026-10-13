@@ -59,6 +59,33 @@ class RuntimeBusyError(RuntimeError):
     """同一会话已有一轮对话在执行时抛出。"""
 
 
+def build_session_id(conversation_id: int, settings: "DshSettings", ai_config: AiRuntimeConfig) -> str:
+    """构造 dsh 会话 id：在会话号之外并入「会影响会话 seed 的配置」摘要。
+
+    dsh 恢复已存会话日志时要求**活会话的 seed 覆盖日志前缀**，否则抛
+    ``session "cw-N" already has a persisted log on disk that does not match this live
+    session (id collision)``（见 dsh-session-persistence 的 adoptLivePrefix），该会话
+    此后每一轮都失败——用户看到的就是「模型未返回有效内容」或 SSE 流中断。
+
+    seed 由运行时注入的 provider / 模型 / maxTokens / system prompt 决定，而 CodeWise
+    允许用户在同一会话里切换模型：此前 id 只含 conversation_id，换模型后新运行时会去
+    adopt 旧模型的日志、seed 不匹配即整会话失效（实测：同一会话先用 kimi-k3 正常，
+    换 deepseek-v4.1-flash 立刻 id collision）。
+
+    把配置摘要并入 id 后，换配置即换一条独立会话：各自保留自己的上下文，换回来还能接着用，
+    也永远不会去 adopt 别套配置的日志。摘要取 ``AiRuntimeConfig.fingerprint()``（含配置 id、
+    模型、端点、密钥摘要、maxTokens）再叠加 provider 与 system prompt，宁可多换会话也不撞。
+    """
+
+    seed_inputs = "\x1f".join([
+        ai_config.fingerprint(),
+        settings.provider,
+        settings.system_prompt or "",
+    ])
+    digest = hashlib.sha256(seed_inputs.encode("utf-8")).hexdigest()[:10]
+    return f"cw-{conversation_id}-{digest}"
+
+
 class DshConversationRuntime:
     """一个会话的 dsh 运行时生命周期与轮次执行。"""
 
@@ -77,8 +104,9 @@ class DshConversationRuntime:
         self._busy_lock = threading.Lock()
         self._harness: DeepSeekHarness | None = None
         # 确定性 session id：会话目录与 session 一一对应，无需额外映射表，
-        # 进程重启后按同样的 id 恢复 JSONL 日志。
-        self.session_id = f"cw-{conversation_id}"
+        # 进程重启后按同样的 id 恢复 JSONL 日志。id 里带上「会影响 dsh 会话 seed 的
+        # 配置摘要」，理由见 build_session_id。
+        self.session_id = build_session_id(conversation_id, settings, ai_config)
         self.session_root = settings.session_root_base / str(conversation_id)
         self.last_used = time.monotonic()
         self.turn_timeout_seconds = float(os.getenv("DSH_TURN_TIMEOUT_SECONDS", "300"))
