@@ -1,10 +1,11 @@
-"""dsh 会话 id 的配置敏感性。
+"""dsh 会话 id 的构造契约。
 
-背景：dsh 恢复已存会话日志时要求活会话的 seed 覆盖日志前缀，而 seed 由运行时注入的
-provider / 模型 / maxTokens / system prompt 决定。若会话 id 只含 conversation_id，
-用户在同一会话里切换模型后新运行时会去 adopt 旧模型的日志、seed 不匹配，dsh 抛
-``... already has a persisted log on disk that does not match this live session
-(id collision)``，该会话从此每轮都失败（表现为「模型未返回有效内容」）。
+背景：dsh 恢复已存会话日志用的是 ``seedCoversPrefix``——要求已存前缀与活会话 seed
+**逐字节 JSON 相等**，而 seed 含创建时间戳等易变字段，新进程无法复现，必然抛
+``... does not match this live session (id collision)``（实测：同一会话号连跑两次，
+第二次必失败）。dsh 注释也说明该 adopt 路径只用于同进程 HMR/reload。
+
+因此会话 id 必须带运行实例后缀：永不碰撞，同一实例内多轮共用同一会话保持上下文连续。
 """
 
 from __future__ import annotations
@@ -34,39 +35,41 @@ def _ai_config(**overrides) -> AiRuntimeConfig:
     return AiRuntimeConfig(**base)
 
 
-def test_same_config_yields_same_session_id():
-    """同配置必须稳定：进程重启后要按同一 id 恢复 JSONL 上下文。"""
+def test_two_runtime_instances_never_share_session_id():
+    """核心回归：不同运行时实例必须拿到不同 id，否则第二个实例会去 adopt 旧日志并被 dsh 判 id collision。"""
 
     settings = _settings()
 
-    assert build_session_id(7, settings, _ai_config()) == build_session_id(7, settings, _ai_config())
+    first = build_session_id(7, settings, _ai_config(), "aaaaaaaa")
+    second = build_session_id(7, settings, _ai_config(), "bbbbbbbb")
+
+    assert first != second
 
 
-def test_model_switch_changes_session_id():
-    """核心回归：换模型必须换 id，否则 dsh 会 adopt 旧模型日志并抛 id collision。"""
+def test_same_instance_keeps_one_session_id():
+    """同一实例内的多轮必须固定用同一 id，否则每轮都开新会话、上下文不连续。"""
 
     settings = _settings()
-
-    assert build_session_id(7, settings, _ai_config(model_name="kimi-k3")) != \
-        build_session_id(7, settings, _ai_config(model_name="deepseek-v4.1-flash"))
-
-
-def test_provider_system_prompt_and_endpoint_change_session_id():
     ai = _ai_config()
 
-    assert build_session_id(7, _settings(), ai) != \
-        build_session_id(7, _settings(provider="deepseek-official"), ai)
-    assert build_session_id(7, _settings(), ai) != \
-        build_session_id(7, _settings(system_prompt="另一个提示词"), ai)
-    assert build_session_id(7, _settings(), ai) != \
-        build_session_id(7, _settings(), _ai_config(ai_url="https://other.example/v1"))
+    assert build_session_id(7, settings, ai, "abc12345") == build_session_id(7, settings, ai, "abc12345")
 
 
-def test_session_id_is_prefixed_and_path_safe():
-    """会话号保留在前缀，便于运维按会话定位日志；整串不能含路径分隔符或空格。"""
+def test_session_id_carries_conversation_and_config_digest():
+    """id 自带会话号与配置摘要：日志目录自解释，换配置在目录名上可见。"""
 
-    sid = build_session_id(12, _settings(), _ai_config())
+    settings = _settings()
+    same_config_other_model = build_session_id(7, settings, _ai_config(model_name="kimi-k3"), "abc12345")
+    other_conversation = build_session_id(8, settings, _ai_config(), "abc12345")
 
-    assert sid.startswith("cw-12-")
+    assert same_config_other_model.startswith("cw-7-")
+    assert same_config_other_model.split("-")[2] != build_session_id(7, settings, _ai_config(), "abc12345").split("-")[2]
+    assert other_conversation.startswith("cw-8-")
+
+
+def test_session_id_is_path_safe():
+    """id 会变成日志目录名，不能含路径分隔符或空格。"""
+
+    sid = build_session_id(12, _settings(), _ai_config(), "00ff00ff")
+
     assert "/" not in sid and "\\" not in sid and " " not in sid
-    assert sid != build_session_id(13, _settings(), _ai_config())

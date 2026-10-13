@@ -59,22 +59,25 @@ class RuntimeBusyError(RuntimeError):
     """同一会话已有一轮对话在执行时抛出。"""
 
 
-def build_session_id(conversation_id: int, settings: "DshSettings", ai_config: AiRuntimeConfig) -> str:
-    """构造 dsh 会话 id：在会话号之外并入「会影响会话 seed 的配置」摘要。
+def build_session_id(conversation_id: int, settings: "DshSettings", ai_config: AiRuntimeConfig,
+                     instance_nonce: str) -> str:
+    """构造 dsh 会话 id：会话号 + 配置摘要 + **运行实例随机后缀**。
 
-    dsh 恢复已存会话日志时要求**活会话的 seed 覆盖日志前缀**，否则抛
-    ``session "cw-N" already has a persisted log on disk that does not match this live
-    session (id collision)``（见 dsh-session-persistence 的 adoptLivePrefix），该会话
-    此后每一轮都失败——用户看到的就是「模型未返回有效内容」或 SSE 流中断。
+    dsh 恢复已存会话日志的判定是 ``seedCoversPrefix``：它要求**已存日志的前缀与活会话 seed
+    逐字节 JSON 相等**（``JSON.stringify(seedEvent) === JSON.stringify(event)``），而 seed
+    里含创建时间戳等每次都会变的字段，因此新进程**永远无法**复现旧前缀，dsh 必然抛
+    ``session "cw-N" ... does not match this live session (id collision)``——该会话此后每轮
+    都失败（用户看到「模型未返回有效内容」或 SSE 流空返回/中断）。dsh 自己的注释也写明该
+    adopt 路径是给 **HMR/reload（同进程）** 用的。
 
-    seed 由运行时注入的 provider / 模型 / maxTokens / system prompt 决定，而 CodeWise
-    允许用户在同一会话里切换模型：此前 id 只含 conversation_id，换模型后新运行时会去
-    adopt 旧模型的日志、seed 不匹配即整会话失效（实测：同一会话先用 kimi-k3 正常，
-    换 deepseek-v4.1-flash 立刻 id collision）。
+    所以不能让同一会话在新进程里复用旧 id：
 
-    把配置摘要并入 id 后，换配置即换一条独立会话：各自保留自己的上下文，换回来还能接着用，
-    也永远不会去 adopt 别套配置的日志。摘要取 ``AiRuntimeConfig.fingerprint()``（含配置 id、
-    模型、端点、密钥摘要、maxTokens）再叠加 provider 与 system prompt，宁可多换会话也不撞。
+    - 实例后缀让每个运行时实例拿到自己的会话（dsh 走"全新会话"分支，永不碰撞）。同一实例
+      内的多轮对话仍共用该会话，上下文连续；实例被回收（空闲超时 / 容器重启 / 模型配置变更）
+      后开启新会话，模型上下文从零开始——跨实例的连续上下文应由门面用 MySQL 里的消息历史
+      回放（DB 才是历史的事实来源，JSONL 只是运行期工作日志）。
+    - 配置摘要（``AiRuntimeConfig.fingerprint()`` 叠加 provider 与 system prompt）只用于让日志
+      目录自解释：出问题时一眼看出那是哪套配置写的。
     """
 
     seed_inputs = "\x1f".join([
@@ -83,7 +86,7 @@ def build_session_id(conversation_id: int, settings: "DshSettings", ai_config: A
         settings.system_prompt or "",
     ])
     digest = hashlib.sha256(seed_inputs.encode("utf-8")).hexdigest()[:10]
-    return f"cw-{conversation_id}-{digest}"
+    return f"cw-{conversation_id}-{digest}-{instance_nonce}"
 
 
 class DshConversationRuntime:
@@ -103,10 +106,9 @@ class DshConversationRuntime:
         self._fingerprint = ai_config.fingerprint()
         self._busy_lock = threading.Lock()
         self._harness: DeepSeekHarness | None = None
-        # 确定性 session id：会话目录与 session 一一对应，无需额外映射表，
-        # 进程重启后按同样的 id 恢复 JSONL 日志。id 里带上「会影响 dsh 会话 seed 的
-        # 配置摘要」，理由见 build_session_id。
-        self.session_id = build_session_id(conversation_id, settings, ai_config)
+        # dsh 会话 id：每个运行时实例独立（理由见 build_session_id）。同一实例内的多轮共用
+        # 同一会话，上下文连续；实例被回收后开新会话，避免去 adopt 旧日志而整会话失效。
+        self.session_id = build_session_id(conversation_id, settings, ai_config, uuid.uuid4().hex[:8])
         self.session_root = settings.session_root_base / str(conversation_id)
         self.last_used = time.monotonic()
         self.turn_timeout_seconds = float(os.getenv("DSH_TURN_TIMEOUT_SECONDS", "300"))
