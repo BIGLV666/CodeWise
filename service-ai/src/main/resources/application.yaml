@@ -24,6 +24,21 @@ server:
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
 
+# AI 端点：优先由 Nacos 下发 ai.models（每条生成一个 AiAggregateService）；
+# 未配置 ai.models 时，AIServiceManager 回退到静态 Provider Bean（GLM/Qwen/Niko/Ollama）。
+# 示例（真实值放 Nacos，勿提交密钥）：
+# ai:
+#   health-check.enabled: true        # false = 不起周期探测线程，改为调用时按失败计数发现故障
+#   models:
+#     - name: GLM                     # 仅用于日志识别
+#       url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+#       modelName: [glm-4-flash, glm-4-air]
+#       defaultModelName: glm-4-flash
+#       apiKeys: [sk-xxx]
+#       enabled: true
+#       priority: 1                   # 越小越优先（AUTO 轮转）
+#       timeout: 120000
+
 # 本服务不生产事件：显式关闭 OutboxPro（其自动配置默认 matchIfMissing=true）
 outboxpro:
   enabled: false

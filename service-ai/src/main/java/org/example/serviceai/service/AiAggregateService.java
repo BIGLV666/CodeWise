@@ -3,12 +3,11 @@ package org.example.serviceai.service;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceai.config.GLMConfig;
+import org.example.serviceai.entry.Model;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
+import org.example.serviceai.util.GetAPiKey;
 import org.example.serviceapi.exception.BizException;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.OutputStream;
@@ -17,33 +16,45 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
+/**
+ * 由 {@code ai.models} 配置驱动的通用 AI 端点实现：一个 {@link Model} 对应一个实例，
+ * 统一走 OpenAI 兼容的 chat/completions SSE 协议。
+ *
+ * <p>本类刻意不是 Spring Bean——{@link Model} 是配置数据而非 Bean，无法注入。它由
+ * AIServiceManager 在装配阶段按配置逐条 new 出来；所依赖的 {@link GetAPiKey} 先由容器
+ * 注入工厂，再由工厂传入构造器，因此依赖来源仍是 IoC 容器。</p>
+ */
 @Slf4j
-@Service
-public class GLMService implements CallAi {
+public class AiAggregateService implements CallAi {
 
-    /** 由 Nacos 下发 glm.enabled=false 时不参与轮转与探测；Bean 仍保留（见 CallAi#isEnabled）。 */
-    @Value("${glm.enabled:true}")
-    private boolean enabled;
+    private final Model config;
+    private final GetAPiKey getAPiKey;
 
-    private final GLMConfig config;
-
-    public GLMService(GLMConfig config) {
+    public AiAggregateService(Model config, GetAPiKey getAPiKey) {
         this.config = config;
+        this.getAPiKey = getAPiKey;
     }
 
     @Override
     public boolean isEnabled() {
-        return enabled;
+        return config.isEnabled();
     }
 
     @Override
     public String getModelName() {
-        return "GLM";
+        return config.getDefaultModelName();
     }
 
     @Override
     public String callAi(String prompt) {
         return callAi(prompt, 1024);
+    }
+
+    @Override
+    public String callAi(String prompt, String modelName) {
+        StringBuilder result = new StringBuilder();
+        streamAi(prompt, 1024, result::append, modelName);
+        return result.toString();
     }
 
     @Override
@@ -58,25 +69,35 @@ public class GLMService implements CallAi {
         streamAi(prompt, 1024, onChunk);
     }
 
+    @Override
+    public void streamAi(String prompt, Consumer<String> onChunk, String modelName) {
+        streamAi(prompt, 1024, onChunk, modelName);
+    }
+
     private void streamAi(String prompt, int maxTokens, Consumer<String> onChunk) {
+        streamAi(prompt, maxTokens, onChunk, config.getDefaultModelName());
+    }
+
+    private void streamAi(String prompt, int maxTokens, Consumer<String> onChunk, String model) {
+        String provider = providerName();
         HttpURLConnection connection = null;
         try {
-            JSONObject body = requestBody(prompt, maxTokens);
-            log.info("GLM request, model={}, promptLength={}",
-                    config.getModel(), prompt == null ? 0 : prompt.length());
+            JSONObject body = requestBody(prompt, maxTokens, model);
+            log.info("{} API request, model={}, promptLength={}",
+                    provider, model, prompt == null ? 0 : prompt.length());
 
-            connection = openConnection(config.getEndpoint(), config.getApikey());
+            connection = openConnection(config.getUrl(), getAPiKey.getApikey(config));
             try (OutputStream outputStream = connection.getOutputStream()) {
                 outputStream.write(body.toString().getBytes(StandardCharsets.UTF_8));
             }
 
-            int responseLength = readStream(connection, "GLM", onChunk);
-            log.info("GLM stream completed, responseLength={}", responseLength);
+            int responseLength = readStream(connection, provider, onChunk);
+            log.info("{} API stream completed, responseLength={}", provider, responseLength);
         } catch (AiProviderHttpException exception) {
-            log.warn("GLM request rejected: {}", exception.getDiagnostic());
+            log.warn("{} API request rejected: {}", provider, exception.getDiagnostic());
             throw exception;
         } catch (Exception exception) {
-            log.error("GLM stream failed: {}", exception.getMessage(), exception);
+            log.error("{} API stream failed: {}", provider, exception.getMessage(), exception);
             throw new BizException(AiErrorCode.PROVIDER_CALL_FAILED, exception);
         } finally {
             if (connection != null) {
@@ -85,9 +106,9 @@ public class GLMService implements CallAi {
         }
     }
 
-    private JSONObject requestBody(String prompt, int maxTokens) {
+    private JSONObject requestBody(String prompt, int maxTokens, String modelName) {
         JSONObject body = new JSONObject();
-        body.put("model", config.getModel());
+        body.put("model", modelName);
         body.put("temperature", 0.7);
         body.put("max_tokens", maxTokens);
         body.put("stream", true);
@@ -155,13 +176,20 @@ public class GLMService implements CallAi {
         }
     }
 
+    /** 日志/异常里用的端点标识：优先服务名，未配置时退回默认模型名，避免打印 null。 */
+    private String providerName() {
+        return config.getName() != null && !config.getName().isBlank()
+                ? config.getName()
+                : config.getDefaultModelName();
+    }
+
     @Override
     public int getPriority() {
-        return 1;
+        return config.getPriority() == null ? 0 : config.getPriority();
     }
 
     @Override
     public int getTimeout() {
-        return 120000;
+        return config.getTimeout();
     }
 }

@@ -42,7 +42,7 @@ service-ai/src/main/java/org/example/serviceai
 │   ├── WAAiHandle                     判题失败（WA/RE/TLE）建议消费者（事件状态机）
 │   └── TestCaseHandle、GLMTestCaseHandle、QwenTestCaseHandle
 │                                      题目测试用例生成消费者（ai.testcase.routing，成功后经 question.exchange 回传用例；终态失败补偿删除题目）
-└── service                            AIService、ConsumedEventService、UserAiService、ApiKeyCryptoService、FunctionArtifactService、AiAdviceTaskService 与模型适配器（GLM/Qwen/GPT/Ollama）
+└── service                            AIService、ConsumedEventService、UserAiService、ApiKeyCryptoService、FunctionArtifactService、AiAdviceTaskService 与模型适配器（AiAggregateService 按 ai.models 配置生成，OllamaService 供会话摘要）
 ```
 
 Prompt 构建、模型调用、持久化和推送分别放在对应层，不由 Controller 或 Mapper 混合承担。
@@ -107,7 +107,7 @@ data: 对用户安全的固定文案
 两处真实模型流式输出的修复必须保留：
 
 1. **空响应守卫**：`ask()` 与 `askStream()` 收尾前检查全文 `isBlank()`——网关限流或流解析异常可能返回空串，空结果按 FAILED 收尾并上抛（交分发器重试或向客户端报 error），绝不落空 COMPLETED 行（否则前端出现空胶囊）。
-2. **SSE 行解析**：Provider 解析按 `data:` 前缀匹配后再 `trim()`（SSE 规范允许冒号后不带空格，部分网关如 new-api 会省略——只认 `data: ` 会静默丢块导致回复截断）。该修复在 GLM/NikoApiGpt 适配器中；自定义用户模型通道（`UserAiService`）仍按 `data: ` 前缀解析。
+2. **SSE 行解析**：Provider 解析按 `data:` 前缀匹配后再 `trim()`（SSE 规范允许冒号后不带空格，部分网关如 new-api 会省略——只认 `data: ` 会静默丢块导致回复截断）。该修复在配置驱动的 `AiAggregateService` 中；自定义用户模型通道（`UserAiService`）仍按 `data: ` 前缀解析。
 
 ## 5. Prompt 上下文顺序
 
@@ -153,11 +153,13 @@ data: 对用户安全的固定文案
 | 模型类型 | 当前职责 |
 | --- | --- |
 | 云端模型 | 自动判题建议、用户实时追问、题目用例生成与函数产物生成、`/task` 静默观察 |
-| Ollama 小模型 | 会话摘要（增量压缩 / 重建），并作为优先级最低的兜底 Provider 参与轮转 |
+| Ollama 小模型 | 会话摘要（增量压缩 / 重建）；仅作为 Bean 供 `AiConversationMemaryService` 使用，不参与轮转 |
 
-已注册的平台 Provider 按优先级排序为：NikoApiGpt（`GPT`，0）、GLM（1）、QWEN（2）、Ollama（999）。GLM 与 NikoApiGpt 走 OpenAI 兼容 `chat/completions`，`endpoint` 默认官方公共网关、可经 Nacos 覆盖为自建网关；配置前缀分别为 `glm.*`、`nikoapigpt.*`、`qianwen.*`（各含 `apikey`/`model`，来自 Nacos `service-ai.yaml`）。QWEN 走 DashScope 原生非流式接口。Ollama 经 LangChain4j `OllamaChatModel`（`http://localhost:11434`，模型 `qwen2.5:14b`）。
+平台 Provider 完全由 Nacos 的 `ai.models` 配置驱动：列表里每条配置（`name`/`url`/`modelName`/`defaultModelName`/`apiKeys`/`enabled`/`priority`/`timeout`）在启动时由 `AIServiceManager` 生成一个 `AiAggregateService`，统一走 OpenAI 兼容的 `chat/completions`（`stream: true`），`apiKeys` 是 key 池、每次调用随机取一个。Provider 按 `priority` 升序轮转，`enabled: false` 的条目被剔除。原先硬编码的 GLM/Qwen/GPT 适配器及其 `glm.*`/`qianwen.*`/`nikoapigpt.*` 配置前缀已删除。Ollama 经 LangChain4j `OllamaChatModel`（`http://localhost:11434`，模型 `qwen2.5:14b`）。
 
-不同模型统一实现 `CallAi`。`AIServiceManager` 按优先级选择健康 Provider，记录失败次数并进行切换；后台单线程定时执行真实探测（`isAvailable` 即发一条 "Reply with OK."，10 秒内返回非空视为健康），健康实例每三分钟探测一次，不健康实例每三十秒复检，关闭服务时同步停止探测线程。`AIService` 记录 Provider 名称、耗时、超时判断和根因。
+`AiAggregateService` 刻意不是 Spring Bean——`Model` 是配置数据而非 Bean，无法注入；它由 `AIServiceManager`（组合根）按配置逐条 `new` 出来，依赖的 `GetAPiKey` 由容器先注入工厂再传入。
+
+不同模型统一实现 `CallAi`。`AIServiceManager` 按优先级选择健康 Provider，记录失败次数并进行切换；`ai.health-check.enabled` 为 `true`（默认）时后台单线程定时执行真实探测（`isAvailable` 即发一条 "Reply with OK."，10 秒内返回非空视为健康），健康实例每三分钟探测一次，不健康实例每三十秒复检，关闭服务时同步停止探测线程；为 `false` 时不起探测线程，改为乐观地把全部 Provider 标记为可用，靠调用时的失败计数与切换按需发现故障。`AIService` 记录 Provider 名称、耗时、超时判断和根因。
 
 ## 8. 数据库与迁移
 
@@ -182,7 +184,7 @@ UNIQUE KEY uk_event_id (event_id);  -- consumed_event
 
 表共五张：`ai_conversation`、`ai_message`、`ai_conversation_memory`、`user_ai_config`（`model_names` 为 JSON 列，`api_key` 存密文）、`consumed_event`。
 
-服务端口 `8085`，自身无 context-path，控制器直接暴露 `/api/ai/**`；网关（8082）按 `Path=/api/ai/**` 路由到本服务，所有请求先经 `UserAuthInterceptor` 校验 `X-Internal-Token` 并填充 `UserContext`。本地 `application.yaml` 固定项：`spring.rabbitmq.listener.simple.acknowledge-mode: manual`（手动 ACK 必须显式声明，否则与分发器双重确认导致 channel 崩溃）、`outboxpro.enabled: false`（本服务只消费不生产）、`codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`、`api.governance`（Redis 滑动窗口限流，超限返回 429「AI 请求过于频繁，请稍后重试」；管理端点 `/api/ai/governance` 仅管理员角色可访问）。数据源、`security.api-key-master-key` 与各 Provider 配置由 Nacos 数据源 `service-ai.yaml` 下发。
+服务端口 `8085`，自身无 context-path，控制器直接暴露 `/api/ai/**`；网关（8082）按 `Path=/api/ai/**` 路由到本服务，所有请求先经 `UserAuthInterceptor` 校验 `X-Internal-Token` 并填充 `UserContext`。本地 `application.yaml` 固定项：`spring.rabbitmq.listener.simple.acknowledge-mode: manual`（手动 ACK 必须显式声明，否则与分发器双重确认导致 channel 崩溃）、`outboxpro.enabled: false`（本服务只消费不生产）、`codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`、`api.governance`（Redis 滑动窗口限流，超限返回 429「AI 请求过于频繁，请稍后重试」；管理端点 `/api/ai/governance` 仅管理员角色可访问）。数据源、`security.api-key-master-key` 与 Provider 配置（`ai.models`、`ai.health-check.enabled`）由 Nacos 数据源 `service-ai.yaml` 下发。
 
 已有数据库按 `service-ai/src/main/resources/sql/migration_*.sql` 顺序执行迁移（当前：`migration_20260823_ai_message_status.sql` 为 ai_message 增加 status 列并把存量 ASSISTANT 行回填 COMPLETED；`consumed_event.sql` 建消费幂等状态表）。Nacos 的 `service-ai.yaml` 数据源需要指向 `codewise_ai`。
 

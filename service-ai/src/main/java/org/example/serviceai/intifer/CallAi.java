@@ -4,7 +4,7 @@ import java.util.function.Consumer;
 
 public interface CallAi {
     /**
-     * 获取AI模型名称
+     * 获取默认AI模型名称
      */
     String getModelName();
 
@@ -25,7 +25,7 @@ public interface CallAi {
      * 调用AI服务
      */
     String callAi(String prompt);
-
+    default String callAi(String prompt, String modelName){return callAi(prompt);}
     default String callAi(String prompt, int maxTokens) {
         return callAi(prompt);
     }
@@ -35,6 +35,7 @@ public interface CallAi {
     default void streamAi(String prompt, Consumer<String> onChunk) {
         onChunk.accept(callAi(prompt));
     }
+    default void streamAi(String prompt, Consumer<String> onChunk, String modelName) {onChunk.accept(callAi(prompt, modelName));}
 
     /**
      * 检查服务是否可用（健康检查）

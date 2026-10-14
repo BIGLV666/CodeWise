@@ -3,35 +3,42 @@ package org.example.serviceai.AIServiceManager;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceai.config.AiConfig;
+import org.example.serviceai.entry.Model;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
+import org.example.serviceai.service.AiAggregateService;
+import org.example.serviceai.util.GetAPiKey;
 import org.example.serviceapi.exception.BizException;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * AI 端点的组合根（工厂 + 注册表）：启动时组装 Provider 列表、维护健康状态与失败计数，
+ * 对外提供 {@link #getAvailableService()} 轮转取用。
+ *
+ * <p>Provider 的唯一来源是配置：{@code ai.models} 里每条配置生成一个
+ * {@link AiAggregateService}。这里 new 出 Provider 不违反 IoC——本类及
+ * {@link GetAPiKey}、{@link AiConfig} 都由容器注入，被 new 的只是「由配置数据决定的实例」，
+ * 与 {@code @Bean} 方法里 new 一个对象同理。</p>
+ */
+@Service
 @Slf4j
-@Component
 public class AIServiceManager {
-    @Autowired(required = false)
-    private List<CallAi> aiServices;
 
-    /**
-     * 是否启用 Provider 健康探测定时任务。
-     *
-     * <p>由 Nacos 下发 {@code ai.health-check.enabled}（默认 true）。置为 false 后不再起
-     * 后台周期探测线程，改为在真实调用时靠失败计数与切换机制按需发现故障——这样未部署的
-     * Provider（如 Ollama）不会持续刷连接失败日志。</p>
-     */
-    @Value("${ai.health-check.enabled:true}")
-    private boolean healthCheckEnabled;
+    private final AiConfig aiConfig;
+    private final GetAPiKey getAPiKey;
+
+    AIServiceManager(AiConfig aiConfig, GetAPiKey getAPiKey) {
+        this.aiConfig = aiConfig;
+        this.getAPiKey = getAPiKey;
+    }
 
     // 所有服务（按优先级排序）
     private List<CallAi> availableServices = new ArrayList<>();
@@ -61,16 +68,17 @@ public class AIServiceManager {
 
     @PostConstruct
     public void init() {
-        if (aiServices == null || aiServices.isEmpty()) {
+        // 组装 + 注册必须原子完成，故合并在单个 @PostConstruct 里（两个 @PostConstruct 的执行
+        // 顺序依赖反射实现，不可靠）。
+        List<CallAi> candidates = buildProviders();
+        if (candidates.isEmpty()) {
             log.error("没有可用的AI服务");
             return;
         }
 
-        // 先剔除被 Nacos 关闭的 Provider（如 ollama.enabled=false），再按优先级排序。
-        // 只影响「是否参与轮转与探测」；Provider Bean 一律保留——业务类对其是硬依赖注入
-        // （AiConversationMemaryService 依赖 OllamaService），删 Bean 会让上下文启动失败。
+        // 先剔除被配置关闭的端点（ai.models[].enabled=false），再按优先级排序。
         availableServices = new ArrayList<>();
-        for (CallAi service : aiServices) {
+        for (CallAi service : candidates) {
             if (service.isEnabled()) {
                 availableServices.add(service);
             } else {
@@ -80,7 +88,7 @@ public class AIServiceManager {
         availableServices.sort(Comparator.comparingInt(CallAi::getPriority));
 
         if (availableServices.isEmpty()) {
-            log.error("所有 AI 服务都被配置关闭（检查 glm/qianwen/nikoapigpt/ollama 的 enabled），AI 功能将不可用");
+            log.error("所有 AI 服务都被配置关闭（检查 ai.models[].enabled），AI 功能将不可用");
         }
 
         // 初始化状态
@@ -92,7 +100,7 @@ public class AIServiceManager {
                     service.getModelName(), service.getPriority());
         }
 
-        if (healthCheckEnabled) {
+        if (aiConfig.isHealthCheckEnabled()) {
             // 启动健康检查
             startHealthCheck();
         } else {
@@ -106,6 +114,28 @@ public class AIServiceManager {
         }
 
         log.info("AI服务管理器初始化完成，共 {} 个服务", availableServices.size());
+    }
+
+    /**
+     * 按 {@code ai.models} 逐条生成 Provider。单条配置有问题只跳过它，不让整个上下文启动失败。
+     */
+    private List<CallAi> buildProviders() {
+        List<Model> models = aiConfig.getModels();
+        if (models == null || models.isEmpty()) {
+            log.error("未配置 ai.models（或为空），无法装配任何 AI 端点");
+            return List.of();
+        }
+
+        List<CallAi> providers = new ArrayList<>(models.size());
+        for (Model model : models) {
+            try {
+                providers.add(new AiAggregateService(model, getAPiKey));
+            } catch (Exception exception) {
+                log.error("AI 端点配置无效，已跳过: name={}", model.getName(), exception);
+            }
+        }
+        log.info("已按 ai.models 生成 {} 个 AI 端点", providers.size());
+        return providers;
     }
 
     /**

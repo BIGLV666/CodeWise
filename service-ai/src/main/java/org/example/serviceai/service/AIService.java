@@ -1,7 +1,7 @@
 package org.example.serviceai.service;
 
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceai.AIServiceManager.AIServiceManager;
+import org.example.serviceai.AIServiceManager.*;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.intifer.CallAi;
 import org.example.serviceapi.exception.BizException;
