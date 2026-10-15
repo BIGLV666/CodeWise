@@ -53,6 +53,11 @@ public class OpenAiCompatibleProvider implements AiProvider {
     }
 
     @Override
+    public boolean autoRotate() {
+        return spec.autoRotate();
+    }
+
+    @Override
     public int priority() {
         return spec.priority();
     }

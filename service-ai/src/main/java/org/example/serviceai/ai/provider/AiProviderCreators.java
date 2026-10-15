@@ -78,6 +78,7 @@ final class AiProviderCreators {
                 AuthScheme.bearer(),
                 model.getHeaders(),
                 model.isEnabled(),
+                model.isAutoRotate(),
                 priorityOf(model),
                 Duration.ofMillis(model.getTimeout())
         );

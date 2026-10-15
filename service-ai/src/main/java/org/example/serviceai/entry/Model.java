@@ -34,8 +34,17 @@ public class Model {
     private String url;
     /** 该端点的 API Key 池，调用时随机取一个（见 AiKeyPool）。 */
     private List<String> apiKeys;
-    /** 是否参与轮转与健康探测，缺省 true；为 false 时被 AiServiceFactory 过滤掉。 */
+    /** 是否启用该端点，缺省 true；为 false 时既不参与轮转，也不进模型选择列表。 */
     private boolean enabled = true;
+    /**
+     * 是否参与 AUTO 轮转与健康探测，缺省 true。
+     *
+     * <p>与 {@link #enabled} 的差别：置 false 表示"只在用户明确指定模型时才用"——
+     * 端点仍出现在模型选择列表里、仍能被按模型路由到，但 AUTO 不会借到它。
+     * OpenCode Go 这类每次请求都要求会话头的端点必须这么配：AUTO 的调用方
+     * （测试用例生成、函数产物、WA 建议）手里没有会话概念，打过去会 400。</p>
+     */
+    private boolean autoRotate = true;
     /** 默认模型，调用方未显式指定 model 时使用。 */
     private String defaultModelName;
     /** 优先级，用于 AUTO 轮转，数值越小越优先。 */

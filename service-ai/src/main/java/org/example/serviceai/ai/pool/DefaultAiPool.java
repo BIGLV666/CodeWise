@@ -91,25 +91,35 @@ public class DefaultAiPool implements AiPool {
             return;
         }
 
-        // 先剔除被配置关闭的端点（ai.models[].enabled=false），再按优先级排序。
+        // 两个集合，用途不同：
+        //   routable —— 进模型索引（"这个能力谁能提供"）：enabled 即可
+        //   rotation —— 进 AUTO 轮转与健康探测：还要 auto-rotate
+        // 于是"只用于指定模型、不参与 AUTO 轮转"可以表达——例如 OpenCode Go 这类
+        // 每次请求都要求会话头的端点，AUTO 的调用方没有会话概念，打过去必 400。
+        List<AiProvider> routable = new ArrayList<>();
         List<AiProvider> rotation = new ArrayList<>();
         for (AiProvider provider : configured) {
-            if (provider.enabled()) {
+            if (!provider.enabled()) {
+                log.info("AI 服务已由配置关闭（enabled=false），既不轮转也不进模型列表: {}", provider.name());
+                continue;
+            }
+            routable.add(provider);
+            if (provider.autoRotate()) {
                 rotation.add(provider);
             } else {
-                log.info("AI 服务已由配置关闭，不参与轮转与探测: {}", provider.name());
+                log.info("AI 服务只用于指定模型，不参与 AUTO 轮转与探测: {}", provider.name());
             }
         }
+        routable.sort(Comparator.comparingInt(AiProvider::priority));
         rotation.sort(Comparator.comparingInt(AiProvider::priority));
         autoRotation = List.copyOf(rotation);
 
         if (autoRotation.isEmpty()) {
-            log.error("所有 AI 服务都被配置关闭（检查 ai.models[].enabled），AI 功能将不可用");
+            log.error("没有任何端点参与 AUTO 轮转（检查 ai.models[].enabled / auto-rotate），"
+                    + "AUTO 那条路将不可用");
         }
 
-        // 模型索引从轮转集合派生：天然继承「enabled 过滤 + priority 排序」，不需要第二套规则。
-        // 这样「被配置关闭的端点」不会出现在模型选择列表里，也不会被模型路由命中。
-        byModel = buildModelIndex(rotation);
+        byModel = buildModelIndex(routable);
 
         for (AiProvider provider : autoRotation) {
             healthCache.put(provider.name(), false);
@@ -130,8 +140,8 @@ public class DefaultAiPool implements AiPool {
             log.info("AI 健康探测定时任务已关闭（ai.health-check.enabled=false），改为调用时按需发现故障");
         }
 
-        log.info("AI 端点池初始化完成，自动轮转 {} 个，按身份可用 {} 个，可用模型 {} 个",
-                autoRotation.size(), byIdentity.size(), byModel.size());
+        log.info("AI 端点池初始化完成：自动轮转 {} 个，可路由端点 {} 个，按身份可用 {} 个，可用模型 {} 个",
+                autoRotation.size(), routable.size(), byIdentity.size(), byModel.size());
     }
 
     /** 每个模型对应一个按 priority 升序的端点列表——同模型多端点时用随机取做负载均衡。 */

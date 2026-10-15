@@ -41,6 +41,16 @@ public interface AiProvider {
         return true;
     }
 
+    /**
+     * 是否参与 AUTO 轮转（与健康探测）。
+     *
+     * <p>置 false 的端点仍可被"指定模型"路由到、也仍出现在模型选择列表里，
+     * 只是 AUTO 不会借到它。</p>
+     */
+    default boolean autoRotate() {
+        return enabled();
+    }
+
     /** 优先级，数值越小越优先。 */
     default int priority() {
         return 0;

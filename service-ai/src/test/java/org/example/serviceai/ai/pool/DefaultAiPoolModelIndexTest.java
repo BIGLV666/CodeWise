@@ -6,6 +6,7 @@ import org.example.serviceai.ai.provider.AiProvider;
 import org.example.serviceai.ai.provider.OpenAiProviderCreator;
 import org.example.serviceai.ai.provider.OpenCodeGoProviderCreator;
 import org.example.serviceai.ai.transport.HttpAiTransport;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceai.config.AiConfig;
 import org.example.serviceai.entry.Model;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 「模型 → 端点」索引：用户选了平台模型之后，靠它找到该打哪个端点。
@@ -122,6 +124,50 @@ class DefaultAiPoolModelIndexTest {
 
         assertThat(pool.platformModels()).isEmpty();
         assertThat(pool.borrowForModel("m-1")).isNull();
+    }
+
+    /**
+     * {@code auto-rotate: false}：仍然可被「指定模型」路由到、仍出现在模型列表里，
+     * 但 AUTO 永远不会借到它。
+     *
+     * <p>这是 OpenCode Go 这类端点的正确配法——AUTO 的调用方（测试用例生成、函数产物、
+     * WA 建议）手里没有会话概念，打过去必 400。</p>
+     */
+    @Test
+    void autoRotateFalseEndpointIsRoutableButNeverBorrowedByAuto() {
+        Model onlyForModel = model("ocgw", "gpt-5", 1, true, "opencode-model");
+        onlyForModel.setAutoRotate(false);
+        DefaultAiPool pool = poolOf(configOf(onlyForModel, model("s-a", "m-1", 2, true, "m-1")));
+
+        // 默认模型名 gpt-5 会按规则并入 servedModels，所以也在列表里
+        assertThat(pool.platformModels()).containsExactly("gpt-5", "m-1", "opencode-model");
+        assertThat(pool.borrowForModel("opencode-model")).isNotNull();
+
+        // 不进健康快照，AUTO 也永远只借到参与轮转的那个
+        assertThat(pool.status()).containsOnlyKeys("s-a");
+        for (int i = 0; i < 30; i++) {
+            assertThat(pool.borrowAuto().name()).isEqualTo("s-a");
+        }
+
+        // 对它记失败是无操作：模型级故障不会连坐到 AUTO 的轮转状态
+        AiProvider ocgw = pool.borrowForModel("opencode-model");
+        for (int i = 0; i < 5; i++) {
+            pool.reportFailure(ocgw);
+        }
+        assertThat(pool.status().get("s-a")).isTrue();
+        assertThat(pool.borrowAuto().name()).isEqualTo("s-a");
+    }
+
+    @Test
+    void noEndpointRoutableByAutoStillServesExplicitModelRequests() {
+        Model onlyForModel = model("ocgw", "gpt-5", 1, true, "opencode-model");
+        onlyForModel.setAutoRotate(false);
+        DefaultAiPool pool = poolOf(configOf(onlyForModel));
+
+        // AUTO 没有可轮转端点 → 借不到；但指定模型那条路照常
+        assertThat(pool.status()).isEmpty();
+        assertThatThrownBy(pool::borrowAuto).isInstanceOf(BizException.class);
+        assertThat(pool.borrowForModel("opencode-model")).isNotNull();
     }
 
     private static DefaultAiPool poolOf(AiConfig config, AiProvider... beanProviders) {

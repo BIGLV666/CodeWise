@@ -21,6 +21,7 @@ public record AiEndpointSpec(
         AuthScheme authScheme,
         Map<String, String> extraHeaders,
         boolean enabled,
+        boolean autoRotate,
         int priority,
         Duration timeout
 ) {
