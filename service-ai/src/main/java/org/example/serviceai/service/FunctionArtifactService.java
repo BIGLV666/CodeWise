@@ -3,6 +3,8 @@ package org.example.serviceai.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateRequest;
 import org.example.serviceapi.dto.ai.FunctionArtifactGenerateResponse;
@@ -13,17 +15,17 @@ import org.springframework.stereotype.Service;
 public class FunctionArtifactService {
     private static final String CONTRACT_VERSION = "function-artifact-v1";
 
-    private final AIService aiService;
+    private final AiFacade aiFacade;
     private final ObjectMapper objectMapper;
 
-    public FunctionArtifactService(AIService aiService, ObjectMapper objectMapper) {
-        this.aiService = aiService;
+    public FunctionArtifactService(AiFacade aiFacade, ObjectMapper objectMapper) {
+        this.aiFacade = aiFacade;
         this.objectMapper = objectMapper;
     }
 
     public FunctionArtifactGenerateResponse generate(FunctionArtifactGenerateRequest request) {
         validate(request);
-        String response = aiService.callAi(buildPrompt(request), 8192);
+        String response = aiFacade.chat(AiRequest.auto(buildPrompt(request), 8192));
         JsonNode root = parseJson(response);
 
         FunctionArtifactGenerateResponse result = new FunctionArtifactGenerateResponse();

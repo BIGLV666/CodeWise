@@ -1,9 +1,9 @@
 package org.example.serviceai.controller;
 
 import io.github.biglv666.apigovernance.annotation.RateLimit;
+import org.example.serviceai.ai.config.UserAiConfigService;
 import org.example.serviceai.dto.AiModelQueryDto;
 import org.example.serviceai.dto.UserAiConfigDto;
-import org.example.serviceai.service.UserAiService;
 import org.example.serviceai.vo.HomeUserConfigVo;
 import org.example.serviceai.vo.UserAiConfigVo;
 import org.example.serviceapi.dto.Result;
@@ -22,28 +22,28 @@ import java.util.List;
 @RequestMapping("/api/ai/configs")
 public class UserAiConfigController {
 
-    private final UserAiService userAiService;
+    private final UserAiConfigService userAiConfigService;
 
-    public UserAiConfigController(UserAiService userAiService) {
-        this.userAiService = userAiService;
+    public UserAiConfigController(UserAiConfigService userAiConfigService) {
+        this.userAiConfigService = userAiConfigService;
     }
 
     @GetMapping
     @RateLimit(limit = 100, window = 60)
     public Result<List<HomeUserConfigVo>> getAllConfigs() {
-        return Result.success(userAiService.getAllConfigs());
+        return Result.success(userAiConfigService.getAllConfigs());
     }
 
     @GetMapping("/{configId}")
     @RateLimit(limit = 100, window = 60)
     public Result<UserAiConfigVo> getConfig(@PathVariable Long configId) {
-        return Result.success(userAiService.getConfig(configId));
+        return Result.success(userAiConfigService.getConfig(configId));
     }
 
     @PostMapping
     @RateLimit(limit = 20, window = 60)
     public Result<UserAiConfigVo> createConfig(@RequestBody UserAiConfigDto dto) {
-        return Result.success(userAiService.createConfig(dto));
+        return Result.success(userAiConfigService.createConfig(dto));
     }
 
     @PutMapping("/{configId}")
@@ -52,19 +52,19 @@ public class UserAiConfigController {
             @PathVariable Long configId,
             @RequestBody UserAiConfigDto dto
     ) {
-        return Result.success(userAiService.updateConfig(configId, dto));
+        return Result.success(userAiConfigService.updateConfig(configId, dto));
     }
 
     @DeleteMapping("/{configId}")
     @RateLimit(limit = 30, window = 60)
     public Result<Void> deleteConfig(@PathVariable Long configId) {
-        userAiService.deleteConfig(configId);
+        userAiConfigService.deleteConfig(configId);
         return Result.success("删除成功");
     }
 
     @PostMapping("/models")
     @RateLimit(limit = 30, window = 60)
     public Result<List<String>> fetchModels(@RequestBody AiModelQueryDto dto) {
-        return Result.success(userAiService.fetchModels(dto.getBaseUrl(), dto.getApiKey()));
+        return Result.success(userAiConfigService.fetchModels(dto.getBaseUrl(), dto.getApiKey()));
     }
 }

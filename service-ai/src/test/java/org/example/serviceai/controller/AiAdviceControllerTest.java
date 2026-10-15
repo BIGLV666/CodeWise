@@ -1,7 +1,7 @@
 package org.example.serviceai.controller;
 
 import org.example.serviceai.exception.AiErrorCode;
-import org.example.serviceai.service.AiProviderHttpException;
+import org.example.serviceai.ai.transport.AiProviderHttpException;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;

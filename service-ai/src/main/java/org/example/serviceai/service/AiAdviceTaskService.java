@@ -1,6 +1,8 @@
 package org.example.serviceai.service;
 
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
 import org.example.serviceai.dto.AiTaskChangesDto;
 import org.example.serviceai.dto.AiTaskDto;
 import org.example.serviceai.dto.AiTaskRootDto;
@@ -44,7 +46,7 @@ public class AiAdviceTaskService {
     @Autowired
     private RedissonClient redissonClient;
     @Autowired
-    private AIService aiService;
+    private AiFacade aiFacade;
     private final String AI_TASK_KEY="ai_task_key";
     private final String AI_TASK_CHANGES_KEY="ai_task_changes_key";
     private final String AI_ADVICE_KEY="ai_advice_key";
@@ -219,7 +221,7 @@ public class AiAdviceTaskService {
             }
             String prompt=buildPrompt(root,changes);
 
-            String advice=aiService.callAi(prompt);
+            String advice=aiFacade.chat(AiRequest.auto(prompt));
             compactTaskRoot(rootKey, changesKey, root, changes);
             if(advice == null || advice.trim().equalsIgnoreCase("OK")){
                 return;

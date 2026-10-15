@@ -1,7 +1,7 @@
 package org.example.serviceai.advice;
 
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceai.service.AiProviderHttpException;
+import org.example.serviceai.ai.transport.AiProviderHttpException;
 import org.example.serviceapi.dto.Result;
 import org.example.servicecommon.advice.AbstractGlobalExceptionHandler;
 import org.springframework.web.bind.annotation.ExceptionHandler;

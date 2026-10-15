@@ -5,8 +5,10 @@ import org.example.serviceai.conversation.repository.AiConversationRepository;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.entry.MessageStatus;
-import org.example.serviceai.service.AIService;
-import org.example.serviceai.service.UserAiService;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
+import org.example.serviceai.ai.AiTarget;
+import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceapi.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,11 +44,9 @@ class AdviceConversationServiceTest {
     @Mock
     private AiConversationRepository aiConversationRepository;
     @Mock
-    private AIService aiService;
+    private AiFacade aiFacade;
     @Mock
     private AiConversationMemaryService aiConversationMemaryService;
-    @Mock
-    private UserAiService userAiService;
     @InjectMocks
     private AdviceConversationService service;
 
@@ -76,11 +76,13 @@ class AdviceConversationServiceTest {
 
     @Test
     void usesAutomaticProviderWhenCustomFieldsAreEmpty() {
+        AtomicReference<AiRequest> dispatched = new AtomicReference<>();
         doAnswer(invocation -> {
+            dispatched.set(invocation.getArgument(0));
             Consumer<String> consumer = invocation.getArgument(1);
             consumer.accept("auto-answer");
             return null;
-        }).when(aiService).streamAi(anyString(), any());
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
 
         Message result = service.askStream(
                 10L, 1L, "why", "code", Role.USER,
@@ -88,17 +90,20 @@ class AdviceConversationServiceTest {
         );
 
         assertEquals("auto-answer", result.getContent());
-        verify(aiService).streamAi(anyString(), any());
-        verify(userAiService, never()).streamAi(anyString(), any(), any(), any(), anyString());
+        // 未指定配置与模型 → 交给平台端点自动轮转
+        assertEquals(new AiTarget.PlatformAuto(), dispatched.get().target());
+        assertNull(dispatched.get().modelName());
     }
 
     @Test
     void usesOwnedCustomProviderWhenConfigAndModelArePresent() {
+        AtomicReference<AiRequest> dispatched = new AtomicReference<>();
         doAnswer(invocation -> {
+            dispatched.set(invocation.getArgument(0));
             Consumer<String> consumer = invocation.getArgument(1);
             consumer.accept("custom-answer");
             return null;
-        }).when(userAiService).streamAi(anyString(), any(), any(), any(), anyString());
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
 
         Message result = service.askStream(
                 10L, 1L, "why", "code", Role.USER,
@@ -106,8 +111,77 @@ class AdviceConversationServiceTest {
         );
 
         assertEquals("custom-answer", result.getContent());
-        verify(userAiService).streamAi(anyString(), any(), any(), any(), anyString());
-        verify(aiService, never()).streamAi(anyString(), any());
+        // 指定了配置与模型 → 走用户自带端点，且归属信息随请求一起下发
+        assertEquals(new AiTarget.UserConfig(10L, 99L), dispatched.get().target());
+        assertEquals("custom-model", dispatched.get().modelName());
+    }
+
+    @Test
+    void usesPlatformModelWhenOnlyModelIsChosen() {
+        AtomicReference<AiRequest> dispatched = new AtomicReference<>();
+        doAnswer(invocation -> {
+            dispatched.set(invocation.getArgument(0));
+            Consumer<String> consumer = invocation.getArgument(1);
+            consumer.accept("platform-answer");
+            return null;
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
+
+        Message result = service.askStream(
+                10L, 1L, "why", "code", Role.USER,
+                null, "glm-5.3", chunk -> { }
+        );
+
+        assertEquals("platform-answer", result.getContent());
+        // 只选了模型没选分组 → 平台按模型路由，不落用户配置
+        assertEquals(new AiTarget.PlatformModel(), dispatched.get().target());
+        assertEquals("glm-5.3", dispatched.get().modelName());
+    }
+
+    @Test
+    void carriesTheConversationIdAsSessionRef() {
+        when(aiConversationRepository.get(4242L)).thenReturn(Conversation.builder()
+                .conversationId(4242L).userId(10L).questionId(20L)
+                .questionContent("question").build());
+        AtomicReference<AiRequest> dispatched = new AtomicReference<>();
+        doAnswer(invocation -> {
+            dispatched.set(invocation.getArgument(0));
+            Consumer<String> consumer = invocation.getArgument(1);
+            consumer.accept("ok");
+            return null;
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
+
+        service.askStream(10L, 4242L, "why", "code", Role.USER, null, null, chunk -> { });
+
+        // 会话 id 必须随请求下发：OpenCode Go 这类协议靠它做 prompt cache 分组，
+        // 缺了上游直接 400；而且必须跨轮稳定，所以取会话主键而不是随机值
+        assertEquals("4242", dispatched.get().sessionRef());
+    }
+
+    @Test
+    void choosingAGroupWithoutItsModelIsRejected() {
+        // 给了分组却没给模型：无法确定用户想用哪个模型，不能替用户选
+        BizException failure = assertThrows(BizException.class, () -> service.askStream(
+                10L, 1L, "why", "code", Role.USER,
+                99L, null, chunk -> { }
+        ));
+
+        assertEquals(AiErrorCode.MODEL_ARGS_INCOMPLETE.getCode(), failure.getCode());
+        verify(aiFacade, never()).chatStream(any(AiRequest.class), any());
+    }
+
+    @Test
+    void blankModelIsTreatedAsAutoInsteadOfAChoice() {
+        AtomicReference<AiRequest> dispatched = new AtomicReference<>();
+        doAnswer(invocation -> {
+            dispatched.set(invocation.getArgument(0));
+            Consumer<String> consumer = invocation.getArgument(1);
+            consumer.accept("auto-answer");
+            return null;
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
+
+        service.askStream(10L, 1L, "why", "code", Role.USER, null, "   ", chunk -> { });
+
+        assertEquals(new AiTarget.PlatformAuto(), dispatched.get().target());
     }
 
     @Test
@@ -128,7 +202,7 @@ class AdviceConversationServiceTest {
             Consumer<String> consumer = invocation.getArgument(1);
             consumer.accept("partial");
             return null;
-        }).when(aiService).streamAi(anyString(), any());
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
 
         Message result = service.askStream(
                 10L, 1L, "why", "code", Role.USER,
@@ -147,7 +221,7 @@ class AdviceConversationServiceTest {
             Consumer<String> consumer = invocation.getArgument(1);
             consumer.accept("full answer");
             return null;
-        }).when(aiService).streamAi(anyString(), any());
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
 
         Message result = service.askStream(
                 10L, 1L, "why", "code", Role.USER,
@@ -164,7 +238,7 @@ class AdviceConversationServiceTest {
     void askStreamMarksFailedOnProviderError() {
         Long assistantId = ASSISTANT_ROW_ID;
         doThrow(new RuntimeException("AI providers failed"))
-                .when(aiService).streamAi(anyString(), any());
+                .when(aiFacade).chatStream(any(AiRequest.class), any());
 
         assertThrows(RuntimeException.class, () -> service.askStream(
                 10L, 1L, "why", "code", Role.USER,
@@ -183,7 +257,7 @@ class AdviceConversationServiceTest {
             Consumer<String> consumer = invocation.getArgument(1);
             consumer.accept("partial ");
             throw new RuntimeException("AI providers failed");
-        }).when(aiService).streamAi(anyString(), any());
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
 
         assertThrows(RuntimeException.class, () -> service.askStream(
                 10L, 1L, "why", "code", Role.USER,
@@ -202,7 +276,7 @@ class AdviceConversationServiceTest {
             consumer.accept("par");
             // 控制器包装 SSE send 失败的形态：RuntimeException 因链上带 IOException
             throw new RuntimeException("SSE 客户端已断开", new IOException("broken pipe"));
-        }).when(aiService).streamAi(anyString(), any());
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
 
         assertThrows(RuntimeException.class, () -> service.askStream(
                 10L, 1L, "why", "code", Role.USER,
@@ -225,7 +299,7 @@ class AdviceConversationServiceTest {
 
     @Test
     void askMarksCompletedOnSuccess() {
-        when(aiService.callAi(anyString())).thenReturn("reply");
+        when(aiFacade.chat(any(AiRequest.class))).thenReturn("reply");
 
         Message result = service.ask(10L, 1L, "why", "code", Role.USER);
 
@@ -238,7 +312,7 @@ class AdviceConversationServiceTest {
 
     @Test
     void askMarksFailedAndRethrowsOnProviderError() {
-        when(aiService.callAi(anyString())).thenThrow(new RuntimeException("AI providers failed"));
+        when(aiFacade.chat(any(AiRequest.class))).thenThrow(new RuntimeException("AI providers failed"));
 
         assertThrows(RuntimeException.class, () -> service.ask(10L, 1L, "why", "code", Role.USER));
 
@@ -281,7 +355,7 @@ class AdviceConversationServiceTest {
                 .status(MessageStatus.FAILED).build();
         when(aiConversationRepository.getMessage(77L)).thenReturn(prior);
         when(aiConversationRepository.restartFailedGeneration(77L)).thenReturn(true);
-        when(aiService.callAi(anyString())).thenReturn("reply");
+        when(aiFacade.chat(any(AiRequest.class))).thenReturn("reply");
 
         Message result = service.ask(10L, 1L, "why", "code", Role.SYSTEM, 77L);
 
@@ -340,7 +414,7 @@ class AdviceConversationServiceTest {
             Consumer<String> consumer = invocation.getArgument(1);
             consumer.accept("ok");
             return null;
-        }).when(aiService).streamAi(anyString(), any());
+        }).when(aiFacade).chatStream(any(AiRequest.class), any());
         AtomicReference<Long> created = new AtomicReference<>();
 
         service.askStream(10L, 1L, "why", "code", Role.USER,

@@ -16,7 +16,7 @@ import java.util.List;
 @Data
 public class AiConfig {
 
-    /** 配置化的 AI 端点列表；非空时由 AIServiceManager 逐条生成 AiAggregateService。 */
+    /** 配置化的 AI 端点列表；非空时由 AiServiceFactory 按 {@code type} 逐条生成 Provider。 */
     private List<Model> models;
 
     /**
