@@ -268,6 +268,35 @@ class DefaultAiFacadeTest {
     }
 
     @Test
+    void clientErrorFromUpstreamOnTheModelPathSaysSwitchModel() {
+        // 上游对"模型不存在/套餐不含"回 400（OpenCode Go 原话 Model is unavailable）。
+        // 这条必须说成"换个模型"，而不是"AI 服务繁忙，请稍后重试"——后者会让人白重试。
+        AiProviderHttpException unavailable =
+                new AiProviderHttpException("opencode-go", 400, "Model is unavailable.", null);
+        when(pool.borrowForModel("nope")).thenReturn(first);
+        when(first.chat(any(AiRequest.class))).thenThrow(unavailable);
+
+        BizException failure = (BizException) catchThrowable(() -> facade.chat(AiRequest.model("hi", "nope")));
+
+        assertThat(failure.getCode()).isEqualTo(AiErrorCode.MODEL_UNRESPONSIVE.getCode());
+        assertThat(failure.getCause()).isSameAs(unavailable);
+    }
+
+    @Test
+    void authAndQuotaFailuresOnTheModelPathKeepTheirOwnCode() {
+        when(pool.borrowForModel("m")).thenReturn(first);
+        when(first.chat(any(AiRequest.class)))
+                .thenThrow(new AiProviderHttpException("opencode-go", 401, "bad key", null));
+        assertThat(((BizException) catchThrowable(() -> facade.chat(AiRequest.model("hi", "m")))).getCode())
+                .isEqualTo(AiErrorCode.PROVIDER_KEY_INVALID.getCode());
+
+        when(first.chat(any(AiRequest.class)))
+                .thenThrow(new AiProviderHttpException("opencode-go", 429, "quota", "30"));
+        assertThat(((BizException) catchThrowable(() -> facade.chat(AiRequest.model("hi", "m")))).getCode())
+                .isEqualTo(AiErrorCode.PROVIDER_QUOTA_EXCEEDED.getCode());
+    }
+
+    @Test
     void modelRoutingOnStreamFollowsTheSameNoFallbackPolicy() {
         when(pool.borrowForModel("glm-5.3")).thenReturn(first);
         doAnswer(invocation -> {

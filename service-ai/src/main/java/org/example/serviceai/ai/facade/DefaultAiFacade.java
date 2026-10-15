@@ -9,6 +9,7 @@ import org.example.serviceai.ai.config.UserAiConfigService;
 import org.example.serviceai.ai.pool.AiPool;
 import org.example.serviceai.ai.pool.AiServiceFactory;
 import org.example.serviceai.ai.provider.AiProvider;
+import org.example.serviceai.ai.transport.AiProviderHttpException;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceapi.exception.BizException;
 import org.springframework.stereotype.Service;
@@ -231,12 +232,25 @@ public class DefaultAiFacade implements AiFacade {
     /**
      * 指定模型失败后的异常。
      *
-     * <p>已经分类过的业务异常（密钥无效、额度不足等）原样上抛——它的错误码与文案都是对的，
-     * 重包成"模型无法响应"会把"密钥错了"说成"换个模型"，还会击穿上层对
-     * {@code AiProviderHttpException} 的专门分支。只有没分类的（超时、IO）才换成
-     * {@code MODEL_UNRESPONSIVE}，给用户"换个模型试试"的提示。</p>
+     * <p>已经分类过的业务异常（密钥无效、额度不足）原样上抛——它们的错误码与文案都是对的，
+     * 重包会把"密钥错了"说成"换个模型"，还会击穿上层对 {@code AiProviderHttpException}
+     * 的专门分支。</p>
+     *
+     * <p>但上游的 4xx（除密钥/额度）在"指定模型"这条路上几乎都是"这个模型用不了"
+     * ——例如模型 id 不存在或套餐不含（OpenCode Go 会回 {@code Model is unavailable}）。
+     * 这时换成 {@link AiErrorCode#MODEL_UNRESPONSIVE}（"请更换模型或稍后重试"）比
+     * {@code PROVIDER_CALL_FAILED}（"AI 服务繁忙，请稍后重试"）准确得多：后者会让人
+     * 反复重试一个永远不会成功的请求。</p>
      */
     private RuntimeException modelFailure(Exception failure) {
+        if (failure instanceof AiProviderHttpException httpFailure) {
+            int status = httpFailure.getStatusCode();
+            boolean alreadyClassified = status == 401 || status == 403 || status == 429;
+            if (status >= 400 && status < 500 && !alreadyClassified) {
+                return new BizException(AiErrorCode.MODEL_UNRESPONSIVE, failure);
+            }
+            return httpFailure;
+        }
         if (failure instanceof BizException classified) {
             return classified;
         }
