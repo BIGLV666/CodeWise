@@ -30,13 +30,14 @@ public class JudgeResHandle implements MessageHandler {
     @Override
     @SuppressWarnings("unchecked")
     public void handle(String messageBody, Channel channel, Message amqmessage) throws IOException {
-        Long tag=amqmessage.getMessageProperties().getDeliveryTag();
+        long tag=amqmessage.getMessageProperties().getDeliveryTag();
         try{
             Map<String,Object> map =(Map<String, Object>) objectMapper.readValue(messageBody,Map.class);
             User user=userMapper.selectById((Long)map.get("userId"));
             if(user==null){
                 log.info("用户不存在跳过id{}",map.get("userId"));
                 channel.basicAck(tag,false);
+                return;
             }
 
             user.setTotalSubmit(user.getTotalSubmit()+Long.parseLong((map.get("totalSubmit").toString())));
@@ -45,9 +46,10 @@ public class JudgeResHandle implements MessageHandler {
             if(r==0){
                 log.info("更新失败");
                 channel.basicNack(tag,false,true);
+                return;
             }
         }catch (Exception e){
-        log.error("处理判题结果失败", e);
+            log.error("处理判题结果失败", e);
         try {
             // 拒绝并重新入队
             channel.basicNack(tag, false, true);
