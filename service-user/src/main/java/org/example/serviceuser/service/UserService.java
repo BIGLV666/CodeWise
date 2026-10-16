@@ -429,6 +429,13 @@ public class UserService {
      * @param banTime 冻结时间，单位为天
      */
     public void banUser(Long userId,Integer banTime){
+        // TODO(安全): 管理员封禁他人时不会作废对方已签发的 token。
+        //  现有的 logout_token:<token> 黑名单按 token 原文匹配，而这里拿到的是 userId，
+        //  服务端没有 token -> 用户的索引，所以复用不了 blacklistCurrentToken（它作废的是
+        //  请求者自己的凭证，用在这里会把管理员自己踢下线）。
+        //  要覆盖需要按用户维度记录失效时间戳，例如 user_token_invalid_before:<userId> = now，
+        //  由 UserAuthInterceptor 比对 JWT 的 iat（iat <= 该时间戳即视为已失效，同时天然支持
+        //  "改密码后其它会话全部下线"）。在那之前，被封禁用户在 token 自然过期前仍可继续调用接口。
         LocalDateTime banUntil = LocalDateTime.now().plusDays(banTime);
         int userStatus = 0; // 0 表示封禁状态
         User user = userMapper.selectById(userId);
