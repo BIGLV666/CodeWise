@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.exception.CommonErrorCode;
+import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicecommon.until.UserContext;
 import org.example.serviceuser.dto.UserDto;
@@ -465,6 +466,11 @@ public class UserService {
         if(user.getStatus()==2){
             throw new BizException(UserErrorCode.USER_CANCELLED);
         }
+        // 先作废旧凭证，再落库状态变更：JWT 无状态，网关只验签名不看账号状态，
+        // 只有黑名单写成功，"账号已注销"才真的等于"旧 token 立即失效"。
+        // 若顺序反过来，一旦黑名单写失败就会留下「账号已注销但旧 token 还能用」的窗口；
+        // 现在最坏情况只是状态更新失败、用户需要重新登录一次。
+        blacklistCurrentToken(UserErrorCode.SESSION_REVOKE_FAILED);
         user.setStatus(2);
         user.setUpdateTime(LocalDateTime.now());
         int r=userMapper.updateById(user);
@@ -496,6 +502,10 @@ public class UserService {
         if(!PasswordEncoding.matches(password,user.getPassword())){
             throw new BizException(UserErrorCode.PASSWORD_INCORRECT);
         }
+        // 密码核验通过后才作废旧凭证（校验失败不该把人踢下线），
+        // 且先作废再落库：账号状态变更与凭证失效保持一致，
+        // 不留「已冻结但旧 token 还能用」的窗口，理由同 deleteUser。
+        blacklistCurrentToken(UserErrorCode.SESSION_REVOKE_FAILED);
         user.setStatus(0);
 
         user.setUpdateTime(LocalDateTime.now());
@@ -549,6 +559,59 @@ public class UserService {
         userDto.setEmail(null);
         userDto.setPhone(null);
         return userDto;
+    }
+
+    /**
+     * <P>用户退出登录，因为为jwt无状态token，所以不支持天然踢出，
+     * 在此使用redis存放退出token，token有效期为7天，所以我们ttl需要大于7,
+     * 否则可能出现用户退出登录前端清除token但是还可以拿旧token登录的情况。
+     * </P>
+     */
+    public void logout(){
+        blacklistCurrentToken(UserErrorCode.LOGOUT_FAILED);
+    }
+
+    /**
+     * 把当前请求携带的凭证写入黑名单，使其立即失效。
+     *
+     * <p>退出登录、冻结账号、注销账号都必须走这一步：JWT 是无状态的，网关只验签名、
+     * 不看账号状态，真正让旧 token 失效的是 {@code UserAuthInterceptor} 每次请求
+     * 对 {@code logout_token:<token>} 的检查，所以只有写进黑名单，旧凭证才真的作废。</p>
+     *
+     * <p>没有单独的下线广播，也没有把 key 存进数据库：这里刻意复用登出同一套机制，
+     * 保证三个场景的失效语义完全一致（同样是 7 天 TTL，同样按原 token 原文匹配）。</p>
+     *
+     * @param persistFailedCode 写入黑名单失败时抛出的业务码（各场景面向用户的文案不同）
+     */
+    private void blacklistCurrentToken(UserErrorCode persistFailedCode){
+        Long userId=UserContext.getUserId();
+        String token=UserContext.getToken();
+
+        //网关注入的token，其实已经解析过一次，以防万一在此再解析一次
+        Long user;
+        try {
+            var body= jwtUntil.parseToken(token);
+            //jwt解析出的id
+            user = Long.parseLong(body.getSubject());
+        }catch (Exception e){
+            //token 缺失、过期、签名不符或被篡改都归为凭证无效，原始异常只进日志
+            log.warn("解析待作废凭证失败: {}",e.getMessage(),e);
+            throw new BizException(CommonErrorCode.TOKEN_INVALID, e);
+        }
+
+        //token 身份与当次请求身份不一致：凭证不可信，同样按凭证无效处理
+        if(!user.equals(userId)){
+            throw new BizException(CommonErrorCode.TOKEN_INVALID);
+        }
+
+        //把token添加到redis做持久化
+        try {
+            String key = RedisContext.LOGOUT_TOKEN + ":" + token;
+            redisTemplate.opsForValue().set(key, token, 7, TimeUnit.DAYS);
+        }catch (Exception e){
+            log.error("凭证写入黑名单失败{}",e.getMessage(),e);
+            throw new BizException(persistFailedCode, e);
+        }
     }
 
 

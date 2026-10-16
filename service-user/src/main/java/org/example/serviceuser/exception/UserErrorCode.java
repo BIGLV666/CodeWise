@@ -72,7 +72,15 @@ public enum UserErrorCode implements ErrorCode {
     UPLOAD_PATH_CONFIG_ERROR(5000103, "文件保存位置配置有误，请联系管理员处理"),
 
     // ---------- 邮件 ----------
-    MAIL_TEMPLATE_UNAVAILABLE(5000104, "邮件内容暂时无法生成，请稍后重试或联系管理员");
+    MAIL_TEMPLATE_UNAVAILABLE(5000104, "邮件内容暂时无法生成，请稍后重试或联系管理员"),
+    //-----------登出失败---------
+    LOGOUT_FAILED(5000105,"退出失败请稍后重试"),
+    /**
+     * 冻结 / 注销账号时，把旧凭证写入黑名单失败。
+     * 这一步失败会中止整个操作，因此不会出现「账号已停用但旧 token 仍可用」的窗口，
+     * 文案按「本次操作没做成、可以重试」来写。
+     */
+    SESSION_REVOKE_FAILED(5000106,"操作失败，请稍后重试");
 
     private final int code;
     private final String message;

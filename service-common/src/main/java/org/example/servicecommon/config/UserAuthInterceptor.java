@@ -2,14 +2,17 @@ package org.example.servicecommon.config;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.feign.UserFeignClient;
+import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.web.servlet.HandlerInterceptor;
 
@@ -25,6 +28,7 @@ import java.util.Set;
  * 请求头细节不落日志（历史版本曾全量打印请求头，含 Authorization 与内部 Token）。</p>
  */
 @AutoConfiguration
+@Slf4j
 public class UserAuthInterceptor implements HandlerInterceptor {
     /** 管理员角色标识 */
     private static final Integer ADMIN_ROLE = 2;
@@ -55,8 +59,12 @@ public class UserAuthInterceptor implements HandlerInterceptor {
     @Autowired(required = false)
     private UserFeignClient userFeignClient;
 
+    @Lazy
+    @Autowired(required = false)
+    private RedisTemplate<String,Object> redisTemplate;
+
     @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)  {
         String path = request.getRequestURI();
         String ip = request.getHeader("X-Real-IP");
         if (ip != null) {
@@ -78,6 +86,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
             }
             return false;
         }
+
 
         String normalizedPath = path.endsWith("/") && path.length() > 1
                 ? path.substring(0, path.length() - 1)
@@ -104,6 +113,29 @@ public class UserAuthInterceptor implements HandlerInterceptor {
         if (userName != null) {
             UserContext.setUserName(userName);
         }
+        // 获取用户jwtToken（网关注入；客户端伪造值已由网关剥离）
+        String userToken=request.getHeader("X-User-Token");
+        if (userToken != null && !userToken.isBlank()) {
+            UserContext.setUserToken(userToken);
+        }
+
+        // 判断token不为空时在此调用redis，不把io操作放网关上，网关做初步正确性校验后在此判断是否为注销token
+        // 无 token（如带内部 Token 的服务间调用）跳过查询，避免用 "logout_token:null" 空转一次 io
+        if (userToken != null && !userToken.isBlank()) {
+            try {
+                if (redisTemplate.hasKey(RedisContext.LOGOUT_TOKEN + ":" + userToken)) {
+                    // HTTP 保持 200，前端按响应体 code 分支（与全局异常处理器口径一致）；
+                    // 中文文案必须显式声明 UTF-8，否则 getWriter 按容器默认编码输出乱码
+                    response.setContentType("application/json;charset=UTF-8");
+                    response.getWriter().write("{\"code\":403,\"message\":\"您的登录已过期，请重新登录\"}");
+                    return false;
+                }
+            }catch (Exception e){
+                // Redis 不可用 / 响应写入失败不阻断业务请求（与原有失败放行口径一致），仅落日志
+                log.error("注销 token 校验失败{}",e.getMessage(),e);
+            }
+        }
+
 
         if(antPathMatcher.match(path,"/api/*/governance")){
             try{
@@ -122,7 +154,7 @@ public class UserAuthInterceptor implements HandlerInterceptor {
                 return false;
             }
             } catch (IOException e) {
-                e.printStackTrace();
+                log.error("权限校验失败{}",e.getMessage(),e);
             }
         }
 

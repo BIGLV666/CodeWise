@@ -47,6 +47,12 @@ public class UserController {
     public Result<Map<String,Object>> login(@RequestParam String username, @RequestParam String password){
         return  Result.success(userService.login(username,password));
     }
+    @PostMapping("/logout")
+    @RateLimit(limit = 10,window = 60)
+    public Result<String>logout(){
+        userService.logout();
+        return  Result.success("success");
+    }
 
     @PostMapping("/emaillogin")
     @RateLimit(limit = 60, window = 60)
@@ -59,6 +65,7 @@ public class UserController {
     public Result<String> getEmailCode(@RequestParam String email){
         return Result.success(userService.getEmailCode(email));
     }
+
 
     @PostMapping("/emailloginforcode")
     @RateLimit(limit = 60, window = 60)

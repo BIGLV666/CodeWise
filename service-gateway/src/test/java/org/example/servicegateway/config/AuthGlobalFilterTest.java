@@ -75,6 +75,7 @@ class AuthGlobalFilterTest {
                         .remoteAddress(REMOTE)
                         .header("X-User-Id", "999")
                         .header("X-User-Name", "attacker")
+                        .header("X-User-Token", "forged-token")
                         .header("X-Internal-Token", "forged-token")
                         .header("X-Real-IP", "1.2.3.4")
                         .build());
@@ -85,6 +86,7 @@ class AuthGlobalFilterTest {
         ServerHttpRequest forwarded = forwarded(chain);
         assertThat(forwarded.getHeaders().getFirst("X-User-Id")).isNull();
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isNull();
+        assertThat(forwarded.getHeaders().getFirst("X-User-Token")).isNull();
         assertThat(forwarded.getHeaders().getFirst("X-Internal-Token")).isEqualTo(INTERNAL_TOKEN);
         assertThat(forwarded.getHeaders().getFirst("X-Real-IP")).isEqualTo("203.0.113.7");
     }
@@ -103,6 +105,7 @@ class AuthGlobalFilterTest {
                         .header("Authorization", "Bearer " + token)
                         .header("X-User-Id", "1")
                         .header("X-User-Name", "attacker")
+                        .header("X-User-Token", "forged-token")
                         .header("X-Internal-Token", "forged-token")
                         .build());
         GatewayFilterChain chain = mockChain();
@@ -112,6 +115,7 @@ class AuthGlobalFilterTest {
         ServerHttpRequest forwarded = forwarded(chain);
         assertThat(forwarded.getHeaders().getFirst("X-User-Id")).isEqualTo("42");
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isEqualTo("alice");
+        assertThat(forwarded.getHeaders().getFirst("X-User-Token")).isEqualTo(token);
         assertThat(forwarded.getHeaders().getFirst("X-Internal-Token")).isEqualTo(INTERNAL_TOKEN);
     }
 
@@ -191,6 +195,7 @@ class AuthGlobalFilterTest {
                         .header("Upgrade", "websocket")
                         .header("X-User-Id", "1")
                         .header("X-User-Name", "attacker")
+                        .header("X-User-Token", "forged-token")
                         .build());
         GatewayFilterChain chain = mockChain();
 
@@ -199,6 +204,7 @@ class AuthGlobalFilterTest {
         ServerHttpRequest forwarded = forwarded(chain);
         assertThat(forwarded.getHeaders().getFirst("X-User-Id")).isEqualTo("42");
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isEqualTo("alice");
+        assertThat(forwarded.getHeaders().getFirst("X-User-Token")).isEqualTo(token);
         assertThat(forwarded.getHeaders().getFirst("X-Internal-Token")).isEqualTo(INTERNAL_TOKEN);
     }
 

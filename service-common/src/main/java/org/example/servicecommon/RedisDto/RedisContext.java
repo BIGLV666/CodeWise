@@ -48,4 +48,7 @@ public  class RedisContext {
     public static final String POST_AND_USER_ID_KEY = "post_and_user_id_key:v2";
     public static final String COMMENT_AND_USER_ID = "comment_and_user_id_key:v2";
     public static final String SOLUTION_AND_USER_ID = "solution_and_user_id_key:v2";
+
+    //===============已登出的token=========================
+    public static final String LOGOUT_TOKEN="logout_token";
 }
