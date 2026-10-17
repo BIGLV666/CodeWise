@@ -51,7 +51,7 @@ api:
     rate-limit:
       type: redis
       algorithm: sliding-window
-      default-limit: -1
+      default-limit: 60
       default-window: 60
       status-code: 429
       message: "通知操作过于频繁，请稍后重试"

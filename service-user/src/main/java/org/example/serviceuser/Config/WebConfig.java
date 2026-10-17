@@ -30,6 +30,9 @@ import java.nio.file.Paths;
                     //.excludePathPatterns("/api/user/register")       // 放行注册
                     .excludePathPatterns("/api/user/wechat/callback")
                     .excludePathPatterns("/api/user/updatefromcode")
+                    // TODO(清理): 路径多了一个斜杠，"找回密码"实际没被这条排除命中
+                    //  （目前靠 UserAuthInterceptor 自己的 PUBLIC_PATHS 白名单放行）。
+                    //  修成 "/api/user/updatepasswordforemail" 即可。
                     .excludePathPatterns("/api//user/updatepasswordforemail")
                     .excludePathPatterns("/uploads/**");
                     //.excludePathPatterns("/api/user/emailregister")

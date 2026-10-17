@@ -23,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.LocalDateTime;
@@ -46,6 +47,8 @@ class UserServiceAuthenticationTest {
     @Mock private RabbitTemplate rabbitTemplate;
     @Mock private RedisTemplate<String, Object> redisTemplate;
     @Mock private ValueOperations<String, Object> valueOperations;
+    @Mock private StringRedisTemplate stringRedisTemplate;
+    @Mock private ValueOperations<String, String> stringValueOperations;
     @InjectMocks private UserService service;
     @Captor private ArgumentCaptor<Wrapper<User>> queries;
     @Captor private ArgumentCaptor<User> writtenUsers;
@@ -212,7 +215,8 @@ class UserServiceAuthenticationTest {
     @EnumSource(EmailFlow.class)
     void allExplicitEmailFlowsReject255BeforeAnyDependency(EmailFlow flow) {
         assertLengthError(() -> invoke(flow, EMAIL_254 + "x"));
-        verifyNoInteractions(userMapper, jwtUntil, redisTemplate, valueOperations, userMailService, rabbitTemplate);
+        verifyNoInteractions(userMapper, jwtUntil, redisTemplate, valueOperations, stringRedisTemplate,
+                userMailService, rabbitTemplate);
     }
 
     @ParameterizedTest
@@ -279,6 +283,8 @@ class UserServiceAuthenticationTest {
                 when(valueOperations.get("user_code:reset--" + email))
                         .thenReturn(Map.of("code", CODE, "userId", 42L));
                 when(userMapper.updateById(owner)).thenReturn(1);
+                //改密成功后会写「用户级凭证失效线」（revoke_before:<userId>）
+                when(stringRedisTemplate.opsForValue()).thenReturn(stringValueOperations);
             }
             case ACTIVATE -> when(valueOperations.get("user_code:register--" + email))
                     .thenReturn(registrationPayload(email));

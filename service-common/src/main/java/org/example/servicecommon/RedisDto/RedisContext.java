@@ -51,4 +51,38 @@ public  class RedisContext {
 
     //===============已登出的token=========================
     public static final String LOGOUT_TOKEN="logout_token";
+    //===============用户级凭证失效线========================
+    /**
+     * 用户级凭证失效线 key 前缀，value 为 <b>epoch 秒</b>（纯数字字符串，供 Lua {@code tonumber} 解析）。
+     *
+     * <p>语义：「该用户在此时间点<b>之前</b>签发的 token 全部失效」。管理员封禁、改密、
+     * 全端下线都写它；拦截器用网关注入的 JWT {@code iat} 与之比较。</p>
+     *
+     * <p>解封时<b>不清除</b>：清掉会让封禁期间未使用过的旧 token 复活。新登录签发的 token
+     * {@code iat} 更晚，自然通过判定，所以不需要任何「解封清理」动作。</p>
+     */
+    public static final String USER_TOKEN_REVOKE_BEFORE = "revoke_before";
+
+    /**
+     * 凭证失效兜底 TTL（秒）。
+     *
+     * <p>登出黑名单、失效线都靠它自然过期，因此必须<b>大于等于</b>
+     * {@code jwt.expiration}（当前默认 24h），否则失效线会先于凭证过期，
+     * 出现「token 还没过期但已不在失效范围内」的窗口。</p>
+     */
+    public static final long SESSION_REVOKE_TTL_SECONDS = 7 * 24 * 3600L;
+
+    /**
+     * token 桶 key：存在即该凭证已失效（登出、以及被失效线判定拒绝后的兜底落库）。
+     */
+    public static String logoutTokenKey(String token) {
+        return LOGOUT_TOKEN + ":" + token;
+    }
+
+    /**
+     * 用户级失效线 key：value 为该用户「凭证失效时间点」的 epoch 秒。
+     */
+    public static String revokeBeforeKey(Long userId) {
+        return USER_TOKEN_REVOKE_BEFORE + ":" + userId;
+    }
 }

@@ -30,34 +30,34 @@ public class JudgeResHandle implements MessageHandler {
     @Override
     @SuppressWarnings("unchecked")
     public void handle(String messageBody, Channel channel, Message amqmessage) throws IOException {
-        long tag=amqmessage.getMessageProperties().getDeliveryTag();
-        try{
-            Map<String,Object> map =(Map<String, Object>) objectMapper.readValue(messageBody,Map.class);
-            User user=userMapper.selectById((Long)map.get("userId"));
-            if(user==null){
-                log.info("用户不存在跳过id{}",map.get("userId"));
-                channel.basicAck(tag,false);
+        long tag = amqmessage.getMessageProperties().getDeliveryTag();
+        try {
+            Map<String, Object> map = (Map<String, Object>) objectMapper.readValue(messageBody, Map.class);
+            User user = userMapper.selectById((Long) map.get("userId"));
+            if (user == null) {
+                log.info("用户不存在跳过id{}", map.get("userId"));
+                channel.basicAck(tag, false);
                 return;
             }
 
-            user.setTotalSubmit(user.getTotalSubmit()+Long.parseLong((map.get("totalSubmit").toString())));
-            user.setTotalAc(user.getTotalAc()+Long.parseLong( map.get("totalAc").toString()));
-            int r= userMapper.updateById(user);
-            if(r==0){
+            user.setTotalSubmit(user.getTotalSubmit() + Long.parseLong((map.get("totalSubmit").toString())));
+            user.setTotalAc(user.getTotalAc() + Long.parseLong(map.get("totalAc").toString()));
+            int r = userMapper.updateById(user);
+            if (r == 0) {
                 log.info("更新失败");
-                channel.basicNack(tag,false,true);
+                channel.basicNack(tag, false, true);
                 return;
             }
-        }catch (Exception e){
+        } catch (Exception e) {
             log.error("处理判题结果失败", e);
-        try {
-            // 拒绝并重新入队
-            channel.basicNack(tag, false, true);
-        } catch (IOException ex) {
-            log.error("NACK失败", ex);
+            try {
+                // 拒绝并重新入队
+                channel.basicNack(tag, false, true);
+            } catch (IOException ex) {
+                log.error("NACK失败", ex);
+            }
+            // 抛出异常让事务回滚（MQ 消费链路，消息不直达前端；原始错误只进日志）
+            throw new BizException(CommonErrorCode.INTERNAL_ERROR, e);
         }
-        // 抛出异常让事务回滚（MQ 消费链路，消息不直达前端；原始错误只进日志）
-        throw new BizException(CommonErrorCode.INTERNAL_ERROR, e);
-    }
     }
 }

@@ -56,7 +56,6 @@ class UserServiceLogoutTest {
     private static final long USER_ID = 1L;
     private static final String USER_NAME = "admin";
     /** 黑名单 TTL：必须不小于 token 有效期，否则 token 没过期黑名单就失效了。 */
-    private static final long BLACKLIST_TTL_DAYS = 7L;
 
     /** 真实 JwtUntil 的 spy：等价于“mock 一个能签发/解析真 token 的 JWT 桩”。 */
     @Spy private JwtUntil jwtUntil = new JwtUntil();
@@ -89,8 +88,8 @@ class UserServiceLogoutTest {
 
         service.logout();
 
-        verify(valueOperations).set(RedisContext.LOGOUT_TOKEN + ":" + token, token,
-                BLACKLIST_TTL_DAYS, TimeUnit.DAYS);
+        verify(valueOperations).set(RedisContext.logoutTokenKey(token), token,
+                RedisContext.SESSION_REVOKE_TTL_SECONDS, TimeUnit.SECONDS);
         verifyNoMoreInteractions(valueOperations);
         verifyNoInteractions(userMailService, rabbitTemplate);
     }

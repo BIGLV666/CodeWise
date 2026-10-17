@@ -2,11 +2,13 @@ package org.example.serviceai.ai.pool;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceai.ai.provider.AiProvider;
 import org.example.serviceai.config.AiConfig;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceapi.exception.BizException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -16,11 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -77,7 +75,6 @@ public class DefaultAiPool implements AiPool {
                 thread.setDaemon(true);
                 return thread;
             });
-
     @PostConstruct
     public void init() {
         // 先登记「按身份可借用」的全部端点（含不参与轮转的 Bean 端点），

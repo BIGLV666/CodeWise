@@ -125,6 +125,10 @@ public class UserAppealService {
      * @param approve 是否批准申诉，true-批准，false-拒绝
      * @throws BizException 如果申诉记录不存在或已处理、申诉用户不存在，或更新申诉记录、解封用户失败
      *
+     * <p>TODO(一致性): 本方法没有事务。申诉记录用乐观锁（WHERE status=0）更新成功之后，
+     * 若紧接着的用户状态更新失败，管理员重试会被"该申诉已处理完成"挡掉，而用户实际没被解封。
+     * 建议加 {@code @Transactional(rollbackFor = Exception.class)} 让两处 DB 写同进同退。</p>
+     *
      */
     public void processUserAppeal(Long userAppealId, String processResult, boolean approve) {
         UserAppeal userAppeal = userAppealMapper.selectById(userAppealId);

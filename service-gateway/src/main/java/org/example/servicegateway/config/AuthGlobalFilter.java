@@ -18,6 +18,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Date;
 import java.util.Objects;
 import java.util.Set;
 
@@ -111,6 +112,17 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     }
 
 
+    /**
+     * 凭证签发时间（epoch 秒），供下游比对用户级失效线。
+     *
+     * <p>正常签发的 token 一定带 {@code iat}；万一缺失就下发空串，让下游按
+     * 「无法证明凭证比失效线新」处理，而不是伪造一个当前时间把旧凭证放过去。</p>
+     */
+    private static String issuedAtSeconds(Claims claims) {
+        Date issuedAt = claims.getIssuedAt();
+        return issuedAt == null ? "" : String.valueOf(issuedAt.getTime() / 1000L);
+    }
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
@@ -127,6 +139,8 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             httpHeaders.remove("X-User-Id");
             httpHeaders.remove("X-User-Name");
             httpHeaders.remove("X-User-Token");
+            // 凭证签发时间：下游拦截器用它比对用户级失效线（封禁/改密），伪造值必须剥离
+            httpHeaders.remove("X-User-Token-Iat");
             httpHeaders.remove("X-Internal-Token");
             httpHeaders.remove("X-Real-IP");
             if (!trustForwardedFor) {
@@ -179,6 +193,7 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             ServerHttpRequest newRequest = requestBuilder
                     .header("X-User-Id", String.valueOf(userId))
                     .header("X-User-Name", userName)
+                    .header("X-User-Token-Iat", issuedAtSeconds(claims))
                     .header("X-Internal-Token", internalToken)
                     .header("X-User-Token",token)
                     .build();
@@ -201,16 +216,21 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             return rejectUnauthorized(exchange);
         }
 
-        Long userId = jwtUtil.getUserIdFromToken(token);
-        String userName = jwtUtil.getUserNameFromToken(token);
+        // 只解析一次：userId / userName / iat 都取自同一份 claims
+        Claims claims = jwtUtil.parseToken(token);
+        Long userId = Long.parseLong(claims.getSubject());
+        Object userNameClaim = claims.get("userName");
+        String userName = userNameClaim == null ? "" : userNameClaim.toString();
 
 
         // 6. 在同一个 requestBuilder 上继续添加请求头
-        // X-User-Token：下游登出校验（redis 黑名单）需要原始 token，客户端伪造值已在步骤 2 剥离
+        // X-User-Token：下游登出/失效线校验需要原始 token，客户端伪造值已在步骤 2 剥离
+        // X-User-Token-Iat：下游无法自行解析 JWT（多数服务没有 jwt.secret），由网关透传签发时间
         ServerHttpRequest newRequest = requestBuilder
                 .header("X-User-Id", String.valueOf(userId))
-                .header("X-User-Name", String.valueOf(userName))
+                .header("X-User-Name", userName)
                 .header("X-User-Token", token)
+                .header("X-User-Token-Iat", issuedAtSeconds(claims))
                 .header("X-Internal-Token", internalToken)
                 .build();
 

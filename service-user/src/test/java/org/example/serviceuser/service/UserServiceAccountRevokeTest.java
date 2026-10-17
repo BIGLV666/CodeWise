@@ -61,7 +61,6 @@ class UserServiceAccountRevokeTest {
     private static final long USER_ID = 1L;
     private static final String USER_NAME = "alice";
     private static final String RAW_PASSWORD = "correct-password";
-    private static final long BLACKLIST_TTL_DAYS = 7L;
 
     @Spy private JwtUntil jwtUntil = new JwtUntil();
     @Mock private UserMailService userMailService;
@@ -104,8 +103,8 @@ class UserServiceAccountRevokeTest {
 
         service.freezeUser("违规测试", RAW_PASSWORD);
 
-        verify(valueOperations).set(RedisContext.LOGOUT_TOKEN + ":" + token, token,
-                BLACKLIST_TTL_DAYS, TimeUnit.DAYS);
+        verify(valueOperations).set(RedisContext.logoutTokenKey(token), token,
+                RedisContext.SESSION_REVOKE_TTL_SECONDS, TimeUnit.SECONDS);
         assertEquals(0, user.getStatus(), "冻结应把 status 置为 0");
         assertEquals("违规测试", user.getBanReason());
 
@@ -169,8 +168,8 @@ class UserServiceAccountRevokeTest {
 
         service.deleteUser();
 
-        verify(valueOperations).set(RedisContext.LOGOUT_TOKEN + ":" + token, token,
-                BLACKLIST_TTL_DAYS, TimeUnit.DAYS);
+        verify(valueOperations).set(RedisContext.logoutTokenKey(token), token,
+                RedisContext.SESSION_REVOKE_TTL_SECONDS, TimeUnit.SECONDS);
         assertEquals(2, user.getStatus(), "注销应把 status 置为 2");
 
         InOrder order = inOrder(valueOperations, userMapper);

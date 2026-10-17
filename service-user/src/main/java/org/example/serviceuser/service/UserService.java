@@ -22,9 +22,12 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.time.Instant;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -46,6 +49,9 @@ public class UserService {
     private RabbitTemplate rabbitTemplate;
     @Autowired
     private RedisTemplate<String,Object> redisTemplate;
+    /** 失效线专用：值必须是裸字符串（纯 epoch 秒），不能被 Jackson 值序列化器加引号。 */
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
     private final static String USER_CODE_KEY = "user_code";
     private final static String USER_CODE_COOLDOWN_KEY = "user_code_cooldown";
     private final static String USER_CODE_ATTEMPT_KEY = "user_code_attempt";
@@ -57,6 +63,8 @@ public class UserService {
     private final static long MAX_VERIFY_ATTEMPTS = 5;
     private final static SecureRandom SECURE_RANDOM = new SecureRandom();
     private final static int MAX_EMAIL_LENGTH = 254;
+    /** 一次封禁允许的最大天数（上界防止 LocalDateTime.plusDays 溢出成 500）。 */
+    private final static int MAX_BAN_DAYS = 3650;
     /** 封禁提示中的解封时间展示格式，避免把 LocalDateTime 原始值透给用户。 */
     private final static DateTimeFormatter BAN_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
@@ -313,6 +321,7 @@ public class UserService {
         }
     }
     //修改密码
+    @Transactional(rollbackFor = Exception.class)
     public void updatePassword(String oldPassword,String newPassword){
         User user= userMapper.selectById(UserContext.getUserId());
         if(user==null){
@@ -326,6 +335,10 @@ public class UserService {
         if(i!=1){
             throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
+
+        //用户修改密码后，所有已签发凭证必须作废（含其它设备）：写用户级失效线，
+        //本人随后重新登录拿到的新 token iat 更晚，不受影响
+        revokeIssuedTokens(UserContext.getUserId(),UserErrorCode.SESSION_REVOKE_FAILED);
     }
     /**
      * 找回密码第一步：仅发送验证码。
@@ -351,6 +364,7 @@ public class UserService {
      * 找回密码第二步：校验验证码并写入新密码。
      * 新密码在这一步随验证码一起提交，两者缺一不可。
      */
+    @Transactional(rollbackFor = Exception.class)
     public void updatePasswordForCode(String n, String code, String newPassword){
         validateEmailLength(n);
         if (newPassword == null || newPassword.length() < 6) {
@@ -368,6 +382,12 @@ public class UserService {
         if(r!=1){
             throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
+        //用户修改密码后，所有已签发凭证必须作废：写用户级失效线。
+        //注意：本入口（/api/user/updatefromcode）是公开路径，UserContext 里没有登录身份，
+        //必须用刚刚改密的那条记录 userId，否则会写成 revoke_before:null —— 既拦不住该用户，
+        //还会留下一个对谁都无效的死键。
+        revokeIssuedTokens(user.getUserId(),UserErrorCode.SESSION_REVOKE_FAILED);
+
     }
     public UserDto getUserById(Long userId) {
         User user = userMapper.selectById(userId);
@@ -422,37 +442,93 @@ public class UserService {
     }
 
     /**
+     *<P> 让某用户「已签发的凭证全部失效」，封禁 / 改密 / 全端下线共用。
+     *
+     *   实现方式是写一条用户级失效线 {@code revoke_before:<userId> = 当前 epoch 秒}，
+     *   由 {@code UserAuthInterceptor} 拿网关注入的 JWT {@code iat} 与之比较：
+     *   {@code iat <= 失效线} 的凭证一律拒绝（同时把该 token 兜底落进 token 桶）。
+     *
+     *   这样处理的好处：
+     *   1. 一次覆盖该用户<b>所有</b>已签发凭证（含多端、含封禁期间一次都没用过的），
+     *      不需要服务端维护 token -> userId 索引；
+     *   2. 重新登录签发的 token {@code iat} 更晚，天然可用 —— 所以<b>解封不需要任何清理动作</b>，
+     *      也就不会出现「忘记调用解封接口导致用户再也进不来」的问题。</P>
+     * @param userId 被操作用户id，此id需要显示传参，否则管理封禁用户会导致自己被封禁。
+     * @param userErrorCode User模块的自定义错误码，失败时抛出。
+     * @throws BizException 封禁失败的错误,内容为传参中的{@link UserErrorCode}
+     */
+    public void revokeIssuedTokens(Long userId,UserErrorCode userErrorCode){
+        //此方法需要调用方自行校验权限，在此方法不做校验
+        if(userId==null){
+            //公开入口（找回密码等）没有登录身份，传空说明调用方取错了对象：
+            //直接失败，避免写出 revoke_before:null 这种对任何人都无效的死键
+            log.error("revokeIssuedTokens 收到空 userId，调用方未指定被操作用户");
+            throw new BizException(userErrorCode);
+        }
+
+        String key=RedisContext.revokeBeforeKey(userId);
+        //TTL 必须不小于凭证生命期（jwt.expiration，默认 24h），否则失效线先过期、旧 token 还有效。
+        //用 StringRedisTemplate 写纯数字：Lua 里要 GET 后用 tonumber 解析，
+        //经 Jackson 值序列化器会变成带引号的 "\"1234567\""，tonumber 直接拿到 nil。
+        try{
+            stringRedisTemplate.opsForValue().set(key,String.valueOf(Instant.now().getEpochSecond()),
+                    RedisContext.SESSION_REVOKE_TTL_SECONDS,TimeUnit.SECONDS);
+        }catch (Exception e){
+            log.error("写入用户级凭证失效线失败{}",e.getMessage(),e);
+            throw new BizException(userErrorCode,e);
+        }
+    }
+
+
+
+    /**
      * 管理员冻结用户账号，设置 status 为 0，表示封禁状态。
      * 仅允许管理员操作，用户无法直接冻结其他用户。
      * 该操作可逆，管理员可以通过解封操作恢复用户账号。
+     * 该方法必须为事务，如果将用户移入redis失败抛出异常回滚通知管理，
+     * 管理来尝试重试。而不能入库成功但是移入redis失败用户可以带着封禁token继续请求。
+     *
+     * <p>已签发 token 的作废走 {@link #revokeIssuedTokens(Long, UserErrorCode)}：写用户级失效线，
+     * 拦截器比对 JWT {@code iat} 一次性覆盖该用户所有旧凭证（含多端），
+     * 因此不需要（也无法）在服务端按 userId 反查全部 token；解封也无需清理。</p>
+     *
+     * <p>封禁通知邮件按 best-effort 处理：它走 MQ，属于通知而非封禁本身的一部分，
+     * 邮件通道故障不该把「管理员已经作出的封禁」回滚掉（否则会出现「DB 没封成、
+     * Redis 封禁键却已写入」的不一致）。</p>
+     *
      * @param userId 冻结用户id
      * @param banTime 冻结时间，单位为天
      */
+    @Transactional(rollbackFor = Exception.class)
     public void banUser(Long userId,Integer banTime){
-        // TODO(安全): 管理员封禁他人时不会作废对方已签发的 token。
-        //  现有的 logout_token:<token> 黑名单按 token 原文匹配，而这里拿到的是 userId，
-        //  服务端没有 token -> 用户的索引，所以复用不了 blacklistCurrentToken（它作废的是
-        //  请求者自己的凭证，用在这里会把管理员自己踢下线）。
-        //  要覆盖需要按用户维度记录失效时间戳，例如 user_token_invalid_before:<userId> = now，
-        //  由 UserAuthInterceptor 比对 JWT 的 iat（iat <= 该时间戳即视为已失效，同时天然支持
-        //  "改密码后其它会话全部下线"）。在那之前，被封禁用户在 token 自然过期前仍可继续调用接口。
+        if(userId==null){
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
+        }
+        if(banTime==null||banTime<=0||banTime>MAX_BAN_DAYS){
+            //上界防止 plusDays 溢出（LocalDateTime 上限）后变成 500；
+            //重复封禁视为延长封禁期，这里不做拒绝
+            throw new BizException(CommonErrorCode.PARAM_INVALID);
+        }
         LocalDateTime banUntil = LocalDateTime.now().plusDays(banTime);
         int userStatus = 0; // 0 表示封禁状态
         User user = userMapper.selectById(userId);
         if(user==null){
             throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
-        if(user.getStatus()==2){
+        //status 可能为 null，不能直接拆箱比较
+        if(Integer.valueOf(2).equals(user.getStatus())){
             throw new BizException(UserErrorCode.USER_CANCELLED);
         }
         user.setStatus(userStatus);
         user.setUpdateTime(LocalDateTime.now());
         user.setBanTime(banUntil);
+
         int r=userMapper.updateById(user);
         if(r==0){
             throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
-        userMailService.sendBanMail(user);
+        revokeIssuedTokens(userId,UserErrorCode.SESSION_REVOKE_FAILED);
+        sendBanMailQuietly(user);
 
     }
 
@@ -470,9 +546,13 @@ public class UserService {
         if(user==null){
             throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
-        if(user.getStatus()==2){
+        if(Integer.valueOf(2).equals(user.getStatus())){
             throw new BizException(UserErrorCode.USER_CANCELLED);
         }
+        // TODO(安全): 这里只作废"发起请求的这一个会话"，该用户其它设备仍可用到 token 自然过期
+        //  （jwt.expiration，默认 24h）。要与管理员封禁口径一致（全部会话立即失效）
+        //  就改调 revokeIssuedTokens(userId, ...)：它写的是用户级失效线，
+        //  解封/重新登录都不需要额外清理，也没有多端漏封问题。
         // 先作废旧凭证，再落库状态变更：JWT 无状态，网关只验签名不看账号状态，
         // 只有黑名单写成功，"账号已注销"才真的等于"旧 token 立即失效"。
         // 若顺序反过来，一旦黑名单写失败就会留下「账号已注销但旧 token 还能用」的窗口；
@@ -509,6 +589,8 @@ public class UserService {
         if(!PasswordEncoding.matches(password,user.getPassword())){
             throw new BizException(UserErrorCode.PASSWORD_INCORRECT);
         }
+        // TODO(安全): 同 deleteUser —— 只作废当前会话，其它设备仍可用到 token 过期；
+        //  若自助冻结也要求"全部设备立即失效"，改成 revokeIssuedTokens(userId, ...) 即可。
         // 密码核验通过后才作废旧凭证（校验失败不该把人踢下线），
         // 且先作废再落库：账号状态变更与凭证失效保持一致，
         // 不留「已冻结但旧 token 还能用」的窗口，理由同 deleteUser。
@@ -532,12 +614,14 @@ public class UserService {
      * 该操作可逆，管理员可以通过冻结操作再次冻结用户账号。
      * @param userId 操作对象
      */
+    @Transactional(rollbackFor = Exception.class)
     public void unBanUser(Long userId){
         User user = userMapper.selectById(userId);
         if(user==null){
             throw new BizException(UserErrorCode.USER_NOT_FOUND);
         }
-        if(user.getStatus()!=0){
+        //status 可能为 null，不能直接拆箱比较
+        if(!Integer.valueOf(0).equals(user.getStatus())){
             throw new BizException(UserErrorCode.USER_NOT_FROZEN);
         }
         user.setStatus(1);
@@ -548,7 +632,33 @@ public class UserService {
         if(r==0){
             throw new BizException(CommonErrorCode.DATA_OPERATION_FAILED);
         }
-        userMailService.sendUnbanMail(user);
+        //解封不需要清理 Redis：失效线保留（清掉会让封禁期间没用过的旧 token 复活），
+        //用户重新登录签发的 token iat 更晚，自然通过校验。
+        //通知邮件走 best-effort，邮件通道故障不影响解封结果
+        sendUnbanMailQuietly(user);
+    }
+
+    /**
+     * 封禁通知邮件（best-effort）。
+     *
+     * <p>邮件走 MQ，只承担「告知」职责：通道故障时只落日志，绝不回滚已经完成的封禁，
+     * 也不把异常抛给管理员（否则 DB 回滚而 Redis 封禁键已写入，状态反而不一致）。</p>
+     */
+    private void sendBanMailQuietly(User user){
+        try{
+            userMailService.sendBanMail(user);
+        }catch (Exception e){
+            log.error("封禁通知邮件发送失败，已忽略: userId={}",user.getUserId(),e);
+        }
+    }
+
+    /** 解封通知邮件（best-effort），口径同 {@link #sendBanMailQuietly(User)}。 */
+    private void sendUnbanMailQuietly(User user){
+        try{
+            userMailService.sendUnbanMail(user);
+        }catch (Exception e){
+            log.error("解封通知邮件发送失败，已忽略: userId={}",user.getUserId(),e);
+        }
     }
 
     /**
@@ -613,8 +723,8 @@ public class UserService {
 
         //把token添加到redis做持久化
         try {
-            String key = RedisContext.LOGOUT_TOKEN + ":" + token;
-            redisTemplate.opsForValue().set(key, token, 7, TimeUnit.DAYS);
+            String key = RedisContext.logoutTokenKey(token);
+            redisTemplate.opsForValue().set(key, token, RedisContext.SESSION_REVOKE_TTL_SECONDS, TimeUnit.SECONDS);
         }catch (Exception e){
             log.error("凭证写入黑名单失败{}",e.getMessage(),e);
             throw new BizException(persistFailedCode, e);

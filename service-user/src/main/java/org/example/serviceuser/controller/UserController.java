@@ -42,7 +42,7 @@ public class UserController {
         return Result.success("success");
     }
     @PostMapping("/login")
-    @RateLimit(limit = 60, window = 60)
+    @RateLimit(limit = 10, window = 60)
     @AsyncAction(value = "user-login")
     public Result<Map<String,Object>> login(@RequestParam String username, @RequestParam String password){
         return  Result.success(userService.login(username,password));
@@ -68,7 +68,7 @@ public class UserController {
 
 
     @PostMapping("/emailloginforcode")
-    @RateLimit(limit = 60, window = 60)
+    @RateLimit(limit = 10, window = 60)
     public Result<Map<String,Object>> emailLoginForCode(@RequestParam String email, @RequestParam String code){
         return Result.success(userService.emailLoginForCode(email,code));
     }
@@ -78,7 +78,7 @@ public class UserController {
      * password 已不再于此步生效，保留入参仅为兼容旧客户端。
      */
     @PostMapping("/updatepasswordforemail")
-    @RateLimit(limit = 20, window = 60)
+    @RateLimit(limit = 2, window = 60)
     public Result<String> updatePasswordForEmail(@RequestParam String email,
                                                  @RequestParam(required = false) String password){
         userService.updatePasswordForEmail(email,password);
