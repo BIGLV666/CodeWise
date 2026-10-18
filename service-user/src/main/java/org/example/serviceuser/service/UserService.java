@@ -549,15 +549,11 @@ public class UserService {
         if(Integer.valueOf(2).equals(user.getStatus())){
             throw new BizException(UserErrorCode.USER_CANCELLED);
         }
-        // TODO(安全): 这里只作废"发起请求的这一个会话"，该用户其它设备仍可用到 token 自然过期
-        //  （jwt.expiration，默认 24h）。要与管理员封禁口径一致（全部会话立即失效）
-        //  就改调 revokeIssuedTokens(userId, ...)：它写的是用户级失效线，
-        //  解封/重新登录都不需要额外清理，也没有多端漏封问题。
         // 先作废旧凭证，再落库状态变更：JWT 无状态，网关只验签名不看账号状态，
         // 只有黑名单写成功，"账号已注销"才真的等于"旧 token 立即失效"。
         // 若顺序反过来，一旦黑名单写失败就会留下「账号已注销但旧 token 还能用」的窗口；
         // 现在最坏情况只是状态更新失败、用户需要重新登录一次。
-        blacklistCurrentToken(UserErrorCode.SESSION_REVOKE_FAILED);
+        revokeIssuedTokens(user.getUserId(),UserErrorCode.SESSION_REVOKE_FAILED);
         user.setStatus(2);
         user.setUpdateTime(LocalDateTime.now());
         int r=userMapper.updateById(user);
@@ -589,12 +585,11 @@ public class UserService {
         if(!PasswordEncoding.matches(password,user.getPassword())){
             throw new BizException(UserErrorCode.PASSWORD_INCORRECT);
         }
-        // TODO(安全): 同 deleteUser —— 只作废当前会话，其它设备仍可用到 token 过期；
-        //  若自助冻结也要求"全部设备立即失效"，改成 revokeIssuedTokens(userId, ...) 即可。
         // 密码核验通过后才作废旧凭证（校验失败不该把人踢下线），
         // 且先作废再落库：账号状态变更与凭证失效保持一致，
         // 不留「已冻结但旧 token 还能用」的窗口，理由同 deleteUser。
-        blacklistCurrentToken(UserErrorCode.SESSION_REVOKE_FAILED);
+        revokeIssuedTokens(user.getUserId(),UserErrorCode.SESSION_REVOKE_FAILED);
+
         user.setStatus(0);
 
         user.setUpdateTime(LocalDateTime.now());
