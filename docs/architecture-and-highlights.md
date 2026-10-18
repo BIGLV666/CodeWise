@@ -338,7 +338,9 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 - 方案：自研 starter `io.github.biglv666:api-governance-spring-boot-starter:0.5.0`
   （根 POM 统一管版本），6 个业务服务（user/question/review/community/message/ai）本地 yaml 显式
   `api.governance.enabled: true`；judge 也标注了 @RateLimit 但本地 yaml 未显式配置（依赖 Nacos 下发）；
-  网关不接入该 starter 配置，只做头清洗与路由。
+  网关不接入该 starter 配置，只做头清洗与路由，也**不声明该依赖**（starter 是 Servlet 形态，
+  `0.5.0` 起自动配置类引用 `jakarta.servlet.Filter`，网关无 servlet API 会在启动自省时抛
+  `NoClassDefFoundError` 并反复重启——网关 `pom.xml` 有注释护栏）。
 - **@RateLimit 声明式限流**：168 个 controller 方法标注；Redis 滑动窗口，按端点配额，
   未标注端点默认 60 次/分钟（`default-limit: 60` + `default-window: 60`）——`-1` 才是"只对显式标注的路由生效"，
   即覆盖注解的免费额度；超限返回 429 + 各服务定制中文文案。
