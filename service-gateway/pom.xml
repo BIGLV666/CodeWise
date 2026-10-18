@@ -67,11 +67,11 @@
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
 
-        <!-- API 治理 -->
-        <dependency>
-            <groupId>io.github.biglv666</groupId>
-            <artifactId>api-governance-spring-boot-starter</artifactId>
-        </dependency>
+        <!-- 注意：不要在此引入 api-governance-spring-boot-starter。
+             该 starter 是 Servlet 形态（自动配置类签名引用 jakarta.servlet.Filter），
+             而网关是 WebFlux（类路径没有 servlet API）：0.5.0 起 Spring 在自省其
+             ApiGovernanceAutoConfiguration 时会抛 NoClassDefFoundError: jakarta/servlet/Filter，
+             导致网关启动即失败。网关本身不使用该 starter 的任何能力。 -->
 
         <!-- 测试 -->
         <dependency>
