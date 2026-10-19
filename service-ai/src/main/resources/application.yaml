@@ -30,6 +30,16 @@ server:
   port: 8085
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
+  # 函数题导入时的题面重写：走「按身份借用端点」这条路（不走 AUTO）。
+  # 默认端点 opencode-go 是订阅制上游、每次请求要求会话头，所以必须指定端点而非让 AUTO 轮转。
+  # session 只需跨轮稳定（同批导入复用一个会话，复用上游 prompt cache），服务端会把它规整成 ses_ 形状。
+  function-description:
+    provider: ${FUNCTION_DESCRIPTION_PROVIDER:opencode-go}
+    # 留空 = 用端点默认模型；填了就用指定模型（形如 deepseek-v4.1-flash）
+    model: ${FUNCTION_DESCRIPTION_MODEL:}
+    session: ${FUNCTION_DESCRIPTION_SESSION:codewise-function-description}
+    max-tokens: 8192
+    max-description-length: 20000
 
 # AI 端点：由 Nacos 下发 ai.models，每条配置按 type 选一个 AiProviderCreator 生成端点。
 # 示例（真实值放 Nacos，勿提交密钥）：

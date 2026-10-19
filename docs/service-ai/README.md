@@ -409,6 +409,8 @@ Authorization: Bearer <token>
 - `String`：长度 `0-20`，内容为大小写字母和数字
 - `int[]`：长度 `0-20`，元素范围 `[-100, 100]`
 - `String[]`：长度 `0-10`，单个字符串长度 `0-10`
+- `int[][]`：行数 `0-5`、每行 `0-5` 个元素，元素范围 `[-100, 100]`
+- `ListNode`：节点数 `0-20`，节点值 `[-100, 100]`，按整数数组下发（判题侧还原成链表）
 - `TreeNode`：约 10% 概率空树，否则 1-15 个节点、节点值 `[-100, 100]`，按层序数组（含 null 空洞）输出
 
 随机生成只保证参数类型正确，不保证满足题目的跨参数业务约束。例如“两数之和一定存在答案”这类约束，后续需要增加题目级生成规则。
@@ -435,3 +437,29 @@ service-question LeetCodeArtifactImportService（异步任务）
 ```
 
 service-ai 侧不落库、不感知产物目录；模型只生成「生成器 + 标准答案」两段可执行源码，绝不直接枚举测试样例，样例数量与种子由 service-question 在运行时传给 Generator。
+
+---
+
+## 函数题题面重写（导入题库用）
+
+供 `service-question` 批量导入函数题时调用，输入是调用方自有的素材（已验证解法、参考实现、作者笔记），输出是**原创表述**的题面：
+
+```text
+service-question FunctionBatchImportService（异步任务）
+  -> AiDescriptionFeignClient：POST /api/ai/internal/function-description
+     请求头 X-CodeWise-Internal-Token = CODEWISE_INTERNAL_TOKEN（与 UserAuthInterceptor 的 X-Internal-Token 同值）
+  -> service-ai FunctionDescriptionService：
+     AiRequest.provider(指定端点, prompt, maxTokens).withSessionRef(固定会话种子).withModel(可选模型)
+```
+
+关键点：
+
+- **走指定端点，不走 AUTO**：默认端点 `opencode-go` 是订阅制上游（每次请求要 `x-opencode-session`），
+  已被刻意排除在 AUTO 轮转之外；这里按身份借用，并用固定种子派生会话 id（`OpenCodeSessionId`）复用上游 prompt cache。
+- 配置项：`codewise.function-description.provider`（默认 `opencode-go`）、
+  `codewise.function-description.model`（留空用端点默认模型）、`session`、`max-tokens`、`max-description-length`。
+- 提示词要求：只依据素材还原题意、禁止复述第三方题面/题号/平台名、禁止编造样例（样例由平台用真实执行结果回填）、
+  约束必须与平台随机数据规模一致。
+- 返回 `description/inputDesc/outputDesc/hint/difficulty/tags` 与 **`parameterRanges`**（参数取值域建议）：
+  后者让「题面写的约束」与「实际生成的用例」一致（例如 depth 必须是正整数、链表节点是 0~9 的数字）。
+- 不落库、不感知题目；service-ai 只负责把素材变成文案与取值域。

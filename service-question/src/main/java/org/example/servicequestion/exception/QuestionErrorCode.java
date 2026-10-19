@@ -51,6 +51,10 @@ public enum QuestionErrorCode implements ErrorCode {
     QUESTION_TEXT_TOO_LONG(4000231, "%s内容过长，请缩短后重试"),
     QUESTION_TIME_LIMIT_INVALID(4000232, "时间限制必须为正整数"),
     QUESTION_MEMORY_LIMIT_INVALID(4000233, "内存限制必须为正整数"),
+    BATCH_IMPORT_ITEMS_REQUIRED(4000234, "批量导入的题目列表不能为空"),
+    BATCH_IMPORT_LIMIT_EXCEEDED(4000235, "单次最多导入 %s 道题目，请分批提交"),
+    BATCH_IMPORT_ITEM_INCOMPLETE(4000236, "第 %s 道题的导入信息不完整，请检查标题、函数签名与解法代码"),
+    SAMPLE_PROMOTE_COUNT_INVALID(4000237, "提升为样例的数量需在 %s 到 %s 之间"),
 
     // ---- 权限/可见性（403，账号状态语义为本服务自有）----
     ACCOUNT_UNAVAILABLE(4030201, "当前账号不可用，请联系管理员"),
@@ -72,6 +76,7 @@ public enum QuestionErrorCode implements ErrorCode {
     TESTCASE_DUPLICATED(4090204, "相同输入与输出的测试用例已存在，请勿重复添加"),
     RANDOM_INPUT_INSUFFICIENT(4090205, "本次生成的测试输入重复较多，请更换随机种子后重试"),
     SUBMIT_RECORD_STATE_CONFLICT(4090206, "提交记录状态已变化，稍后将自动重试"),
+    SAMPLE_PROMOTE_NO_CASE(4090207, "该题还没有可用于展示的测试用例，请先生成测试用例"),
 
     // ---- 系统内部/判题与生成链路（500，面向用户不带技术细节）----
     QUESTION_TOTAL_QUERY_FAILED(5000201, "题目总数加载失败，请稍后重试"),
@@ -89,7 +94,8 @@ public enum QuestionErrorCode implements ErrorCode {
     ARTIFACT_WORKSPACE_FAILED(5000213, "生成任务准备工作目录失败，请稍后重试"),
     ARTIFACT_STATUS_READ_FAILED(5000214, "生成任务状态读取失败，请稍后重试"),
     QUESTION_IMPORT_FAILED(5000215, "题目导入失败，请稍后重试"),
-    QUESTION_COUNT_UPDATE_FAILED(5000216, "题目统计更新失败，稍后将自动重试");
+    QUESTION_COUNT_UPDATE_FAILED(5000216, "题目统计更新失败，稍后将自动重试"),
+    DESCRIPTION_GENERATE_FAILED(5000217, "题面生成失败，请稍后重试或直接补充题面后再导入");
 
     private final int code;
     private final String message;

@@ -36,6 +36,7 @@ public enum AiErrorCode implements ErrorCode {
     ARTIFACT_DESC_REQUIRED(4000621, "题目描述为空，无法生成测试数据，请补充后重试"),
     FUNCTION_SIGNATURE_INCOMPLETE(4000622, "函数签名信息不完整，请补充后重试"),
     MODEL_NOT_SERVED(4000623, "该模型暂不支持，请选择其他模型"),
+    DESCRIPTION_SOLUTION_REQUIRED(4000624, "缺少已验证的解法代码，无法生成题面，请补充后重试"),
 
     // ===== 401：调用凭证 =====
     INTERNAL_CALL_UNAUTHORIZED(4010601, "调用凭证无效，请联系管理员检查服务配置"),
@@ -74,7 +75,8 @@ public enum AiErrorCode implements ErrorCode {
     API_KEY_ENCRYPT_FAILED(5000616, "模型密钥保存失败，请稍后重试"),
     API_KEY_DECRYPT_FAILED(5000617, "模型密钥读取失败，请重新保存模型配置"),
     SUMMARY_UPDATE_FAILED(5000618, "会话摘要更新失败，稍后将自动重试"),
-    PROVIDER_TYPE_UNSUPPORTED(5000619, "该模型接入类型暂不支持，请检查模型配置");
+    PROVIDER_TYPE_UNSUPPORTED(5000619, "该模型接入类型暂不支持，请检查模型配置"),
+    DESCRIPTION_RESULT_INVALID(5000620, "生成的题面内容不完整，请稍后重试");
 
     private final int code;
     private final String message;

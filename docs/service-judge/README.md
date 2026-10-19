@@ -256,3 +256,12 @@ DELETE /api/judge/containers/{language}/{containerId}
 - `codewise.judge.consumer-concurrency`（提交队列消费并发，默认 2）须与容器池容量同步上调，否则池容器闲置或排队空转。
 - `outboxpro.enabled: true`，与 question 共用 `codewise_question` 库的 `outboxpro_*` 表；`outboxpro.producer.poll-interval: 1000`（纯毫秒，Boot 3.2.4 不支持 `"1000ms"` 写法）。
 - Docker 部署（`deploy/docker-compose.yml`）：service-judge 挂载宿主 `/var/run/docker.sock`（DooD），`JUDGE_CONCURRENCY` 环境变量映射消费并发；`judge-base` 一次性任务负责构建 `codewise-java-judge:17`（可用 `JUDGE_IMAGE` 覆盖镜像名）。
+
+## 函数模式批量用例的两个约定
+
+- **每个用例文件都以换行结尾**（`cases/case-XXXXXX.txt`）：Main 用 `readLine()` 读参数，
+  单参数且取值为空串（完全合法的边界用例）时，0 字节文件会让 `readLine()` 返回 `null`，
+  被测代码随即 NPE，整个批量会提前中断，调用方只看到「执行结果数量不完整」。
+- **沙箱按 JDK 17 编译**（镜像 `codewise-java-judge:17`，`javac` 不带 `--release`）：使用 JDK 21 API
+  （`List.removeLast` / `getLast` 等）的解法会在编译阶段失败；批量导入工具的本地闸门会先按 17 编一遍，
+  避免把这类题导入后才发现。

@@ -583,14 +583,19 @@ public class JudgeService implements JudgeInterface {
 
     /**
      * 将全部用例输入打包写入工作区 cases/case-XXXXXX.txt。
+     *
+     * <p>每个文件都以换行结尾：函数模式的 Main 用 {@code readLine()} 读参数，
+     * 单参数且取值为空串时（完全合法的边界用例，如空字符串）文件若是 0 字节，
+     * {@code readLine()} 会返回 null，被测代码随即 NPE——整个批量会因此提前中断，
+     * 调用方只看到「执行结果数量不完整」。补一个换行让空串读成 ""，而不是 null。</p>
      */
-    private void writeFunctionBatchInputs(Path workspace, List<TestDto> testCases) throws IOException {
+    static void writeFunctionBatchInputs(Path workspace, List<TestDto> testCases) throws IOException {
         Path casesDirectory = Files.createDirectories(workspace.resolve("cases"));
         for (int index = 0; index < testCases.size(); index++) {
             String input = testCases.get(index).getInputData();
             Files.writeString(
                     casesDirectory.resolve("case-%06d.txt".formatted(index + 1)),
-                    input == null ? "" : input,
+                    (input == null ? "" : input) + System.lineSeparator(),
                     StandardCharsets.UTF_8
             );
         }

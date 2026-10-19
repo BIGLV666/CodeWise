@@ -139,7 +139,7 @@ class FunctionTestCaseGenerationServiceTest {
                 caseDataConverter,
                 functionQuestionParseService,
                 redisTemplate,
-                rabbitTemplate
-        );
+                rabbitTemplate,
+                new ObjectMapper());
     }
 }

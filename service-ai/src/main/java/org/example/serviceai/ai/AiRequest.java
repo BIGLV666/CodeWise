@@ -43,6 +43,16 @@ public record AiRequest(
         return new AiRequest(prompt, maxTokens, target, modelName, sessionRef);
     }
 
+    /**
+     * 附加/覆盖模型名。
+     *
+     * <p>指定端点的路径默认用端点自己的默认模型；需要固定某个模型时（例如订阅制端点
+     * 虽声明了默认模型，但业务只允许用其中某一个）用它显式指定。</p>
+     */
+    public AiRequest withModel(String modelName) {
+        return new AiRequest(prompt, maxTokens, target, modelName, sessionRef);
+    }
+
     /** AUTO：什么都不选，平台按服务商轮转，模型用被借到端点的默认模型。 */
     public static AiRequest auto(String prompt) {
         return new AiRequest(prompt, DEFAULT_MAX_TOKENS, new AiTarget.PlatformAuto(), null, null);
