@@ -87,7 +87,11 @@ public class FunctionRandomInputGenerator {
         return switch (type) {
             case "int" -> String.valueOf((int) value(random, parameter, -1000, 1000));
             case "long" -> String.valueOf(value(random, parameter, -100_000L, 100_001L - 1));
-            case "String" -> randomString(random, size(random, parameter, "minSize", "maxSize", 0, 20));
+            case "String" -> randomString(
+                    random,
+                    size(random, parameter, "minSize", "maxSize", 0, 20),
+                    charset(parameter)
+            );
             case "int[]", "int []" -> writeJson(randomIntArray(random, parameter));
             case "String[]", "String []" -> writeJson(randomStringArray(random, parameter));
             // 链表与二叉树一样按数组下发（判题侧的 CodeBuild 会把数组还原成节点结构）
@@ -240,18 +244,41 @@ public class FunctionRandomInputGenerator {
         for (int index = 0; index < values.length; index++) {
             values[index] = randomString(
                     random,
-                    size(random, parameter, "elementMinSize", "elementMaxSize", 0, 10)
+                    size(random, parameter, "elementMinSize", "elementMaxSize", 0, 10),
+                    charset(parameter)
             );
         }
         return values;
     }
 
-    private String randomString(Random random, int length) {
+    private String randomString(Random random, int length, String charset) {
         StringBuilder value = new StringBuilder(length);
         for (int index = 0; index < length; index++) {
-            value.append(STRING_CHARACTERS.charAt(random.nextInt(STRING_CHARACTERS.length())));
+            value.append(charset.charAt(random.nextInt(charset.length())));
         }
         return value.toString();
+    }
+
+    /**
+     * 允许的字符集：{@code allowedChars} 里有可打印字符就用它，否则回退默认字符集。
+     *
+     * <p>模型可能给出中文描述（如「数字和字母」）而不是字面量，那种值直接忽略——
+     * 拿它当字符集会生成一堆汉字，反而更糟。</p>
+     */
+    private String charset(JsonNode parameter) {
+        JsonNode node = parameter.get("allowedChars");
+        if (node == null || !node.isTextual()) {
+            return STRING_CHARACTERS;
+        }
+        String raw = node.asText();
+        StringBuilder sanitized = new StringBuilder();
+        for (int index = 0; index < raw.length(); index++) {
+            char current = raw.charAt(index);
+            if (current >= 0x21 && current <= 0x7e && sanitized.indexOf(String.valueOf(current)) < 0) {
+                sanitized.append(current);
+            }
+        }
+        return sanitized.length() == 0 ? STRING_CHARACTERS : sanitized.toString();
     }
 
     private String writeJson(Object value) {

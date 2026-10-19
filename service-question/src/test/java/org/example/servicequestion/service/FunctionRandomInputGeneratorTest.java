@@ -127,6 +127,42 @@ class FunctionRandomInputGeneratorTest {
     }
 
     @Test
+    void honoursAllowedCharacterSet() throws Exception {
+        String config = """
+                [
+                  {"type":"String","name":"s","minSize":1,"maxSize":12,"allowedChars":"123456789#"},
+                  {"type":"String[]","name":"words","minSize":2,"maxSize":2,"elementMinSize":1,"elementMaxSize":4,"allowedChars":"ab"}
+                ]
+                """;
+
+        for (String input : generator.generate(config, 20, 5L)) {
+            String[] lines = input.split("\\R", -1);
+            for (char c : lines[0].toCharArray()) {
+                assertTrue("123456789#".indexOf(c) >= 0, lines[0]);
+            }
+            var words = new ObjectMapper().readTree(lines[1]);
+            for (var word : words) {
+                for (char c : word.asText().toCharArray()) {
+                    assertEquals('a', c == 'a' ? 'a' : c == 'b' ? 'a' : 'x', word.asText());
+                }
+            }
+        }
+    }
+
+    @Test
+    void ignoresNaturalLanguageAllowedChars() throws Exception {
+        // 模型给了中文描述时不能当字符集用，否则会生成汉字
+        String config = "[{\"type\":\"String\",\"name\":\"s\",\"minSize\":3,\"maxSize\":3,\"allowedChars\":\"数字和字母\"}]";
+
+        for (String input : generator.generate(config, 5, 1L)) {
+            assertEquals(3, input.length());
+            for (char c : input.toCharArray()) {
+                assertTrue(c < 0x80, input);
+            }
+        }
+    }
+
+    @Test
     void clampsAbsurdSizesAndSwapsInvertedRanges() throws Exception {
         String config = """
                 [

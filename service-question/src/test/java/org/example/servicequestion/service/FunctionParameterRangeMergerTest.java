@@ -77,6 +77,17 @@ class FunctionParameterRangeMergerTest {
     }
 
     @Test
+    void passesAllowedCharsThrough() throws Exception {
+        FunctionParameterRange range = new FunctionParameterRange();
+        range.setName("s");
+        range.setAllowedChars("123456789#");
+
+        JsonNode merged = objectMapper.readTree(merger.merge("[{\"type\":\"String\",\"name\":\"s\"}]", List.of(range)));
+
+        assertEquals("123456789#", merged.get(0).path("allowedChars").asText());
+    }
+
+    @Test
     void onlySupportedKeysSurvive() throws Exception {
         FunctionParameterRange range = new FunctionParameterRange();
         range.setName("value");

@@ -113,12 +113,13 @@ public class FunctionDescriptionService {
                 不要描述标准输入/输出格式，也不要出现 main 函数、Scanner、System.in 之类的说法。
                 5. 语言为简体中文，使用 Markdown，但不要使用一级标题、不要使用表格；正文 150 ~ 800 字。
                 6. 标签为 2 ~ 5 个中文短语（每个不超过 8 个字），用英文逗号分隔，描述算法或数据结构。
-                7. 还要给出每个参数的<b>取值域建议</b>（parameterRanges）：你在题面里写了什么约束，就把它翻译成可执行的范围，                平台会用它生成测试数据，保证数据与题面一致。仅在该参数确实有约束（如「正整数」「数字 0~9」「长度不超过 100」）时才给，                数值参数用 min/max，长度/个数/行数/节点数用 minSize/maxSize；二维数组的列数用 innerMinSize/innerMaxSize；                字符串数组里单个串的长度用 elementMinSize/elementMaxSize。不要给出比上面「数据范围」更大的数量级。
+                7. 还要给出每个参数的<b>取值域建议</b>（parameterRanges）：你在题面里写了什么约束，就把它翻译成可执行的范围，                平台会用它生成测试数据，保证数据与题面一致。仅在该参数确实有约束（如「正整数」「数字 0~9」「长度不超过 100」）时才给，                数值参数用 min/max，长度/个数/行数/节点数用 minSize/maxSize；二维数组的列数用 innerMinSize/innerMaxSize；                字符串数组里单个串的长度用 elementMinSize/elementMaxSize；如果题面限定了字符串只能由某些字符组成（如「只含 1-9 和 #」），                用 allowedChars 把允许的字符逐字列出（例如 "123456789#"，不要写中文描述）。不要给出比上面「数据范围」更大的数量级。
                 8. 只输出 JSON，不要 Markdown 代码块，不要任何解释文字。
 
                 【JSON 格式】
                 {"description":"题面正文","inputDesc":"输入说明","outputDesc":"输出说明","hint":"提示（可空字符串）","difficulty":1,"tags":"数组,哈希表",
-                 "parameterRanges":[{"name":"depth","min":1,"max":1000},{"name":"l1","min":0,"max":9,"minSize":1,"maxSize":8}]}
+                 "parameterRanges":[{"name":"depth","min":1,"max":1000},{"name":"l1","min":0,"max":9,"minSize":1,"maxSize":8},
+                 {"name":"s","minSize":1,"maxSize":50,"allowedChars":"123456789#"}]}
                 """.formatted(
                 safe(request.getTitle()),
                 safe(request.getClassName()),
@@ -198,6 +199,8 @@ public class FunctionDescriptionService {
             range.setInnerMaxSize(intOrNull(item, "innerMaxSize"));
             range.setElementMinSize(intOrNull(item, "elementMinSize"));
             range.setElementMaxSize(intOrNull(item, "elementMaxSize"));
+            String allowedChars = item.path("allowedChars").asText("").trim();
+            range.setAllowedChars(allowedChars.isEmpty() ? null : allowedChars);
             ranges.add(range);
         }
         return ranges;

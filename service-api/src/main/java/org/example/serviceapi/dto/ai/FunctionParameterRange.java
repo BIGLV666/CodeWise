@@ -30,4 +30,11 @@ public class FunctionParameterRange {
     private Integer elementMinSize;
     /** 字符串数组里单个字符串的长度上限。 */
     private Integer elementMaxSize;
+    /**
+     * 允许出现的字符集合（String 参数或 String[] 的每个元素）。
+     *
+     * <p>有些题对字符集有硬约束（如「只含 1-9 和 #」），仅靠长度范围无法表达，
+     * 随机字母会让正确解法抛异常。这里按字面量列出所有允许字符，生成器从中均匀采样。</p>
+     */
+    private String allowedChars;
 }

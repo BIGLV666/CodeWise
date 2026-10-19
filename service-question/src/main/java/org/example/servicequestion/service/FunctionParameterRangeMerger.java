@@ -90,6 +90,9 @@ public class FunctionParameterRangeMerger {
             for (Map.Entry<String, Long> value : values.entrySet()) {
                 entry.put(value.getKey(), value.getValue());
             }
+            if (range.getAllowedChars() != null && !range.getAllowedChars().isBlank()) {
+                entry.put("allowedChars", range.getAllowedChars());
+            }
             merged.add(entry);
         }
         return merged.toString();

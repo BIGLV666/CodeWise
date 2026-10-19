@@ -461,5 +461,6 @@ service-question FunctionBatchImportService（异步任务）
 - 提示词要求：只依据素材还原题意、禁止复述第三方题面/题号/平台名、禁止编造样例（样例由平台用真实执行结果回填）、
   约束必须与平台随机数据规模一致。
 - 返回 `description/inputDesc/outputDesc/hint/difficulty/tags` 与 **`parameterRanges`**（参数取值域建议）：
-  后者让「题面写的约束」与「实际生成的用例」一致（例如 depth 必须是正整数、链表节点是 0~9 的数字）。
+  后者让「题面写的约束」与「实际生成的用例」一致（例如 depth 必须是正整数、链表节点是 0~9 的数字、
+  字符串只能由 `1-9` 与 `#` 组成——字符集用 `allowedChars` 逐字列出，模型给中文描述时会被忽略并回退默认字符集）。
 - 不落库、不感知题目；service-ai 只负责把素材变成文案与取值域。

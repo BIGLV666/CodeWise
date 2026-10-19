@@ -157,19 +157,21 @@ class FunctionDescriptionServiceTest {
                   {"name":"depth","min":1,"max":1000},
                   {"name":"  ","min":2},
                   {"name":"head","min":"zero","minSize":1,"maxSize":8},
+                  {"name":"s","allowedChars":"123456789#"},
                   "not-an-object"
                 ]}
                 """);
 
         var ranges = service.generate(request()).getParameterRanges();
 
-        assertEquals(2, ranges.size());
+        assertEquals(3, ranges.size());
         assertEquals("depth", ranges.get(0).getName());
         assertEquals(1L, ranges.get(0).getMin());
         assertEquals(1000L, ranges.get(0).getMax());
         assertEquals("head", ranges.get(1).getName());
         assertNull(ranges.get(1).getMin());
         assertEquals(8, ranges.get(1).getMaxSize());
+        assertEquals("123456789#", ranges.get(2).getAllowedChars());
     }
 
     @Test
