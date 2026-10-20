@@ -20,8 +20,20 @@ public class AsyncEnricher {
     public AsyncEventEnricher login(){
         log.info("Registered user-login AsyncEventEnricher");
         return (builder, invocation) -> {
-            if (!"user-login".equals(invocation.getAction())
-                    || invocation.getPhase() != AsyncPhase.AFTER_SUCCESS) {
+            if (!"user-login".equals(invocation.getAction())) {
+                return;
+            }
+
+            // 失败阶段拿不到返回结果，只能从方法参数取账号；绝不能把密码写进事件。
+            if (invocation.getPhase() == AsyncPhase.AFTER_ERROR) {
+                Object[] arguments = invocation.getArguments();
+                if (arguments.length > 0 && arguments[0] != null) {
+                    builder.put("username", String.valueOf(arguments[0]));
+                }
+                return;
+            }
+
+            if (invocation.getPhase() != AsyncPhase.AFTER_SUCCESS) {
                 return;
             }
 

@@ -85,4 +85,42 @@ public  class RedisContext {
     public static String revokeBeforeKey(Long userId) {
         return USER_TOKEN_REVOKE_BEFORE + ":" + userId;
     }
+
+    //===============登录失败风控=========================
+    /**
+     * 登录失败滑动窗口（ZSET）：score 为 Redis TIME 毫秒，member 为单次请求的唯一标识。
+     *
+     * <p>窗口只在登录失败时写入，成功登录会整体删除；无新失败后由 PEXPIRE 自然过期。</p>
+     */
+    public static final String LOGIN_FAIL_WINDOW_KEY = "login:fail:window";
+
+    /**
+     * 风控次数（STRING，纯数字）：每次滑动窗口达到阈值时 INCR，成功登录时删除。
+     *
+     * <p>TTL 为 24 小时滚动续期，避免长期不登录的账号把档位永久累积到最高档。</p>
+     */
+    public static final String LOGIN_RISK_COUNT_KEY = "login:risk:count";
+
+    /**
+     * 登录冻结（STRING，冻结到期 epoch 秒）：TTL 即本次冻结剩余时长。
+     *
+     * <p>与 {@link #revokeBeforeKey(Long)} 分离：失效线负责让旧 token 失效（TTL 必须覆盖
+     * token 生命期），冻结 key 负责表达「本次风控持续多久」，两者不能共用一个 TTL。</p>
+     */
+    public static final String LOGIN_FREEZE_KEY = "login:freeze";
+
+    /** 登录失败滑动窗口 key。 */
+    public static String loginFailWindowKey(Long userId) {
+        return LOGIN_FAIL_WINDOW_KEY + ":" + userId;
+    }
+
+    /** 登录风控次数 key。 */
+    public static String loginRiskCountKey(Long userId) {
+        return LOGIN_RISK_COUNT_KEY + ":" + userId;
+    }
+
+    /** 登录冻结 key。 */
+    public static String loginFreezeKey(Long userId) {
+        return LOGIN_FREEZE_KEY + ":" + userId;
+    }
 }
