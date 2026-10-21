@@ -123,4 +123,25 @@ public  class RedisContext {
     public static String loginFreezeKey(Long userId) {
         return LOGIN_FREEZE_KEY + ":" + userId;
     }
+
+    /**
+     * 登录账号元数据缓存 key（STRING）：value 为 {@code userId|status}，账号不存在时缓存 {@code 0}。
+     *
+     * <p>登录失败风控每次都要把账号换成 userId；缓存后失败链路不再回库，
+     * 只有缓存未命中（或 Redis 故障降级）时才查一次数据库。</p>
+     */
+    public static final String LOGIN_USER_META_KEY = "login:user:meta";
+
+    /** 登录风控邮件节流 key（STRING）：SET NX EX，避免攻击者反复触发把用户邮箱打爆。 */
+    public static final String LOGIN_RISK_MAIL_KEY = "login:risk:mail";
+
+    /** 登录账号元数据缓存 key。 */
+    public static String loginUserMetaKey(String account) {
+        return LOGIN_USER_META_KEY + ":" + account;
+    }
+
+    /** 登录风控邮件节流 key。 */
+    public static String loginRiskMailKey(Long userId) {
+        return LOGIN_RISK_MAIL_KEY + ":" + userId;
+    }
 }
