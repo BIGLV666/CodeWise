@@ -18,7 +18,6 @@ import org.example.serviceuser.exception.UserErrorCode;
 import org.example.serviceuser.mapper.UserMapper;
 import org.example.serviceuser.until.JwtUntil;
 import org.example.serviceuser.until.PasswordEncoding;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -45,8 +44,6 @@ public class UserService {
     private UserMapper userMapper;
     @Autowired
     private JwtUntil jwtUntil;
-    @Autowired
-    private RabbitTemplate rabbitTemplate;
     @Autowired
     private RedisTemplate<String,Object> redisTemplate;
     /** 失效线专用：值必须是裸字符串（纯 epoch 秒），不能被 Jackson 值序列化器加引号。 */
@@ -457,7 +454,7 @@ public class UserService {
      * @param userErrorCode User模块的自定义错误码，失败时抛出。
      * @throws BizException 封禁失败的错误,内容为传参中的{@link UserErrorCode}
      */
-    public void revokeIssuedTokens(Long userId,UserErrorCode userErrorCode){
+    public void revokeIssuedTokens(Long userId, UserErrorCode userErrorCode){
         //此方法需要调用方自行校验权限，在此方法不做校验
         if(userId==null){
             //公开入口（找回密码等）没有登录身份，传空说明调用方取错了对象：

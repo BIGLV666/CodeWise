@@ -42,7 +42,7 @@ public class UserController {
         return Result.success("success");
     }
     @PostMapping("/login")
-    @RateLimit(limit = 10, window = 60)
+    @RateLimit(limit = 5, window = 60)
     @AsyncAction(value = "user-login")
     public Result<Map<String,Object>> login(@RequestParam String username, @RequestParam String password){
         return  Result.success(userService.login(username,password));
