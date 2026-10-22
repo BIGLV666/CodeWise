@@ -17,6 +17,7 @@ CodeWise 面向在线刷题场景，核心目标是把高延迟、高风险的�
 | 社区服务 | 帖子、题解、评论、标签、点赞 | 社区互动、搜索和热点排行 |
 | 消息服务 | 站内通知、通知通道与在线会话 | 邮件、通知查询和 WebSocket 推送 |
 | AI 服务 | AI 请求编排与会话记忆 | 判题建议、SSE 追问、摘要压缩和测试用例生成 |
+| 小组/Quiz 服务 | 小组、成员、邀请码 | 建组/改组、退出与 root 晋升、FREE/APPROVAL/INVITE 加入、邀请码站内信 |
 | Agent 服务（Python，`codewise-agent`） | `codewise_ai` 库中的 `agent_*` 会话与消息表 | 对话式 Agent、工具编排（51 个网关工具）、SSE 流式 |
 
 服务间不直接读写对方数据库。用户昵称、头像、题目信息等通过 Feign 批量获取；判题结果和通知通过 RabbitMQ 传递。
@@ -35,7 +36,7 @@ CodeWise 面向在线刷题场景，核心目标是把高延迟、高风险的�
 
 管理员接口不再各自写判断逻辑，而是标注 `@RequireAdmin`（类级或方法级，定义在 `service-common` 的 `aop` 包）。`AdminAuthAspect` 实现 api-governance 的 `PreFilter`，经 `META-INF/spring` 自动配置注册，凡引入 `service-common` 的服务都自动生效：它用 `UserContext.getUserId()` 经 `UserFeignClient` 回查 `roleId`，`2` 为管理员、`0` 为 root 才放行，其余情况通过 `FilterContext.setRejectReason(...)` 返回拒绝——切面内不抛异常，否则过滤器链会把异常包装成无业务含义的「过滤器异常」。
 
-对外接口普遍标注 `@RateLimit(limit, window)`（当前 169 处），由 `api-governance-spring-boot-starter` 以 Redis 滑动窗口实现，超限返回 429 与业务化中文提示；`default-limit: 60`（配 `default-window: 60`）表示未标注路由也按 60 次/分钟兜底限流，`-1` 才表示只对显式标注的路由生效。用户、题目、复习、社区、消息、AI 六个服务显式配置 `api.governance.enabled: true`（网关是 WebFlux 不参与，也不引入该 starter——它是 Servlet 形态，`0.5.0` 起自动配置类签名引用 `jakarta.servlet.Filter`，网关类路径没有 servlet API，Spring 自省会抛 `NoClassDefFoundError` 导致网关反复重启；判题服务带依赖但没有该配置块，其管理接口依赖 `@RequireAdmin`）。限流键由 `service-common` 的 `RateLimiterConfig` 统一决定：登录用户按 `apiKey#user:<userId>`，未登录按 `apiKey#ip:<clientIp>` 并把配额放大 20 倍，避免共享出口 IP 误伤，也避免换 IP 绕过配额。已启用治理的服务另有 `/api/<service>/governance` 管理端点，用于查看运行期限流与日志配置。
+对外接口普遍标注 `@RateLimit(limit, window)`，由 `api-governance-spring-boot-starter` 以 Redis 滑动窗口实现，超限返回 429 与业务化中文提示；`default-limit: 60`（配 `default-window: 60`）表示未标注路由也按 60 次/分钟兜底限流，`-1` 才表示只对显式标注的路由生效。用户、题目、复习、社区、消息、AI、小组/Quiz 七个服务显式配置 `api.governance.enabled: true`（其中小组/Quiz 用 `default-limit: -1`，但 `GroupController` 每条路由都标了正的 `@RateLimit`，含 6 位邀请码校验接口的 10 次/分钟上限；网关是 WebFlux 不参与，也不引入该 starter——它是 Servlet 形态，`0.5.0` 起自动配置类签名引用 `jakarta.servlet.Filter`，网关类路径没有 servlet API，Spring 自省会抛 `NoClassDefFoundError` 导致网关反复重启；判题服务带依赖但没有该配置块，其管理接口依赖 `@RequireAdmin`）。限流键由 `service-common` 的 `RateLimiterConfig` 统一决定：登录用户按 `apiKey#user:<userId>`，未登录按 `apiKey#ip:<clientIp>` 并把配额放大 20 倍，避免共享出口 IP 误伤，也避免换 IP 绕过配额。已启用治理的服务另有 `/api/<service>/governance` 管理端点，用于查看运行期限流与日志配置。
 
 ## 4. 异步判题设计
 
@@ -155,14 +156,14 @@ limit :pageSize + 1
 | 判题结果 | RabbitMQ 异步回写 |
 | 点赞/复习通知 | RabbitMQ 解耦生产者，数据库唯一消息 ID 幂等消费 |
 
-通知消费当前采用 Redis 短期标记和 `notification_center.uk_message_id` 双重幂等，`consumed_event` 表按 `event_id` 唯一键兜底。站内通知先入库，再尝试 WebSocket 推送；实时推送失败不会造成数据库重复通知（点赞通知目前只写站内收件箱，实时推送分支在 `NotificationCenterLikeHandle` 中处于停用状态）。判题、复习、社区、题目四个服务已接入 OutboxPro 事务性发件箱（`outboxpro.enabled: true`），judge 与 ai 链路另具备 DLX 与延迟重试；剩余收敛项：`message.queue` 与 `notification.queue` 仍是无死信交换机的普通队列、点赞与审核通知为裸 `RabbitTemplate` 尽力而为发送、publisher confirm、统一 Feign 降级策略。
+通知消费当前采用 Redis 短期标记和 `notification_center.uk_message_id` 双重幂等，`consumed_event` 表按 `event_id` 唯一键兜底。站内通知先入库，再尝试 WebSocket 推送；实时推送失败不会造成数据库重复通知（点赞通知目前只写站内收件箱，实时推送分支在 `NotificationCenterLikeHandle` 中处于停用状态）。判题、复习、社区、题目、小组/Quiz 五个服务已接入 OutboxPro 事务性发件箱（`outboxpro.enabled: true`），judge 与 ai 链路另具备 DLX 与延迟重试；剩余收敛项：`message.queue` 与 `notification.queue` 仍是无死信交换机的普通队列、点赞与审核通知为裸 `RabbitTemplate` 尽力而为发送、publisher confirm、统一 Feign 降级策略。
 
 ## 10. 通知中心设计
 
-点赞、复习、审核、申诉和 AI 建议生产者向 `notification.exchange` 发布统一 `NotificationDto`，消息服务按 routing key 分派给对应处理器（`notification.like.routing`、`notification.review.routing`、`notification.review.mastered.routing`、`notification.checked.routing`、`notification.appeal.routing`、`notification.ai.advice.routing`）。
+点赞、复习、审核、申诉、AI 建议和小组邀请码生产者向 `notification.exchange` 发布统一信封消息，消息服务按 routing key 分派给对应处理器（`notification.like.routing`、`notification.review.routing`、`notification.review.mastered.routing`、`notification.checked.routing`、`notification.appeal.routing`、`notification.ai.advice.routing`、`notification.join.token.routing`；邀请码 payload 为 `JoinToken`，其余为 `NotificationDto`）。
 
 ```text
-service-community / service-review / service-ai
+service-community / service-review / service-ai / service-quiz-nest
   -> notification.exchange
   -> notification.queue
   -> 按 routing key 选择处理器

@@ -15,20 +15,85 @@
         where group_id = #{groupId}
     </update>
 
-    <!-- 普通成员退出：删除自己的成员记录；影响行数为 0 表示不在该小组（服务层转 LEAVE_GROUP_FAILED）。
-         第二个参数必须是退出者本人的 userId（SQL 读不到 UserContext）。 -->
-    <update id="leaveGroup">
+    <!-- 普通成员/待审批成员退出：删除自己的成员记录；影响行数为 0 表示不在该小组
+         （服务层转 LEAVE_GROUP_FAILED）。第二个参数必须是退出者本人的 userId
+         （SQL 读不到 UserContext）。 -->
+    <delete id="leaveGroup">
         delete from group_member
         where group_id = #{groupId} and user_id = #{userId}
+    </delete>
+
+    <!-- 新成员以 APPROVED 状态加入时人数 +1。group 行锁让同一小组的并发加入串行化，
+         同时 where group_id 命中 0 行也用于发现「小组已被删除」并让加入事务回滚。 -->
+    <update id="addMemberCount">
+        update `group`
+        set member_count = member_count + 1
+        where group_id = #{groupId}
     </update>
 
-    <!-- root 退出：删除退出者本人的成员记录，role='ROOT' 兜底（非 root 调用返回 0）。
-         「最后一名成员则删除 group」不能写进同一条语句：MySQL 多表 DELETE 禁止子查询引用被删的目标表
-         （实测 ERROR 1093），本仓库也未开 allowMultiQueries，因此空组清理由
-         GroupService.leaveGroup 在删除成员后用 MP 的 delete 收尾。
-         指定新 root 的晋升（晋升算法）实现后再补。 -->
-    <update id="rootLeaveGroup">
+    <!-- 为小组成员数减 1，乐观锁防成员数为负（member_count 口径 = APPROVED 成员数，含 root） -->
+    <update id="decMemberCount">
+        update `group`
+        set member_count = member_count - 1
+        where group_id = #{groupId} and member_count > 0
+    </update>
+
+    <!-- ===== root 退出时的晋升（晋升算法）=====
+         `group`.user_id 是唯一的权威 root 指针，group_member.role='ROOT' 只是它的冗余投影。
+         因此晋升第一步就是把 root 指针 CAS 到继承人：只有仍指向退出者时才允许改。
+         并发下第二个事务会阻塞在 group 行锁上、提交后命中 0 行 → 天然保证「每组至多一个 ROOT」。
+         注意：一条 UPDATE 只能有一个 SET 子句（历史版本写成三个 set，MySQL 直接 1064），
+         且这里绝不能顺手改 member_count（晋升不是退出，人数由调用方按退出动作统一维护）。 -->
+    <update id="casRootOwner">
+        update `group`
+        set user_id = #{newRoot},
+            update_time = CURRENT_TIMESTAMP()
+        where group_id = #{groupId} and user_id = #{oldRoot}
+    </update>
+
+    <!-- 继承人成员记录升为 ROOT：join_status/role 兜底，防止把待审批成员或已是 ROOT 的记录再改一次 -->
+    <update id="promoteMemberToRoot">
+        update group_member
+        set role = 'ROOT',
+            update_time = CURRENT_TIMESTAMP()
+        where group_id = #{groupId}
+          and user_id = #{userId}
+          and join_status = 'APPROVED'
+          and role &lt;&gt; 'ROOT'
+    </update>
+
+    <!-- 删除退出者本人的 ROOT 成员记录；非 root 调用命中 0 行 -->
+    <delete id="deleteRootMember">
         delete from group_member
         where group_id = #{groupId} and user_id = #{userId} and role = 'ROOT'
-    </update>
+    </delete>
+
+    <!-- 继承人候选：管理员优先，其次「最近有成员记录变更」，最后按入库顺序兜底（保证结果确定）。
+         真正的活跃度（答题/互动）要等业务表落地后再改这条 ORDER BY，当前无活跃度数据源。 -->
+    <select id="selectHeirUserId" resultType="java.lang.Long">
+        select gm.user_id
+        from group_member gm
+        where gm.group_id = #{groupId}
+          and gm.join_status = 'APPROVED'
+          and gm.role &lt;&gt; 'ROOT'
+          and gm.user_id &lt;&gt; #{leaverId}
+        order by (gm.role = 'ADMIN') desc, gm.update_time desc, gm.group_member_id asc
+        limit 1
+    </select>
+
+    <!-- 本组已无 APPROVED 成员则删除小组。调用前必须先删掉退出者记录并已锁住 group 行
+         （先 decMemberCount 拿到行锁），否则并发审批可能插进来。
+         子查询只读 group_member、不引用被删的 `group`，因此不会触发 ERROR 1093。 -->
+    <delete id="deleteGroupIfNoApprovedMember">
+        delete from `group`
+        where group_id = #{groupId}
+          and not exists (select 1 from group_member gm
+                          where gm.group_id = #{groupId} and gm.join_status = 'APPROVED')
+    </delete>
+
+    <!-- 删除本组全部成员记录：最后一名 APPROVED 成员退出时，连 PENDING/REJECTED 占位一并清理，
+         避免留下「没有 root、没有成员」却还挂在库里的孤儿组。 -->
+    <delete id="deleteAllMembers">
+        delete from group_member where group_id = #{groupId}
+    </delete>
 </mapper>

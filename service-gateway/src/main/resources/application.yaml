@@ -77,6 +77,12 @@ spring:
           predicates:
             - Path=/api/community/**
 
+        #8-小组/Quiz
+        - id: service-quiz-nest
+          uri: lb://service-quiz-nest
+          predicates:
+            - Path=/api/quiz/**
+
 
 
 jwt:

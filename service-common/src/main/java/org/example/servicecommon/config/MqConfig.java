@@ -364,4 +364,12 @@ public class MqConfig {
                 .with(NOTIFICATION_REVIEW_MASTERED_ROUTING_KEY);
     }
 
+    @Bean
+    public Binding notificationJoinTokenBinding() {
+        return BindingBuilder
+                .bind(NotificationQueue())
+                .to(NotificationExchange())
+                .with(NOTIFICATION_JOIN_TOKEN_ROUTING_KEY);
+    }
+
 }

@@ -17,7 +17,7 @@ import org.springframework.context.annotation.Bean;
  * CodeWise 对 OutboxPro 的公共装配：Relay 发布模板 + 死信告警通知器 + 运维端点只读授权边界。
  *
  * <p>仅当宿主服务显式配置 {@code outboxpro.enabled=true}（生产者服务：
- * question/judge/review/community）时生效；其余服务必须显式配置 false，
+ * question/judge/review/community/quiz-nest）时生效；其余服务必须显式配置 false，
  * 因为 OutboxPro 自身的开关是 {@code matchIfMissing=true}。</p>
  *
  * <p>排序说明（与 {@code EventAutoConfiguration}/旧 {@code OutboxAutoConfiguration}

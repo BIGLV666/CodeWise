@@ -1,8 +1,10 @@
 # CodeWise CI：push / PR 自动测试门禁
 #
-# 仓库无聚合 POM：先 install 两个共享模块，再矩阵并行跑 8 个服务的测试。
+# 仓库无聚合 POM：先 install 两个共享模块，再矩阵并行跑 9 个服务的测试。
 # 全上下文（contextLoads）测试依赖 Nacos/Redis/RabbitMQ，在 CI 中同样无法启动，
 # 但它们只占每服务 1 个用例；其余纯 Mockito 单测构成回归门禁。
+# 例外：service-quiz-nest 的集成测试用 Testcontainers（真 MySQL 8.4 + Redis 7 容器，
+# 无 Docker 时整类跳过），因此在 CI 里会真正执行，无需外部基础设施。
 name: ci
 
 on:
@@ -46,6 +48,7 @@ jobs:
           - service-community
           - service-message
           - service-ai
+          - service-quiz-nest
     name: test ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4

@@ -8,6 +8,7 @@ public enum WebSocketQueueName {
     INBOX_REVIEW,
     INBOX_CHECKED,
     INBOX_APPEAL,
+    INBOX_GROUP_INVITE,
     AI_ADVICE,
     ;
 }

@@ -42,4 +42,7 @@ public final class EventTypes {
     public static final String REVIEW_MASTERED = "REVIEW_MASTERED";
     /** 计划场景判题结果：question -> plan，payload 为 PlanJudgeRecordDto */
     public static final String PLAN_JUDGE_RECORD = "PLAN_JUDGE_RECORD";
+
+    /** 小组邀请码发送：quiz-nest -> message，payload 为 JoinToken */
+    public static final String GROUP_JOIN_TOKEN = "GROUP_JOIN_TOKEN";
 }

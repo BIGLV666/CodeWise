@@ -19,6 +19,7 @@ CREATE DATABASE IF NOT EXISTS codewise_review    DEFAULT CHARACTER SET utf8mb4 C
 CREATE DATABASE IF NOT EXISTS codewise_community DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS codewise_message   DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE DATABASE IF NOT EXISTS codewise_ai        DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS codewise_quiz_nest DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 EOSQL
 
 # 业务账号对全部 codewise 库授权（mysql 官方镜像默认只授予 MYSQL_DATABASE 一个库；
@@ -31,6 +32,7 @@ GRANT ALL PRIVILEGES ON codewise_review.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON codewise_community.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON codewise_message.* TO '${MYSQL_USER}'@'%';
 GRANT ALL PRIVILEGES ON codewise_ai.* TO '${MYSQL_USER}'@'%';
+GRANT ALL PRIVILEGES ON codewise_quiz_nest.* TO '${MYSQL_USER}'@'%';
 FLUSH PRIVILEGES;
 EOSQL
 
@@ -69,5 +71,8 @@ apply codewise_ai /sql/ai/codewise_ai.sql
 apply codewise_ai /sql/ai/consumed_event.sql
 # 7. Agent 库表（codewise-agent 的会话/消息/记忆）
 apply codewise_ai /sql/agent/agent_tables.sql
+
+# 8. 小组/Quiz 库（service-quiz-nest：group 与 group_member）
+apply codewise_quiz_nest /sql/quiz-nest/quiz.nest.sql
 
 echo "[codewise-init] done."

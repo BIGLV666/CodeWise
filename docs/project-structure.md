@@ -151,6 +151,20 @@ CodeWise/
 |       |   `-- service/               # 多模型调用与流式适配
 |       `-- resources/sql/             # codewise_ai 建表与迁移脚本
 |
+|-- service-quiz-nest/                 # 小组/Quiz 服务（group/group_member、邀请码）
+|   `-- src/main/
+|       |-- java/com/example/servicequiznest/
+|       |   |-- controller/            # GroupController（/api/quiz/groups/**）
+|       |   |-- service/               # 建组、改组、退出/root 晋升、加入与邀请码
+|       |   |-- mapper/                # MyBatis-Plus Mapper
+|       |   |-- entity/                # 数据库实体
+|       |   |-- dto/ + enums/          # 请求 DTO 与角色/加入状态枚举
+|       |   |-- config/                # Outbox 事件路由
+|       |   `-- advice/                # 统一异常处理
+|       `-- resources/
+|           |-- mapper/                # MyBatis XML
+|           `-- sql/quiz.nest.sql      # codewise_quiz_nest 库结构
+|
 |-- service-judge-go/                  # Java 判题的 Go 重构原型（调试/提交判题子集）
 |
 |-- codewise-agent/                     # Python Agent（FastAPI 门面 + dsh Node 工具运行时）
@@ -198,6 +212,7 @@ service-review    -> codewise_review
 service-community -> codewise_community
 service-message   -> codewise_message
 service-ai        -> codewise_ai
+service-quiz-nest -> codewise_quiz_nest
 service-judge     -> codewise_question（与 service-question 共库，仅读写判题相关表）
 codewise-agent    -> codewise_ai（agent_* 会话与消息表，与 service-ai 同库不同表）
 ```

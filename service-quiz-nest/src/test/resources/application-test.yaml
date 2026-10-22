@@ -1,0 +1,45 @@
+# 测试专用（@ActiveProfiles("test")）：不连 Nacos、不启用限流；
+# 数据源由 Testcontainers 的 MySQL 容器经 @DynamicPropertySource 注入。
+spring:
+  main:
+    # service-common 的 RedisConfig 与 Boot 的 RedisAutoConfiguration 都注册名为 redisTemplate 的 bean
+    # （前者是 RedisTemplate<String,Object>，后者是 <Object,Object>）。两者谁先注册取决于自动配置
+    # 处理顺序：实测某些上下文组合下 Boot 的会先注册，导致上下文启动即失败。
+    # 这里允许覆盖，保证测试上下文稳定（服务侧同样建议显式打开或改 bean 名，见交付说明）。
+    allow-bean-definition-overriding: true
+  data:
+    redis:
+      # service-common 的 RedisConfig 以 spring.data.redis.host 为开关，缺了它 RedisTemplate 就不会注册，
+      # GroupService 构造失败；退出/晋升用例不真的读写 Redis，因此不需要起 Redis 容器。
+      host: localhost
+      port: 6379
+  cloud:
+    nacos:
+      discovery:
+        enabled: false
+      config:
+        # 主 yaml 已声明 optional:nacos: 导入；这里再关一次 import-check，避免测试环境
+        # 因 Nacos 不可达而影响启动（生产由 Nacos 配置补齐）
+        import-check:
+          enabled: false
+    service-registry:
+      auto-registration:
+        enabled: false
+
+codewise:
+  internal-token: test-token
+
+# 邀请码链路需要真实的 OutboxProPublisher（GroupService 构造依赖），因此测试里也开启；
+# 但关闭 Relay（不连 RabbitMQ）和消费者，只保留「事务内写 outboxpro_outbox」这一层，
+# 集成测试直接查表断言事件内容。poll-interval 用纯毫秒，避免 Boot 3.2 的 duration 解析问题。
+outboxpro:
+  enabled: true
+  producer:
+    poll-interval: 1000
+    relay-enabled: false
+  consumer:
+    enabled: false
+
+api:
+  governance:
+    enabled: false

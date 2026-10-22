@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.servicequiznest.mapper.GroupMemberMapper">
+
+    <!-- PENDING/REJECTED -> APPROVED：条件更新是成员数不重复累加的关键。
+         并发加入同一用户时，第二个事务会阻塞在行锁上，提交后条件不再成立、命中 0 行。 -->
+    <update id="approveExistingMember">
+        update group_member
+        set join_status = 'APPROVED',
+            join_time = coalesce(join_time, CURRENT_TIMESTAMP()),
+            update_time = CURRENT_TIMESTAMP()
+        where group_id = #{groupId}
+          and user_id = #{userId}
+          and join_status &lt;&gt; 'APPROVED'
+    </update>
+
+    <!-- 被拒绝后重新申请：只允许 REJECTED -> PENDING，避免覆盖并发通过的 APPROVED -->
+    <update id="reapplyRejectedMember">
+        update group_member
+        set join_status = 'PENDING',
+            update_time = CURRENT_TIMESTAMP()
+        where group_id = #{groupId}
+          and user_id = #{userId}
+          and join_status = 'REJECTED'
+    </update>
+</mapper>

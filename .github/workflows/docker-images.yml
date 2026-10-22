@@ -74,6 +74,7 @@ jobs:
           - { module: service-community }
           - { module: service-message }
           - { module: service-ai }
+          - { module: service-quiz-nest }
     name: build ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v4

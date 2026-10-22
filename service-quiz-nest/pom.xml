@@ -15,19 +15,27 @@
     <name>service-quiz-nest</name>
     <description>Quiz微服务</description>
 
+    <properties>
+        <!-- testcontainers 内嵌的 docker-java 默认用 Docker API 1.32，而 Moby 28+ 的 daemon
+             最低要求 1.44，握手直接 400（client version 1.32 is too old）→ 集成测试会被静默跳过。
+             daemon 较老（API &lt; 1.44）时用 -Ddocker.api.version=1.43 覆盖。 -->
+        <docker.api.version>1.44</docker.api.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+
         <dependency>
             <groupId>org.example</groupId>
             <artifactId>service-api</artifactId>
         </dependency>
+        <!-- 版本统一由根 POM 管理（当前 0.5.0）；0.5.0 的 servlet 自动配置与 Boot 3.2.4 匹配 -->
         <dependency>
             <groupId>io.github.biglv666</groupId>
             <artifactId>api-governance-spring-boot-starter</artifactId>
-            <version>0.1.0</version>
         </dependency>
 
         <!-- Spring Web -->
@@ -101,6 +109,12 @@
             <optional>true</optional>
         </dependency>
 
+        <dependency>
+            <groupId>io.github.biglv666</groupId>
+            <artifactId>outboxpro-spring-boot-starter</artifactId>
+            <version>1.1.0</version>
+        </dependency>
+
 
 
         <!-- 测试 -->
@@ -112,6 +126,21 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers：小组退出/晋升用真 MySQL 8.4 验证（本地无 Docker 自动跳过）。
+             版本显式覆盖 Boot 3.2.4 BOM 的 1.19.x：新版 Docker Desktop（Moby 28+）下
+             1.19.x 握手报 Status 400，需 1.20.6+（与 service-common 保持一致）。 -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>1.21.4</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mysql</artifactId>
+            <version>1.21.4</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -140,6 +169,16 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+            <!-- 让 testcontainers 走 api.version（见上方属性注释），否则真库集成测试在本机被静默跳过 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <api.version>${docker.api.version}</api.version>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>

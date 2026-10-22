@@ -1,3 +1,68 @@
 spring:
   application:
     name: service-quiz-nest
+  config:
+    import: optional:nacos:service-quiz-nest.yaml   # Nacos 配置中心（可选：缺失时由本地 yaml + 环境变量兜底）
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+      config:
+        server-addr: ${NACOS_ADDR:localhost:8848}
+        file-extension: yaml
+  data:
+    redis:
+      # Redis 故障快速失败：Lettuce 命令超时默认 60s，邀请码校验/发送锁 + 限流
+      # 两处 Redis 调用会把单个请求拖到分钟级。这两项同时被 Redisson 自动配置读取
+      # （setTimeout / setConnectTimeout）；host/port 由 Nacos 或 SPRING_DATA_REDIS_* 注入。
+      timeout: 2s
+      connect-timeout: 2s
+
+# 邀请码经 OutboxPro 投递到 notification.queue，因此本服务是 MQ 生产者：
+# 开启 MqConfig 让本服务启动时也声明 notification.exchange/queue/binding，
+# 避免先于 service-message 启动时事件因交换机不存在而反复重试。
+codewise:
+  mq:
+    enabled: true
+  internal-token: ${CODEWISE_INTERNAL_TOKEN}
+
+# 生产者服务：邀请码事件与业务写入同事务进入 outboxpro_outbox，由 Relay 至少一次投递。
+# poll-interval 必须写纯毫秒：库默认的 "1000ms" 需要 Spring Framework 6.2，
+# Boot 3.2.4 解析失败会直接启动失败。
+outboxpro:
+  enabled: true
+  producer:
+    poll-interval: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+server:
+  port: 8088
+
+api:
+  governance:
+    enabled: true
+    log:
+      enabled: true
+      log-request-params: false
+      log-response: false
+      slow-threshold-ms: 800
+    rate-limit:
+      type: redis
+      algorithm: sliding-window
+      # -1：只对显式标注 @RateLimit 的路由限流（GroupController 的每条路由都已标注）
+      default-limit: -1
+      default-window: 60
+      status-code: 429
+      message: "小组操作过于频繁，请稍后重试"
+    metrics:
+      window-size: 100
+      window-seconds: 300
+      max-apis: 1000
+    management:
+      enabled: true
+      base-path: /api/quiz/governance

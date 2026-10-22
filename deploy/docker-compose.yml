@@ -2,7 +2,7 @@
 # 用法见 deploy/README.md。judge-go 原型不参与部署。
 #
 # 部署拓扑：
-#   frontend(nginx:80) → gateway(8082) → 7 个业务服务
+#   frontend(nginx:80) → gateway(8082) → 8 个业务服务
 #   service-judge / service-question 挂载宿主 /var/run/docker.sock（DooD）执行判题沙箱
 #   基础设施：mysql8 / redis7 / rabbitmq3 / nacos2.3（均持久化数据卷）
 name: codewise
@@ -90,6 +90,7 @@ services:
       - ../service-community/src/main/resources/migration:/sql/migration-community:ro
       - ../service-message/src/main/resources/sql.sql:/sql/message/sql.sql:ro
       - ../service-ai/src/main/resources/sql:/sql/ai:ro
+      - ../service-quiz-nest/src/main/resources/sql:/sql/quiz-nest:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -380,6 +381,33 @@ services:
       - "8085:8085"
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8085/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # ================= 小组/Quiz 服务 =================
+  # service-quiz-nest：小组（group/group_member）与后续 Quiz 业务。
+  # 邀请码经 OutboxPro（outboxpro_* 表在 codewise_quiz_nest 内自动创建）投递到
+  # notification.exchange，因此本服务是 MQ 生产者：outboxpro.enabled=true、
+  # codewise.mq.enabled=true，启动时也会声明通知队列拓扑。
+  service-quiz-nest:
+    mem_limit: 512m
+    <<: *app-base
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.service
+      args: { MODULE: service-quiz-nest }
+    image: ${CODEWISE_IMAGE_PREFIX:-codewise/}service-quiz-nest:latest
+    environment:
+      <<: [*common-env, *db-env]
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_quiz_nest?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    volumes:
+      - service-logs:/app/logs
+    ports:
+      - "8088:8088"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8088/actuator/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10

@@ -19,6 +19,7 @@ CodeWise 是面向编程学习、在线判题、错题复习和题解社区的 S
 | `service-community` | 8087 | 帖子、题解、评论、点赞和排行 |
 | `service-message` | 8083 | 邮件、站内通知、WebSocket 推送 |
 | `service-ai` | 8085 | 判题建议、SSE 追问、会话记忆 |
+| `service-quiz-nest` | 8088 | 小组（group/group_member）、邀请码与 Quiz 业务 |
 | `service-api` | - | Feign 接口和跨服务 DTO |
 | `service-common` | - | JWT、MQ、Redis、用户上下文等公共能力 |
 
@@ -40,7 +41,7 @@ CodeWise 是面向编程学习、在线判题、错题复习和题解社区的 S
 
 | 变量 | 作用范围 | 说明 |
 |------|----------|------|
-| `CODEWISE_INTERNAL_TOKEN` | 全部 8 个服务 | 网关/下游拦截器/Feign 三处同值的内部通信 Token（各服务 yaml `codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`，无默认值） |
+| `CODEWISE_INTERNAL_TOKEN` | 全部 9 个服务 | 网关/下游拦截器/Feign 三处同值的内部通信 Token（各服务 yaml `codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`，无默认值） |
 | `JWT_SECRET` | service-gateway、service-message、service-review、service-user | JWT 签名密钥（user 登录时签发 token），与 Python Agent `.env` 的 `JWT_SECRET` 同值（签名算法由密钥长度自动选择） |
 | `API_KEY_MASTER_KEY` | service-ai | 自定义模型 API Key 的 AES-GCM 主密钥；经属性 `security.api-key-master-key` 读取，仓库 yaml 不落盘，需通过环境变量或 Nacos 注入 |
 
@@ -56,6 +57,8 @@ codewise_question
 codewise_review
 codewise_community
 codewise_message
+codewise_ai
+codewise_quiz_nest
 ```
 
 完整建表脚本和增量迁移脚本位于各模块的 `src/main/resources`。修改表结构时必须同时维护：
@@ -203,7 +206,7 @@ DELETE /api/judge/containers/{language}/{containerId}
 ## 10. Redis 与 RabbitMQ 维护
 
 - 判题主链路已改为事务性 Outbox（OutboxPro，Publisher Confirm 确认投递）+ 统一消息信封：提交经 `outboxpro_outbox` 中转投递，判题队列为 `judge.submit.queue` / `judge.debug.queue` / `judge.retry.queue`（均挂 DLX），submit 消费失败经 `judge.wait.queue` TTL 延迟弹回（debug 失败写 Redis 结果不重试、retry 失败直接死信留痕），死信入 `judge.dead.queue` 并登记 `failure_submit`。架构说明、迭代手册与重放操作见 `docs/maintenance/messaging-reliability.md`。
-- MQ 拓扑声明集中在 `service-common` `MqConfig`，仅当 `codewise.mq.enabled=true` 时装配：community/message/review 已在本地 yaml 显式配 true，question/judge/ai/user 依赖 Nacos 下发；缺省不声明队列，监听方会因队列不存在启动失败。
+- MQ 拓扑声明集中在 `service-common` `MqConfig`，仅当 `codewise.mq.enabled=true` 时装配：community/message/review/quiz-nest 已在本地 yaml 显式配 true，question/judge/ai/user 依赖 Nacos 下发；缺省不声明队列，监听方会因队列不存在启动失败。
 - 手动 ACK 消费者所在服务（question/judge/ai/message/review/user）本地 yaml 均显式配置 `spring.rabbitmq.listener.simple.acknowledge-mode: manual`——Spring 默认 AUTO 会与手动 ACK 叠加触发 406 双重确认、channel 崩溃循环，容器部署（Nacos 空跑）时不能依赖 Nacos 下发该项。
 - 新增队列必须挂 DLX；改队列参数必须换新队列名（RabbitMQ 队列参数不可变）。
 - 修改 routing key 时同时检查生产者、队列绑定和消费者。
@@ -215,8 +218,8 @@ DELETE /api/judge/containers/{language}/{containerId}
 
 ### 服务启动即失败
 
-1. 缺 `CODEWISE_INTERNAL_TOKEN`：全部 8 个服务 yaml 均为 `codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`（无默认值），缺失直接启动失败，属预期。
-2. 生产者服务（question/judge/review/community）缺 `outboxpro.producer.poll-interval: 1000`：OutboxPro 默认值 `"1000ms"` 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 解析失败导致启动即挂；必须显式配纯毫秒。
+1. 缺 `CODEWISE_INTERNAL_TOKEN`：全部 9 个服务 yaml 均为 `codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`（无默认值），缺失直接启动失败，属预期。
+2. 生产者服务（question/judge/review/community/quiz-nest）缺 `outboxpro.producer.poll-interval: 1000`：OutboxPro 默认值 `"1000ms"` 需要 Spring Framework 6.2 的 duration 解析，Boot 3.2.4 解析失败导致启动即挂；必须显式配纯毫秒。
 3. 缺 `JWT_SECRET`：gateway/message/review/user 的 `jwt.secret: ${JWT_SECRET}` 无默认值。Python Agent 侧密钥不一致时，响应只有 `401`「登录状态已失效，请重新登录」（码 `4011002`），**具体原因（签名不匹配、密钥缺失、长度不足）只写服务端日志**：日志出现 `Token 校验失败: Signature verification failed` 即两端 `JWT_SECRET` 不一致；出现 `服务端 JWT 配置异常` 则是 Agent 自身密钥缺失或短于 32 字节（此时返回 `500` / 码 `5001001`）。
 4. 消费者服务监听队列报「队列不存在」：`codewise.mq.enabled` 未下发（MqConfig 不装配则不声明队列，见第 10 节）。
 5. service-ai 缺 `API_KEY_MASTER_KEY`：`ApiKeyCryptoService` 构造读 `security.api-key-master-key`（无默认值），缺失启动失败。

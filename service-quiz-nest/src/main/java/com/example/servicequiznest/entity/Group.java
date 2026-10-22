@@ -23,7 +23,7 @@ public class Group {
     private String groupDescription;
     //小组类型（公开、审批、邀请）
     private GroupType groupType;
-    //成员数
+    //成员数：APPROVED 成员数（含 root），创建人自己算第一个成员，因此建组时为 1
     private Long memberCount;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
@@ -34,7 +34,8 @@ public class Group {
         this.groupName= createGroupDto.getGroupName();
         this.groupType = com.example.servicequiznest.enums.GroupType.valueOf(createGroupDto.getGroupType());
         this.createTime=LocalDateTime.now();
-        this.memberCount=0L;
+        // 创建人自己就是第一个 APPROVED 成员（member_count 口径 = APPROVED 成员数，含 root）
+        this.memberCount=1L;
     }
     public Group(){}
     public Group(GroupDto dto){

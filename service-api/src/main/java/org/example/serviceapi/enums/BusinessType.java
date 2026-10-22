@@ -9,5 +9,7 @@ public enum BusinessType {
     SOLUTION,
     REVIEW_RECORD,
     SUBMIT_RECORD,
-    QUESTION
+    QUESTION,
+    /** 小组（businessId = groupId） */
+    GROUP
 }

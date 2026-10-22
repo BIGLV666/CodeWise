@@ -36,6 +36,11 @@
 codewise_user codewise_question(判题服务共库) codewise_message codewise_ai codewise_community codewise_review
 ```
 
+上图为网关→6 个 HTTP 业务服务的主链路；另有小组/Quiz 服务 `service-quiz-nest:8088`
+（网关路由 `/api/quiz/**`，库 `codewise_quiz_nest`）。它通过 OutboxPro 把小组邀请码事件
+（`GROUP_JOIN_TOKEN`）投递到 `notification.exchange`，是 MQ 生产者（`outboxpro.enabled` 与
+`codewise.mq.enabled` 均显式为 true）。
+
 **基础设施**：MySQL 8（每服务一库，judge 复用 codewise_question）、Redis（限流/幂等/
 分布式锁/热榜）、RabbitMQ（7 组业务交换机 + judge.dlx/ai.dlx 死信拓扑）、Nacos（注册+配置，连接信息不出仓库）、
 Docker（`codewise-java-judge:17` 判题镜像，容器池 2 Java + 1 Python/C/C++）。
@@ -204,7 +209,7 @@ MQ 全拓扑（新队列一律挂 DLX；旧队列参数不可变 ⇒ 换名迁�
 judge.exchange  → judge.submit/debug/retry.queue(挂 judge.dlx) + judge.wait.queue(TTL 弹回)
 ai.exchange     → ai.testcase/advice.queue(挂 ai.dlx) + 两个 wait 队列 + ai.dead.queue
 question.exchange → question.queue（回调/用例/删除）
-notification.exchange → notification.queue（like/review/ai-advice/checked/appeal/review-mastered 6 路由）
+notification.exchange → notification.queue（like/review/ai-advice/checked/appeal/review-mastered/join-token 7 路由）
 message.exchange → message.queue（email/websocket）
 reviews.exchange → reviews.queue（REVIEW_JUDGE_RECORD 判题结果→复习）+ reviews.plan.queue（PLAN_JUDGE_RECORD→学习计划进度打卡）
 user.exchange → user.queue（判题结果→用户侧联动；消费者 service-user Mq/JudgeResHandle，当前无生产者调用点，拓扑保留）
@@ -236,8 +241,8 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 
 **A1. Transactional Outbox 消除双写**
 - 问题：DB 提交了但 MQ 没发出去（或反之），判题任务凭空丢失或幽灵消息污染数据。
-- 方案：业务事务内 publish 事件行（OutboxPro 库 `outboxpro_outbox`，judge/question/review/community
-  四个生产者开启 `outboxpro.enabled: true`，其余服务显式 false；judge 与 question 共写
+- 方案：业务事务内 publish 事件行（OutboxPro 库 `outboxpro_outbox`，judge/question/review/community/quiz-nest
+  五个生产者开启 `outboxpro.enabled: true`，其余服务显式 false；judge 与 question 共写
   codewise_question 库的 outboxpro_* 表，双 Relay 靠 SKIP LOCKED 并发安全），
   Relay 每秒（`poll-interval: 1000`）`FOR UPDATE SKIP LOCKED` 批量认领投递——多实例并发安全，
   **Publisher Confirm 确认后才标 SENT**；失败指数退避，5 次转 DEAD 并入台账，

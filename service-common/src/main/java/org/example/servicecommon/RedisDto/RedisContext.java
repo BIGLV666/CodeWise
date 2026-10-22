@@ -49,6 +49,15 @@ public  class RedisContext {
     public static final String COMMENT_AND_USER_ID = "comment_and_user_id_key:v2";
     public static final String SOLUTION_AND_USER_ID = "solution_and_user_id_key:v2";
 
+    //================加入小组邀请码==========================
+    /** 小组邀请码 key 前缀：{prefix}:{toUserId}:{groupId} -> 6 位邀请码 */
+    public static final String JOIN_GROUP_TOKEN_KEY = "join_group_token_key";
+    /** 邀请码有效期（秒）。站内信长期保留，但邀请码 7 天后失效，避免旧信被反复利用。 */
+    public static final long JOIN_GROUP_TOKEN_TTL_SECONDS = 7 * 24 * 3600L;
+    /** 发送邀请码的防重锁（秒）：双击/并发请求只发一封，锁过期后可重新发送（会生成新码覆盖旧码）。 */
+    public static final String JOIN_GROUP_TOKEN_SEND_LOCK_KEY = "join_group_token_send_lock";
+    public static final long JOIN_GROUP_TOKEN_SEND_LOCK_SECONDS = 3L;
+
     //===============已登出的token=========================
     public static final String LOGOUT_TOKEN="logout_token";
     //===============用户级凭证失效线========================

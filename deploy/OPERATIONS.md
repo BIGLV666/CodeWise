@@ -6,7 +6,7 @@
 
 | 组件 | 容器 | 持久化卷 | 说明 |
 | --- | --- | --- | --- |
-| MySQL | mysql:8.4 | `mysql-data` | 6 库初始化脚本挂载只读 |
+| MySQL | mysql:8.4 | `mysql-data` | 7 库初始化脚本挂载只读 |
 | Redis | redis:7 | `redis-data` | AOF 开启 |
 | RabbitMQ | rabbitmq:3.13 | `rabbitmq-data` | 管理台 15672 仅映射宿主回环（`127.0.0.1:15672`），不对公网暴露 |
 | Nacos | nacos:2.3.2 standalone | `nacos-data` | 服务发现 + 可选配置中心，控制台仅映射宿主回环（`127.0.0.1:8848`） |
@@ -43,6 +43,7 @@
 | codewise_community | `sql.sql` |
 | codewise_message | `sql.sql`（含 notification_center、consumed_event） |
 | codewise_ai | `codewise_ai.sql` → `consumed_event.sql` → `codewise-agent/sql/agent_tables.sql`（Agent 会话/消息表） |
+| codewise_quiz_nest | `quiz.nest.sql`（group 与 group_member；OutboxPro 的 `outboxpro_*` 表由服务启动时自动创建） |
 
 > 各服务的增量脚本（question 的 `function_test_case_unique_hash.sql`、review/community 的
 > `migration/`、ai 的 `migration_*.sql`）**已全部合入上述基础脚本**，init 不再执行；
@@ -52,7 +53,7 @@
 **OutboxPro 表（outboxpro_outbox / outboxpro_inbox / outboxpro_message_log /
 outboxpro_dead_letter / outboxpro_dead_letter_counter）由各生产者服务
 （question/judge 共建 codewise_question 的，review 建 codewise_review 的，
-community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF NOT EXISTS`），
+community 建 codewise_community 的，quiz-nest 建 codewise_quiz_nest 的）启动时自动创建（DDL 幂等，`IF NOT EXISTS`），
 前提是业务账号有对应库的 CREATE 权限（初始化脚本已授权）。**
 
 ### 存量环境升级到 OutboxPro（手工步骤）
@@ -93,7 +94,7 @@ docker compose -f deploy/docker-compose.yml exec service-judge tail -200 /app/lo
 
 > 注意：Nacos 若已下发同名配置（如数据源），其优先级高于环境变量，切换部署方式时留意清理旧配置。
 
-### OutboxPro 相关配置（生产者服务：question/judge/review/community）
+### OutboxPro 相关配置（生产者服务：question/judge/review/community/quiz-nest）
 
 - `outboxpro.enabled`：生产者服务为 `true`；其余服务必须显式 `false`（OutboxPro 默认 `matchIfMissing=true`）；
 - `outboxpro.producer.poll-interval=1000`：**必须显式配置**。OutboxPro 默认值 `"1000ms"` 需要
@@ -116,7 +117,7 @@ docker compose -f deploy/docker-compose.yml exec service-judge tail -200 /app/lo
 ```bash
 # MySQL 逻辑备份
 docker compose -f deploy/docker-compose.yml exec mysql \
-  sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --databases codewise_user codewise_question codewise_review codewise_community codewise_message codewise_ai' \
+  sh -c 'mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --databases codewise_user codewise_question codewise_review codewise_community codewise_message codewise_ai codewise_quiz_nest' \
   > codewise-backup-$(date +%F).sql
 # 恢复：docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"' < backup.sql
 ```
@@ -166,11 +167,11 @@ CODEWISE_IMAGE_PREFIX=ghcr.io/<owner>/codewise-
 JUDGE_IMAGE=ghcr.io/<owner>/codewise-java-judge:17
 ```
 
-compose 的全部 `image:` 字段已预留该前缀变量，改完 `.env` 后 `docker compose -f deploy/docker-compose.yml pull`（或直接 `up -d --pull=always`）即可拉取镜像、无需本地构建。注意：流水线当前发布 8 个服务镜像 + `codewise-java-judge` + `codewise-frontend`，**`codewise-agent` 镜像不在发布范围内**（compose 中保留了 build 上下文，该服务仍走本地构建）。
+compose 的全部 `image:` 字段已预留该前缀变量，改完 `.env` 后 `docker compose -f deploy/docker-compose.yml pull`（或直接 `up -d --pull=always`）即可拉取镜像、无需本地构建。注意：流水线当前发布 9 个服务镜像 + `codewise-java-judge` + `codewise-frontend`，**`codewise-agent` 镜像不在发布范围内**（compose 中保留了 build 上下文，该服务仍走本地构建）。
 
 ## 9. 与本地开发的差异
 
 - 本地：`NACOS_ADDR` 默认 `localhost:8848`，数据源等由本地 Nacos 配置中心下发；
 - 容器：全部经环境变量注入，Nacos 空跑即可（`optional:` 导入缺失不阻塞启动）；
-- 端口映射与本地默认一致（8081-8087、8097），前端固定 80；
+- 端口映射与本地默认一致（8081-8088、8097），前端固定 80；
 - `service-judge-go` 为实验性骨架（执行器桩化返回 SYSTEM_ERROR），**不参与部署**。

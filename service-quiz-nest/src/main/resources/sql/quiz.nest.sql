@@ -2,11 +2,11 @@
 -- 注意：group_type / role / join_status 三个枚举列按 MyBatis-Plus 默认枚举处理器落库为
 -- 枚举的 name()（见 com.example.servicequiznest.enums 下各枚举），因此用 VARCHAR 而非 INT。
 
-CREATE DATABASE IF NOT EXISTS `codewise-quiz-nest`
+CREATE DATABASE IF NOT EXISTS `codewise_quiz_nest`
     DEFAULT CHARACTER SET utf8mb4
     DEFAULT COLLATE utf8mb4_unicode_ci;
 
-USE `codewise-quiz-nest`;
+USE `codewise_quiz_nest`;
 
 -- 小组：创建人同时写入一条 root 成员记录；group_type 决定加入方式
 CREATE TABLE IF NOT EXISTS `group` (
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS `group` (
     `user_id` BIGINT NOT NULL COMMENT '创建人ID（对应 root 成员）',
     `group_description` VARCHAR(500) DEFAULT NULL COMMENT '小组简介，可空',
     `group_type` VARCHAR(20) NOT NULL DEFAULT 'APPROVAL' COMMENT '加入方式：FREE 公开 / APPROVAL 审批 / INVITE 邀请',
-    `member_count` BIGINT NOT NULL DEFAULT 0 COMMENT '成员数，随成员增删维护',
+    `member_count` BIGINT NOT NULL DEFAULT 0 COMMENT '成员数（APPROVED 成员数，含 root），随成员增删维护',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`group_id`),

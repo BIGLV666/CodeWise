@@ -21,20 +21,32 @@ public enum QuizNestErrorCode implements ErrorCode {
     GROUP_TYPE_INVALID(4001103, "小组加入方式不正确，仅支持公开、审批或邀请"),
     CREATE_TOKEN_REQUIRED(4001104, "创建凭证已失效，请重新获取后再试"),
     GROUP_ID_REQUIRED(4001105, "小组ID不能为空"),
+    NOT_GROUP_JOIN_TOKEN(4001106, "邀请码不正确或已失效，请向管理员重新获取"),
+    NOT_USERID_SEND_JOIN_TOKEN(4001107, "请选择要邀请的用户"),
+    CANNOT_INVITE_SELF(4001108, "不能邀请自己加入小组"),
+    INVITE_CONTEXT_TOO_LONG(4001109, "邀请留言不能超过200字"),
 
     // ---------- 无权限 403 ----------
     NO_PERMISSION_UPDATE_GROUP(4031101, "无权限修改小组"),
+    NO_PERMISSION_SEND_JOIN_TOKEN(4031102, "您暂无权限邀请他人，请联系管理员"),
 
     // ---------- 资源不存在 404 ----------
     NOTFOUND_USER_IN_GROUP(4041101, "您不是该小组成员"),
+    NOTFOUND_GROUP(4041102, "您选择的小组不存在，请确认后重试"),
 
     // ---------- 状态冲突 409 ----------
     DUPLICATE_REQUEST(4091101, "该创建请求已提交，请勿重复提交"),
+    HAVE_JOINED(4091102, "您已经加入该小组，请勿重复加入"),
+    SUBMIT_APPLICATION(4091103, "您的提交申请已提交，请耐心等待"),
+    GROUP_NOT_INVITE(4091104, "该小组无需邀请码，可直接加入或提交申请"),
+    INVITEE_ALREADY_MEMBER(4091105, "对方已经是该小组成员，无需再次邀请"),
 
     // ---------- 服务内部 500 ----------
     CREATE_FAILED(5001101, "小组创建失败，请稍后重试"),
     UPDATE_FAILED(5001102, "小组修改失败，请稍后重试"),
-    LEAVE_GROUP_FAILED(5001103, "退出小组失败，请稍后重试");
+    LEAVE_GROUP_FAILED(5001103, "退出小组失败，请稍后重试"),
+    JOIN_GROUP_FAILED(5001104, "加入小组失败，请稍后重试"),
+    SEND_JOIN_TOKEN_FAILED(5001105, "邀请码发送失败，请稍后重试");
 
     private final int code;
     private final String message;
