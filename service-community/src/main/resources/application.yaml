@@ -10,6 +10,13 @@ spring:
       config:
         server-addr: ${NACOS_ADDR:localhost:8848}
         file-extension: yaml
+  data:
+    redis:
+      # Redis 故障快速失败：Lettuce 命令超时默认 60s，拦截器（凭证失效 Lua）+ 限流
+      # 两处 Redis 调用会把单个请求拖到分钟级；两者均 fail-open，2s 内降级即可。
+      # 这两项同时被 Redisson 自动配置读取（setTimeout / setConnectTimeout）。
+      timeout: 2s
+      connect-timeout: 2s
 
 codewise:
   mq:
@@ -61,7 +68,7 @@ api:
     rate-limit:
       type: redis
       algorithm: sliding-window
-      default-limit: -1
+      default-limit: 60
       default-window: 60
       status-code: 429
       message: "社区操作过于频繁，请稍后重试"

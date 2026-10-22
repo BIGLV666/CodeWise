@@ -22,7 +22,6 @@
         <dependency>
             <groupId>io.github.biglv666</groupId>
             <artifactId>api-governance-spring-boot-starter</artifactId>
-            <version>0.1.0</version>
         </dependency>
         <!-- Spring Web -->
         <dependency>
@@ -103,6 +102,15 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-compress</artifactId>
             <version>1.26.2</version>
+        </dependency>
+        <!-- commons-compress 1.26.2 读写 tar 都需要 commons-io >= 2.16，而原本传递进来的是 2.13.0：
+             这里显式对齐版本（必须保持 compile 作用域——docker-java 的 DefaultInvocationBuilder
+             依赖 commons-io，声明成 test 作用域会把传递依赖顶掉，运行时直接 NoClassDefFoundError）。
+             单测解析 copyWorkspaceToContainer 产出的 tar 流同样依赖该版本。 -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.16.1</version>
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>

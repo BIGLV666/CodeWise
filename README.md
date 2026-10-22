@@ -2,6 +2,31 @@
 
 CodeWise 是面向在线编程、代码判题和错题复习场景的学习平台。主体由 8 个可独立运行的 Spring Boot 服务应用和 2 个公共 Maven 模块组成，旁路运行一个 FastAPI + Node 工具运行时（dsh）的 Agent。平台围绕“做题、判题、复习、交流、AI 辅助”形成完整学习闭环，并使用 Nacos、Gateway、OpenFeign、RabbitMQ、Redis 与 Docker 支撑服务协作和异步业务链路。
 
+线上环境：**<https://oj.biglv.asia>**；前端为独立的兄弟仓库 [CodeWise-frontend](https://github.com/BIGLV666/CodeWise-frontend)，与后端一并构建部署。
+
+## 线上环境
+
+| 项 | 值 |
+| --- | --- |
+| 访问入口 | <https://oj.biglv.asia> |
+| 协议 | HTTPS（Let's Encrypt 证书）；`http://` 请求 301 跳转到 `https://` |
+| 入口链路 | 宿主 Nginx 终结 TLS → 前端容器（nginx:80）→ 网关 `:8082` |
+| 部署形态 | 本仓库 [`deploy/docker-compose.yml`](deploy/docker-compose.yml) 一键全栈，15 个常驻容器（前端 + 网关 + 7 个业务服务 + Python Agent + MySQL/Redis/RabbitMQ/Nacos + Mailpit） |
+
+```text
+浏览器 ──HTTPS──▶ 宿主 Nginx（TLS 终结 · HTTP→HTTPS 301）
+                    └─▶ frontend 容器 nginx:80（静态资源 + /api、/agentapi、/uploads 反代）
+                          ├─▶ service-gateway:8082 ──▶ 7 个业务服务
+                          └─▶ codewise-agent（FastAPI + dsh，经 /agentapi/ 前缀）
+```
+
+线上验证：网关与 Agent 接口都强制鉴权，未登录调用 `/api/**`、`/agentapi/api/agent/**` 统一返回 `401`（`{"code":4010001,...}`）。
+
+环境可自行注册账号使用（注册与找回密码的验证码邮件由真实 SMTP 发出）。演示环境为单机小规格部署，以下能力取决于部署时的配置：
+
+- **AI 能力**：平台内置模型由 Nacos 下发的 Provider 列表决定；也可按账号配置自定义模型（密钥经 AES-GCM 加密存储）。
+- **判题**：判题容器池按单机规模预热（Java 2 个，Python / C / C++ 各 1 个），并发提交会排队；沙箱限 1 核 CPU / 256m 内存 / `network=none`。
+
 ## 已实现能力
 
 - 在线判题：代码提交、调试、测试点执行、结果回写与状态查询。
@@ -18,6 +43,8 @@ CodeWise 是面向在线编程、代码判题和错题复习场景的学习平�
 flowchart TB
     Web["Web 前端（HTTP / SSE / WebSocket）"]
     ApiClient["API Client"]
+    Edge["宿主 Nginx<br/>HTTPS 终结（Let's Encrypt）· HTTP→HTTPS 301"]
+    Frontend["frontend 容器 nginx:80<br/>静态资源 · /api · /agentapi · /uploads 反代"]
     Gateway["service-gateway :8082<br/>JWT 校验 · 剥离伪造头后注入可信身份 · 路由"]
 
     subgraph services["业务服务"]
@@ -40,11 +67,13 @@ flowchart TB
     Infra["基础设施<br/>MySQL（每服务一库）· Redis · Nacos"]
     ModelGateway["OpenAI 兼容模型网关<br/>平台 Provider + 用户自定义模型"]
 
-    Web --> Gateway
-    ApiClient --> Gateway
+    Web --> Edge
+    ApiClient --> Edge
+    Edge --> Frontend
+    Frontend -->|"/api/**"| Gateway
+    Frontend -->|"/agentapi/"| Agent
     Gateway --> services
 
-    Web -->|"Bearer Token 直达"| Agent
     Agent -->|"原 Token + 工具调用"| Gateway
     Agent --> ModelGateway
 
@@ -62,11 +91,12 @@ flowchart TB
     Agent -.->|"agent_* 表"| Infra
 ```
 
+- 线上入口由宿主 Nginx 终结 TLS（Let's Encrypt 证书，`http://` 301 跳转 `https://`），再转入前端容器；容器内 nginx 提供静态资源并反代 `/api`、`/agentapi`、`/uploads`。
 - Gateway 校验 JWT，**先剥离**客户端伪造的 `X-User-Id`/`X-User-Name`/`X-Internal-Token`/`X-Real-IP`，**再注入**可信值；下游拦截器校验内部 Token 并写入 `UserContext`，Feign 调用继续透传同一身份。
 - **每个服务一个数据库**，跨服务数据只经 Feign 或消息传递，不做跨库 SQL；判题服务与题目服务共库但只读写判题相关表。
 - **异步判题**：提交记录落库与事件登记在同一事务（事务性 Outbox），Relay 投递到 RabbitMQ，判题服务在 Docker 沙箱执行后回写结果；失败走延迟重试（5s/10s/20s），超限进死信队列留痕可重放。
 - **实时通道**：通知中心经 WebSocket 推送（判题结果、点赞、申诉处理），`service-ai` 的题目内追问与 Agent 对话走 SSE 流式返回。
-- **Python Agent** 由前端携带用户原始 Bearer Token 直达，用与 Java 端一致的 JWT 密钥解析身份，工具调用携带原 Token 经 Gateway 访问各服务；Agent 不接受模型生成的 `userId`。
+- **Python Agent** 由前端经 `/agentapi/` 前缀调用，用与 Java 端一致的 JWT 密钥解析身份，工具调用携带用户原始 Bearer Token 经 Gateway 访问各服务；Agent 不接受模型生成的 `userId`。
 - **两条 AI 路径职责不同**：`service-ai` 消费判题失败事件生成建议、提供题目内追问；`codewise-agent` 提供独立会话页面的跨模块自然语言操作。两者都通过 OpenAI 兼容网关接入模型，平台 Provider 由 Nacos 下发，用户也可配置自定义模型。
 
 ## 服务模块
@@ -145,7 +175,7 @@ Agent 运行时为 dsh（Node 子进程）：Python 门面（FastAPI）按会话
 | `done` | 本次会话处理完成（含 finish_reason 与最终内容） |
 | `error` | 流开始后的异常信息 |
 
-用户问题和完整助手回答在流正常结束后统一提交事务；生成中途失败时回滚本次消息写入。
+用户问题和完整助手回答在流正常结束后统一提交事务；生成中途失败、客户端断开或取消时回滚本次消息写入，不留下只有用户问题的孤立历史。客户端断开（离开页面、切换会话）会被服务端检测并取消本轮，回收运行时子进程与会话 Token 文件。
 
 Agent HTTP 接口：
 
@@ -158,6 +188,8 @@ Agent HTTP 接口：
 | `GET` | `/api/agent/messages/{conversationId}` | 查询会话消息 |
 | `POST` | `/api/agent/call` | 非流式 Agent 调用 |
 | `POST` | `/api/agent/stream` | SSE 流式 Agent 调用及工具过程事件 |
+
+线上环境这些接口位于 `/agentapi/` 前缀下（如 `/agentapi/api/agent/stream`），由前端容器 nginx 反代到 Agent 容器。
 
 ### Docker 判题与容器池
 
@@ -202,7 +234,9 @@ CodeWise/
 
 ## Docker 部署
 
-除本地开发外，项目提供一键 Docker 全栈部署：一台 Linux 主机 + Docker 即可在十分钟左右跑起全栈——15 个常驻容器（前端、网关、7 个业务服务、Python Agent、MySQL/Redis/RabbitMQ/Nacos、Mailpit 邮件捕获），另有一个一次性 judge-base 构建任务容器（`up -d --build` 时构建判题基础镜像后即退出），判题沙箱是运行期由 service-judge 动态创建的临时容器，并已在实机完成端到端验证。
+除本地开发外，项目提供一键 Docker 全栈部署：一台 Linux 主机 + Docker 即可在十分钟左右跑起全栈——15 个常驻容器（前端、网关、7 个业务服务、Python Agent、MySQL/Redis/RabbitMQ/Nacos、Mailpit 邮件捕获），另有一个一次性 judge-base 构建任务容器（`up -d --build` 时构建判题基础镜像后即退出），判题沙箱是运行期由 service-judge 动态创建的临时容器。
+
+线上的 <https://oj.biglv.asia> 就是这套编排部署在单台 Linux 主机上，TLS 终结与域名跳转由宿主 Nginx 承担，步骤见 [deploy/OPERATIONS.md](deploy/OPERATIONS.md) 第 3 节。
 
 三步启动：
 
@@ -290,7 +324,7 @@ FastAPI 默认监听 `127.0.0.1:8000`。前端调用 `/api/agent/**` 时必须�
 - [Controller 接口总览](docs/backend-controller-api.md)
 - [维护手册](docs/maintenance-guide.md)
 - [Docker 快速开始](deploy/README.md)
-- [部署运维手册](deploy/OPERATIONS.md)
+- [部署运维手册（HTTPS / 域名 / 备份 / 排障）](deploy/OPERATIONS.md)
 - [复习与收藏接口](docs/service-review/api.md)
 - [社区接口](docs/service-community/api.md)
 - [通知中心与消息服务](docs/service-message/README.md)
@@ -300,7 +334,3 @@ FastAPI 默认监听 `127.0.0.1:8000`。前端调用 `/api/agent/**` 时必须�
 - [自定义 AI 配置接口](docs/service-ai/README.md#用户自定义-ai-服务配置接口)
 - [Java AI 模块与会话记忆](docs/service-ai/README.md)
 - [V1 发布基线](docs/v1-release-notes.md)
-
-## 项目定位
-
-本项目用于个人学习与工程实践，重点展示异步判题、函数题适配、容器池调度、学习数据闭环和 AI 辅助等核心实现及其设计过程。

@@ -64,6 +64,9 @@ services:
   mysql:
     mem_limit: 1g
     image: mysql:8.4
+    # 基础服务没有 app-base 的重启策略：被 OOM kill 或 Docker 重启后不会自愈。
+    # 2026-10-13 线上 Nacos 正是因此长期失联（连带业务服务 DNS 解析不了 nacos）。
+    restart: unless-stopped
     <<: *infra-logging
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -128,14 +131,18 @@ services:
 
   nacos:
     # JVM_XMX 512m + 堆外/元空间实际 RSS 约 630m+，640m 限额只剩十几 MB 会被 OOM kill
+    # 原先XMN使用默认512m,导致新生代近似等于堆，老年代仅仅只剩下64kb，yg频繁cms空转，导致cpu使用率极高，必须显示覆盖xmn。
     mem_limit: 1g
     image: nacos/nacos-server:v2.3.2
+    # 同 mysql：无重启策略时被 OOM kill 后不会自愈，所有业务服务随之解析不到 nacos
+    restart: unless-stopped
     <<: *infra-logging
     environment:
       MODE: standalone
       NACOS_AUTH_ENABLE: "false"
-      JVM_XMS: 256m
+      JVM_XMS: 512m
       JVM_XMX: 512m
+      JVM_XMN: 256m
     volumes:
       - nacos-data:/home/nacos/data
     # 控制台仅映射宿主回环：SMTP/AI Provider 等功能配置与排障入口（不对公网暴露）
@@ -169,6 +176,8 @@ services:
       <<: [*common-env]
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS}
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8082:8082"
     healthcheck:
@@ -195,6 +204,7 @@ services:
       ROOT_EMAIL: ${ROOT_EMAIL:-}
     volumes:
       - user-uploads:/app/data/uploads
+      - service-logs:/app/logs
     ports:
       - "8081:8081"
     healthcheck:
@@ -225,6 +235,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - question-artifacts:/app/data/function-artifacts
+      - service-logs:/app/logs
     ports:
       - "8084:8084"
     healthcheck:
@@ -256,6 +267,7 @@ services:
       CODEWISE_JUDGE_CONSUMERCONCURRENCY: ${JUDGE_CONCURRENCY:-2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - service-logs:/app/logs
     ports:
       - "8086:8086"
     healthcheck:
@@ -277,6 +289,8 @@ services:
       <<: [*common-env, *db-env]
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_review?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
       JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8097:8097"
     healthcheck:
@@ -297,6 +311,8 @@ services:
     environment:
       <<: [*common-env, *db-env]
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_community?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8087:8087"
     healthcheck:
@@ -324,7 +340,18 @@ services:
       SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-1025}
       SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
       SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
-      SPRING_MAIL_FROM: ${CODEWISE_MAIL_FROM:-codewise@noreply.local}
+      # 发件地址读的是 codewise.mail.from（EmailService 的 @Value），不是 spring.mail.from。
+      # 故容器内环境变量必须是 CODEWISE_MAIL_FROM 才能被松绑定命中；写成 SPRING_MAIL_FROM
+      # 会被静默忽略，发件人退回 Java 里的硬编码默认值（作者个人邮箱）——曾导致真实 SMTP
+      # 因发件地址与认证账号不一致而被拒。
+      CODEWISE_MAIL_FROM: ${CODEWISE_MAIL_FROM:-codewise@noreply.local}
+      # TLS：Spring Boot 不会自动开启 SSL/STARTTLS，必须显式打开，否则 465 直接连不上、
+      # 587 多数服务商也会拒 AUTH。465（隐式 SSL）置 SPRING_MAIL_SSL_ENABLE=true；
+      # 587（STARTTLS）置 SPRING_MAIL_STARTTLS_ENABLE=true。默认 false 以兼容明文 Mailpit。
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_SSL_ENABLE: ${SPRING_MAIL_SSL_ENABLE:-false}
+      SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE: ${SPRING_MAIL_STARTTLS_ENABLE:-false}
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8083:8083"
     healthcheck:
@@ -347,6 +374,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/codewise_ai?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
       # security.api-key-master-key 经 SPRING_APPLICATION_JSON 注入（属性名含中划线）
       SPRING_APPLICATION_JSON: '{"security":{"api-key-master-key":"${API_KEY_MASTER_KEY}"}}'
+    volumes:
+      - service-logs:/app/logs
     ports:
       - "8085:8085"
     healthcheck:
@@ -386,10 +415,10 @@ services:
   frontend:
     mem_limit: 64m
     image: ${CODEWISE_IMAGE_PREFIX:-codewise/}frontend:latest
-    # 前端源码在兄弟仓库 CodeWise-frontend/CodeWise-frontend，用 dockerfile_inline 构建，
-    # 与 deploy/frontend/Dockerfile 内容一致（后者作为独立构建参考）
+    # 前端源码在兄弟仓库 CodeWise-frontend（须与 CodeWise 同级：clone 到 ../CodeWise-frontend），
+    # 用 dockerfile_inline 构建，与 deploy/frontend/Dockerfile 内容一致（后者作为独立构建参考）
     build:
-      context: ../../CodeWise-frontend/CodeWise-frontend
+      context: ../../CodeWise-frontend
       dockerfile_inline: |
         FROM node:22-alpine AS build
         WORKDIR /fe
@@ -408,7 +437,8 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "80:80"
+      # 宿主端口可配：默认 80；宿主 80 已被占用（如已装 nginx / 宝塔面板）时改为 8080 等
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - service-gateway
     restart: unless-stopped
@@ -420,3 +450,5 @@ volumes:
   nacos-data:
   question-artifacts:
   user-uploads:
+  # 各业务服务共享一个卷，GC 日志按服务名分文件（gc-<module>.log），互不覆盖
+  service-logs:

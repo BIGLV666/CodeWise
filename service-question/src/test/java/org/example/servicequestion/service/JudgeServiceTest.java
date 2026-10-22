@@ -13,6 +13,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
@@ -61,6 +63,41 @@ class JudgeServiceTest {
     void tearDown() {
         UserContext.clear();
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"NORMAL", "REVIEW", "PLAN"})
+    void judgeAcceptsAllSupportedSubmitScenes(String scene) {
+        when(submitRecordMapper.insert(any(SubmitRecord.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, SubmitRecord.class).setSubmitRecordId(900L);
+            return 1;
+        });
+
+        GetCodeDto dto = new GetCodeDto();
+        dto.setCode("print(1)");
+        dto.setLanguage("Python");
+        dto.setQuestionId(5L);
+        dto.setSubmitScene(scene);
+
+        assertEquals(900L, judgeService.judge(dto));
+        ArgumentCaptor<SubmitRecord> captor = ArgumentCaptor.forClass(SubmitRecord.class);
+        verify(submitRecordMapper).insert(captor.capture());
+        assertEquals(scene, captor.getValue().getSubmitScene());
+        verify(outboxPublisher).publish(EventTypes.JUDGE_SUBMIT_REQUEST, 900L);
+    }
+
+    @Test
+    void judgeRejectsUnsupportedSubmitScene() {
+        GetCodeDto dto = new GetCodeDto();
+        dto.setCode("print(1)");
+        dto.setLanguage("Python");
+        dto.setQuestionId(5L);
+        dto.setSubmitScene("UNKNOWN");
+
+        BizException exception = assertThrows(BizException.class, () -> judgeService.judge(dto));
+        assertEquals(QuestionErrorCode.SUBMIT_SCENE_UNSUPPORTED.getCode(), exception.getCode());
+        verifyNoInteractions(submitRecordMapper, outboxPublisher);
+    }
+
 
     @Test
     void judgePublishesSubmitRequestToOutboxAfterInsert() {

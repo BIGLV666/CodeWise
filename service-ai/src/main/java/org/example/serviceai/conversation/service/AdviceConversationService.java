@@ -11,8 +11,8 @@ import org.example.serviceai.exception.AiErrorCode;
 
 import org.example.serviceai.conversation.repository.AiConversationRepository;
 import org.example.serviceai.entry.Message;
-import org.example.serviceai.service.AIService;
-import org.example.serviceai.service.UserAiService;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
 import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.servicecommon.until.UserContext;
@@ -32,11 +32,9 @@ public class AdviceConversationService {
     @Autowired
     private AiConversationRepository aiConversationRepository;
     @Autowired
-    private AIService aiService;
+    private AiFacade aiFacade;
     @Autowired
     private AiConversationMemaryService  aiConversationMemaryService;
-    @Autowired
-    private UserAiService userAiService;
     /**
      * 同步追问（首次）：落一条用户/SYSTEM 消息并生成 AI 回答。
      *
@@ -124,7 +122,7 @@ public class AdviceConversationService {
         }
         String repost;
         try {
-            repost=aiService.callAi(prompt);
+            repost=aiFacade.chat(AiRequest.auto(prompt));
         } catch (Exception exception) {
             aiConversationRepository.finishGeneratingMessage(savedMessage.getMessageId(), "", MessageStatus.FAILED);
             throw exception;
@@ -245,12 +243,22 @@ public class AdviceConversationService {
                 userMessage
         );
 
-        boolean useAutoProvider = userAiConfigId == null
-                && (modelName == null || modelName.isBlank());
-        if (!useAutoProvider
-                && (userAiConfigId == null || modelName == null || modelName.isBlank())) {
+        // 用户三选一的映射（前端契约）：
+        //   只给分组            → 用户自带配置（模型须属于该组，后端会再校验一次）
+        //   只给模型            → 平台指定模型（按模型路由，不轮转不兜底）
+        //   两个都不给          → AUTO（平台按服务商轮转，模型用端点的默认模型）
+        // 给了分组却没给模型是前端没按契约传参，此时无法确定用户意图，必须报错而不是替用户选。
+        boolean hasConfig = userAiConfigId != null;
+        boolean hasModel = modelName != null && !modelName.isBlank();
+        if (hasConfig && !hasModel) {
             throw new BizException(AiErrorCode.MODEL_ARGS_INCOMPLETE);
         }
+        // 会话标识：同一会话的每轮、每次重试都必须是它——协议拿它做 prompt cache 的分组键
+        // （OpenCode Go 的 x-opencode-session）。取会话主键：跨轮稳定，且不含用户身份信息。
+        AiRequest aiRequest = (hasConfig
+                ? AiRequest.userConfig(prompt, userId, userAiConfigId, modelName)
+                : (hasModel ? AiRequest.model(prompt, modelName) : AiRequest.auto(prompt)))
+                .withSessionRef(String.valueOf(conversationId));
 
         // 流开始前先落 status=GENERATING 的 ASSISTANT 占位行（content 列 NOT NULL，先插空串），
         // 结束后原子收尾（WHERE status='GENERATING'）：完成→COMPLETED，异常→FAILED，
@@ -279,11 +287,7 @@ public class AdviceConversationService {
             onChunk.accept(chunk);
         };
         try {
-            if (useAutoProvider) {
-                aiService.streamAi(prompt, answerConsumer);
-            } else {
-                userAiService.streamAi(prompt, answerConsumer, userId, userAiConfigId, modelName);
-            }
+            aiFacade.chatStream(aiRequest, answerConsumer);
         } catch (Exception exception) {
             MessageStatus finalStatus = isClientDisconnect(exception)
                     ? MessageStatus.CANCELLED

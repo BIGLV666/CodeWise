@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import threading
 import time
 import uuid
@@ -58,6 +59,47 @@ class RuntimeBusyError(RuntimeError):
     """同一会话已有一轮对话在执行时抛出。"""
 
 
+def build_session_id(conversation_id: int, settings: "DshSettings", ai_config: AiRuntimeConfig,
+                     instance_nonce: str) -> str:
+    """构造 dsh 会话 id：会话号 + 配置摘要 + **运行实例随机后缀**。
+
+    dsh 恢复已存会话日志的判定是 ``seedCoversPrefix``：它要求**已存日志的前缀与活会话 seed
+    逐字节 JSON 相等**（``JSON.stringify(seedEvent) === JSON.stringify(event)``），而 seed
+    里含创建时间戳等每次都会变的字段，因此新进程**永远无法**复现旧前缀，dsh 必然抛
+    ``session "cw-N" ... does not match this live session (id collision)``——该会话此后每轮
+    都失败（用户看到「模型未返回有效内容」或 SSE 流空返回/中断）。dsh 自己的注释也写明该
+    adopt 路径是给 **HMR/reload（同进程）** 用的。
+
+    所以不能让同一会话在新进程里复用旧 id：
+
+    - 实例后缀让每个运行时实例拿到自己的会话（dsh 走"全新会话"分支，永不碰撞）。同一实例
+      内的多轮对话仍共用该会话，上下文连续；实例被回收（空闲超时 / 容器重启 / 模型配置变更）
+      后开启新会话，模型上下文从零开始——跨实例的连续上下文应由门面用 MySQL 里的消息历史
+      回放（DB 才是历史的事实来源，JSONL 只是运行期工作日志）。
+    - 配置摘要（``AiRuntimeConfig.fingerprint()`` 叠加 provider 与 system prompt）只用于让日志
+      目录自解释：出问题时一眼看出那是哪套配置写的。
+    """
+
+    seed_inputs = "\x1f".join([
+        ai_config.fingerprint(),
+        settings.provider,
+        settings.system_prompt or "",
+    ])
+    digest = hashlib.sha256(seed_inputs.encode("utf-8")).hexdigest()[:10]
+    return f"cw-{conversation_id}-{digest}-{instance_nonce}"
+
+
+def compose_prompt(question: str, history: str | None = None) -> str:
+    """把可选的前情提要拼在当前输入之前。
+
+    同一运行时实例的后续轮次不带 history，此时原样返回输入——不给每轮提示词加噪声。
+    """
+
+    if not history or not history.strip():
+        return question
+    return f"{history}\n\n【当前用户输入】\n{question}"
+
+
 class DshConversationRuntime:
     """一个会话的 dsh 运行时生命周期与轮次执行。"""
 
@@ -75,17 +117,24 @@ class DshConversationRuntime:
         self._fingerprint = ai_config.fingerprint()
         self._busy_lock = threading.Lock()
         self._harness: DeepSeekHarness | None = None
-        # 确定性 session id：会话目录与 session 一一对应，无需额外映射表，
-        # 进程重启后按同样的 id 恢复 JSONL 日志。
-        self.session_id = f"cw-{conversation_id}"
+        # dsh 会话 id：每个运行时实例独立（理由见 build_session_id）。同一实例内的多轮共用
+        # 同一会话，上下文连续；实例被回收后开新会话，避免去 adopt 旧日志而整会话失效。
+        self.session_id = build_session_id(conversation_id, settings, ai_config, uuid.uuid4().hex[:8])
         self.session_root = settings.session_root_base / str(conversation_id)
+        # 实例重建后模型上下文为空（dsh 无法跨进程恢复会话），首轮需要门面用 MySQL 里的
+        # 消息历史把上下文接回去；接过一次即可，之后由 dsh 自己的会话记忆承担。
+        self.needs_context_replay = True
         self.last_used = time.monotonic()
+        self.turn_timeout_seconds = float(os.getenv("DSH_TURN_TIMEOUT_SECONDS", "300"))
 
     def run_turn(
         self,
         question: str,
         token: str,
         on_event,
+        *,
+        cancel_event: threading.Event | None = None,
+        history: str | None = None,
     ) -> RunResult:
         """执行一轮对话；on_event 会被实时回调，参数是 dsh session event 字典。
 
@@ -93,6 +142,8 @@ class DshConversationRuntime:
             question: 用户输入文本。
             token: 该用户当前 Bearer token；写入会话私有文件供工具读取。
             on_event: 回调 ``Callable[[JsonObject], None]``，在运行时线程内同步调用。
+            history: 可选的前情提要（历史对话文本）。仅在本实例首轮传入：实例重建后
+                dsh 会话是全新的，模型不记得之前几轮，需要靠它接回上下文。
 
         Raises:
             RuntimeBusyError: 上一轮尚未结束。
@@ -101,16 +152,27 @@ class DshConversationRuntime:
 
         if not self._busy_lock.acquire(blocking=False):
             raise RuntimeBusyError("该会话上一轮对话尚未结束")
+        cancel_event = cancel_event or threading.Event()
         try:
+            if cancel_event.is_set():
+                raise RuntimeError("Agent 轮次已取消")
             token_path = self._token_store.write(self.conversation_id, token)
             harness = self._ensure_harness(token_path)
             self.last_used = time.monotonic()
-            return harness.run(
-                question,
+            if cancel_event.is_set():
+                raise RuntimeError("Agent 轮次已取消")
+            prompt = compose_prompt(question, history)
+            result = harness.run(
+                prompt,
                 session_id=self.session_id,
-                on_notification=_make_event_forwarder(on_event),
+                on_notification=_make_event_forwarder(on_event, cancel_event),
             )
+            # 成功跑完一轮说明该会话里已经有上下文，后续轮次不必再回放。
+            self.needs_context_replay = False
+            return result
         finally:
+            if cancel_event.is_set():
+                self.close()
             self._busy_lock.release()
             self.last_used = time.monotonic()
 
@@ -167,8 +229,13 @@ class DshConversationRuntime:
             ),
         )
         harness = DeepSeekHarness(config)
-        harness.start()
+        # 启动期也必须可取消：initialize 可能阻塞，关闭路径需要先拿到 harness。
         self._harness = harness
+        try:
+            harness.start()
+        except BaseException:
+            self.close()
+            raise
         logger.info(
             "dsh 运行时已启动 conversation_id=%s session=%s model=%s",
             self.conversation_id,
@@ -178,7 +245,7 @@ class DshConversationRuntime:
         return harness
 
 
-def _make_event_forwarder(on_event):
+def _make_event_forwarder(on_event, cancel_event: threading.Event | None = None):
     """把 SDK 通知转换成 dsh session event 回调。
 
     SDK 的 Session.run 会把根会话事件同时放进通知流；这里只挑出
@@ -186,6 +253,8 @@ def _make_event_forwarder(on_event):
     """
 
     def forward(notification) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            return
         if notification.method != "session.event":
             return
         event = notification.payload.get("event")

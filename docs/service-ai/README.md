@@ -42,7 +42,7 @@ service-ai/src/main/java/org/example/serviceai
 │   ├── WAAiHandle                     判题失败（WA/RE/TLE）建议消费者（事件状态机）
 │   └── TestCaseHandle、GLMTestCaseHandle、QwenTestCaseHandle
 │                                      题目测试用例生成消费者（ai.testcase.routing，成功后经 question.exchange 回传用例；终态失败补偿删除题目）
-└── service                            AIService、ConsumedEventService、UserAiService、ApiKeyCryptoService、FunctionArtifactService、AiAdviceTaskService 与模型适配器（GLM/Qwen/GPT/Ollama）
+└── service                            AIService、ConsumedEventService、UserAiService、ApiKeyCryptoService、FunctionArtifactService、AiAdviceTaskService 与模型适配器（AiAggregateService 按 ai.models 配置生成，OllamaService 供会话摘要）
 ```
 
 Prompt 构建、模型调用、持久化和推送分别放在对应层，不由 Controller 或 Mapper 混合承担。
@@ -107,7 +107,7 @@ data: 对用户安全的固定文案
 两处真实模型流式输出的修复必须保留：
 
 1. **空响应守卫**：`ask()` 与 `askStream()` 收尾前检查全文 `isBlank()`——网关限流或流解析异常可能返回空串，空结果按 FAILED 收尾并上抛（交分发器重试或向客户端报 error），绝不落空 COMPLETED 行（否则前端出现空胶囊）。
-2. **SSE 行解析**：Provider 解析按 `data:` 前缀匹配后再 `trim()`（SSE 规范允许冒号后不带空格，部分网关如 new-api 会省略——只认 `data: ` 会静默丢块导致回复截断）。该修复在 GLM/NikoApiGpt 适配器中；自定义用户模型通道（`UserAiService`）仍按 `data: ` 前缀解析。
+2. **SSE 行解析**：Provider 解析按 `data:` 前缀匹配后再 `trim()`（SSE 规范允许冒号后不带空格，部分网关如 new-api 会省略——只认 `data: ` 会静默丢块导致回复截断）。该修复在配置驱动的 `AiAggregateService` 中；自定义用户模型通道（`UserAiService`）仍按 `data: ` 前缀解析。
 
 ## 5. Prompt 上下文顺序
 
@@ -153,11 +153,13 @@ data: 对用户安全的固定文案
 | 模型类型 | 当前职责 |
 | --- | --- |
 | 云端模型 | 自动判题建议、用户实时追问、题目用例生成与函数产物生成、`/task` 静默观察 |
-| Ollama 小模型 | 会话摘要（增量压缩 / 重建），并作为优先级最低的兜底 Provider 参与轮转 |
+| Ollama 小模型 | 会话摘要（增量压缩 / 重建）；仅作为 Bean 供 `AiConversationMemaryService` 使用，不参与轮转 |
 
-已注册的平台 Provider 按优先级排序为：NikoApiGpt（`GPT`，0）、GLM（1）、QWEN（2）、Ollama（999）。GLM 与 NikoApiGpt 走 OpenAI 兼容 `chat/completions`，`endpoint` 默认官方公共网关、可经 Nacos 覆盖为自建网关；配置前缀分别为 `glm.*`、`nikoapigpt.*`、`qianwen.*`（各含 `apikey`/`model`，来自 Nacos `service-ai.yaml`）。QWEN 走 DashScope 原生非流式接口。Ollama 经 LangChain4j `OllamaChatModel`（`http://localhost:11434`，模型 `qwen2.5:14b`）。
+平台 Provider 完全由 Nacos 的 `ai.models` 配置驱动：列表里每条配置（`name`/`url`/`modelName`/`defaultModelName`/`apiKeys`/`enabled`/`priority`/`timeout`）在启动时由 `AIServiceManager` 生成一个 `AiAggregateService`，统一走 OpenAI 兼容的 `chat/completions`（`stream: true`），`apiKeys` 是 key 池、每次调用随机取一个。Provider 按 `priority` 升序轮转，`enabled: false` 的条目被剔除。原先硬编码的 GLM/Qwen/GPT 适配器及其 `glm.*`/`qianwen.*`/`nikoapigpt.*` 配置前缀已删除。Ollama 经 LangChain4j `OllamaChatModel`（`http://localhost:11434`，模型 `qwen2.5:14b`）。
 
-不同模型统一实现 `CallAi`。`AIServiceManager` 按优先级选择健康 Provider，记录失败次数并进行切换；后台单线程定时执行真实探测（`isAvailable` 即发一条 "Reply with OK."，10 秒内返回非空视为健康），健康实例每三分钟探测一次，不健康实例每三十秒复检，关闭服务时同步停止探测线程。`AIService` 记录 Provider 名称、耗时、超时判断和根因。
+`AiAggregateService` 刻意不是 Spring Bean——`Model` 是配置数据而非 Bean，无法注入；它由 `AIServiceManager`（组合根）按配置逐条 `new` 出来，依赖的 `GetAPiKey` 由容器先注入工厂再传入。
+
+不同模型统一实现 `CallAi`。`AIServiceManager` 按优先级选择健康 Provider，记录失败次数并进行切换；`ai.health-check.enabled` 为 `true`（默认）时后台单线程定时执行真实探测（`isAvailable` 即发一条 "Reply with OK."，10 秒内返回非空视为健康），健康实例每三分钟探测一次，不健康实例每三十秒复检，关闭服务时同步停止探测线程；为 `false` 时不起探测线程，改为乐观地把全部 Provider 标记为可用，靠调用时的失败计数与切换按需发现故障。`AIService` 记录 Provider 名称、耗时、超时判断和根因。
 
 ## 8. 数据库与迁移
 
@@ -182,7 +184,7 @@ UNIQUE KEY uk_event_id (event_id);  -- consumed_event
 
 表共五张：`ai_conversation`、`ai_message`、`ai_conversation_memory`、`user_ai_config`（`model_names` 为 JSON 列，`api_key` 存密文）、`consumed_event`。
 
-服务端口 `8085`，自身无 context-path，控制器直接暴露 `/api/ai/**`；网关（8082）按 `Path=/api/ai/**` 路由到本服务，所有请求先经 `UserAuthInterceptor` 校验 `X-Internal-Token` 并填充 `UserContext`。本地 `application.yaml` 固定项：`spring.rabbitmq.listener.simple.acknowledge-mode: manual`（手动 ACK 必须显式声明，否则与分发器双重确认导致 channel 崩溃）、`outboxpro.enabled: false`（本服务只消费不生产）、`codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`、`api.governance`（Redis 滑动窗口限流，超限返回 429「AI 请求过于频繁，请稍后重试」；管理端点 `/api/ai/governance` 仅管理员角色可访问）。数据源、`security.api-key-master-key` 与各 Provider 配置由 Nacos 数据源 `service-ai.yaml` 下发。
+服务端口 `8085`，自身无 context-path，控制器直接暴露 `/api/ai/**`；网关（8082）按 `Path=/api/ai/**` 路由到本服务，所有请求先经 `UserAuthInterceptor` 校验 `X-Internal-Token` 并填充 `UserContext`。本地 `application.yaml` 固定项：`spring.rabbitmq.listener.simple.acknowledge-mode: manual`（手动 ACK 必须显式声明，否则与分发器双重确认导致 channel 崩溃）、`outboxpro.enabled: false`（本服务只消费不生产）、`codewise.internal-token: ${CODEWISE_INTERNAL_TOKEN}`、`api.governance`（Redis 滑动窗口限流，超限返回 429「AI 请求过于频繁，请稍后重试」；管理端点 `/api/ai/governance` 仅管理员角色可访问）。数据源、`security.api-key-master-key` 与 Provider 配置（`ai.models`、`ai.health-check.enabled`）由 Nacos 数据源 `service-ai.yaml` 下发。
 
 已有数据库按 `service-ai/src/main/resources/sql/migration_*.sql` 顺序执行迁移（当前：`migration_20260823_ai_message_status.sql` 为 ai_message 增加 status 列并把存量 ASSISTANT 行回填 COMPLETED；`consumed_event.sql` 建消费幂等状态表）。Nacos 的 `service-ai.yaml` 数据源需要指向 `codewise_ai`。
 
@@ -407,6 +409,8 @@ Authorization: Bearer <token>
 - `String`：长度 `0-20`，内容为大小写字母和数字
 - `int[]`：长度 `0-20`，元素范围 `[-100, 100]`
 - `String[]`：长度 `0-10`，单个字符串长度 `0-10`
+- `int[][]`：行数 `0-5`、每行 `0-5` 个元素，元素范围 `[-100, 100]`
+- `ListNode`：节点数 `0-20`，节点值 `[-100, 100]`，按整数数组下发（判题侧还原成链表）
 - `TreeNode`：约 10% 概率空树，否则 1-15 个节点、节点值 `[-100, 100]`，按层序数组（含 null 空洞）输出
 
 随机生成只保证参数类型正确，不保证满足题目的跨参数业务约束。例如“两数之和一定存在答案”这类约束，后续需要增加题目级生成规则。
@@ -433,3 +437,30 @@ service-question LeetCodeArtifactImportService（异步任务）
 ```
 
 service-ai 侧不落库、不感知产物目录；模型只生成「生成器 + 标准答案」两段可执行源码，绝不直接枚举测试样例，样例数量与种子由 service-question 在运行时传给 Generator。
+
+---
+
+## 函数题题面重写（导入题库用）
+
+供 `service-question` 批量导入函数题时调用，输入是调用方自有的素材（已验证解法、参考实现、作者笔记），输出是**原创表述**的题面：
+
+```text
+service-question FunctionBatchImportService（异步任务）
+  -> AiDescriptionFeignClient：POST /api/ai/internal/function-description
+     请求头 X-CodeWise-Internal-Token = CODEWISE_INTERNAL_TOKEN（与 UserAuthInterceptor 的 X-Internal-Token 同值）
+  -> service-ai FunctionDescriptionService：
+     AiRequest.provider(指定端点, prompt, maxTokens).withSessionRef(固定会话种子).withModel(可选模型)
+```
+
+关键点：
+
+- **走指定端点，不走 AUTO**：默认端点 `opencode-go` 是订阅制上游（每次请求要 `x-opencode-session`），
+  已被刻意排除在 AUTO 轮转之外；这里按身份借用，并用固定种子派生会话 id（`OpenCodeSessionId`）复用上游 prompt cache。
+- 配置项：`codewise.function-description.provider`（默认 `opencode-go`）、
+  `codewise.function-description.model`（留空用端点默认模型）、`session`、`max-tokens`、`max-description-length`。
+- 提示词要求：只依据素材还原题意、禁止复述第三方题面/题号/平台名、禁止编造样例（样例由平台用真实执行结果回填）、
+  约束必须与平台随机数据规模一致。
+- 返回 `description/inputDesc/outputDesc/hint/difficulty/tags` 与 **`parameterRanges`**（参数取值域建议）：
+  后者让「题面写的约束」与「实际生成的用例」一致（例如 depth 必须是正整数、链表节点是 0~9 的数字、
+  字符串只能由 `1-9` 与 `#` 组成——字符集用 `allowedChars` 逐字列出，模型给中文描述时会被忽略并回退默认字符集）。
+- 不落库、不感知题目；service-ai 只负责把素材变成文案与取值域。

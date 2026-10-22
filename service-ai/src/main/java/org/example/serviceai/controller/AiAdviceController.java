@@ -129,7 +129,7 @@ public class AiAdviceController {
      * 把生成异常映射为推给前端的 SSE 错误事件文案。
      *
      * <p>文案一律来自错误码枚举（{@link BizException} 及其子类，含
-     * {@link org.example.serviceai.service.AiProviderHttpException}），只透出
+     * {@link org.example.serviceai.ai.transport.AiProviderHttpException}），只透出
      * 分类后的中文提示；其余异常（含 Provider 名称、内部根因、内部 URL）
      * 返回固定兜底文案，原始异常仅服务端留痕，避免内部细节泄漏到流载荷。</p>
      */

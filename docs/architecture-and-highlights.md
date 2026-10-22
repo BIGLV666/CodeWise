@@ -335,14 +335,17 @@ judge 侧消费者统一"提交后 ACK + 头计数退避重试 + 毒消息死信
 ### F. 横切能力：api-governance 统一 API 治理
 
 - 问题：限流/管理员校验/慢日志这类横切逻辑散落在各服务 controller，改一处要动八个服务。
-- 方案：自研 starter `io.github.biglv666:api-governance-spring-boot-starter:0.1.0`
+- 方案：自研 starter `io.github.biglv666:api-governance-spring-boot-starter:0.5.0`
   （根 POM 统一管版本），6 个业务服务（user/question/review/community/message/ai）本地 yaml 显式
   `api.governance.enabled: true`；judge 也标注了 @RateLimit 但本地 yaml 未显式配置（依赖 Nacos 下发）；
-  网关不接入该 starter 配置，只做头清洗与路由。
+  网关不接入该 starter 配置，只做头清洗与路由，也**不声明该依赖**（starter 是 Servlet 形态，
+  `0.5.0` 起自动配置类引用 `jakarta.servlet.Filter`，网关无 servlet API 会在启动自省时抛
+  `NoClassDefFoundError` 并反复重启——网关 `pom.xml` 有注释护栏）。
 - **@RateLimit 声明式限流**：168 个 controller 方法标注；Redis 滑动窗口，按端点配额，
-  未标注端点默认不限（`default-limit: -1`），超限返回 429 + 各服务定制中文文案。
+  未标注端点默认 60 次/分钟（`default-limit: 60` + `default-window: 60`）——`-1` 才是"只对显式标注的路由生效"，
+  即覆盖注解的免费额度；超限返回 429 + 各服务定制中文文案。
 - **键策略（service-common `RateLimiterConfig`）**：登录用户按 `#user:{id}` 限流（换 IP 绕不过配额）；
-  匿名请求按 `#ip:` 限流并把注解配额 ×20——校园网/公司共享出口不误伤单个 NAT 用户。
+  匿名请求按 `#ip:` 限流并把生效配额 ×20（含 `default-limit`，故匿名默认 1200 次/分钟）——校园网/公司共享出口不误伤单个 NAT 用户。
 - **@RequireAdmin（`AdminAuthAspect` 实现 governance `PreFilter`）**：方法/类级注解统一拦截，
   经 Feign 回查 roleId，仅管理员（2）或 root（0）放行，拒绝只回原因不泄露内部细节。
 - 治理端点：每服务 `/api/{svc}/governance`（配置驱动，`slow-threshold-ms: 1000` 慢请求日志，

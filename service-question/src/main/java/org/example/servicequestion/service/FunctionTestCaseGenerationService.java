@@ -8,6 +8,9 @@ import org.example.servicecommon.RedisDto.GetDebugTestDto;
 import org.example.servicecommon.RedisDto.JudgeReturnRecordDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.config.MqContexts;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.FunctionTestCaseDto;
 import org.example.servicequestion.dto.FunctionTestCaseGenerateRequest;
@@ -44,6 +47,7 @@ public class FunctionTestCaseGenerationService {
     private final FunctionQuestionParseService functionQuestionParseService;
     private final RedisTemplate<String, Object> redisTemplate;
     private final RabbitTemplate rabbitTemplate;
+    private final ObjectMapper objectMapper;
 
     public FunctionTestCaseGenerationService(
             QuestionPermissionService permissionService,
@@ -52,7 +56,8 @@ public class FunctionTestCaseGenerationService {
             FunctionCaseDataConverter caseDataConverter,
             FunctionQuestionParseService functionQuestionParseService,
             RedisTemplate<String, Object> redisTemplate,
-            RabbitTemplate rabbitTemplate
+            RabbitTemplate rabbitTemplate,
+            ObjectMapper objectMapper
     ) {
         this.permissionService = permissionService;
         this.functionConfigMapper = functionConfigMapper;
@@ -61,6 +66,7 @@ public class FunctionTestCaseGenerationService {
         this.functionQuestionParseService = functionQuestionParseService;
         this.redisTemplate = redisTemplate;
         this.rabbitTemplate = rabbitTemplate;
+        this.objectMapper = objectMapper;
     }
 
     public FunctionTestCaseGenerationTaskVo start(FunctionTestCaseGenerateRequest request) {
@@ -82,7 +88,8 @@ public class FunctionTestCaseGenerationService {
 
         int count = request.getCount() == null ? DEFAULT_COUNT : request.getCount();
         long seed = request.getSeed() == null ? System.nanoTime() : request.getSeed();
-        List<String> generatedInputs = inputGenerator.generate(config.getParameterConfig(), count, seed)
+        String generationConfig = resolveGenerationConfig(config.getParameterConfig(), request.getParameterConfigOverride());
+        List<String> generatedInputs = inputGenerator.generate(generationConfig, count, seed)
                 .stream()
                 .map(input -> caseDataConverter.normalizeInput(input, config.getParameterConfig()))
                 .toList();
@@ -222,8 +229,35 @@ public class FunctionTestCaseGenerationService {
         return tests;
     }
 
-    private FunctionTestCaseGenerationTaskVo loadTask(String taskId) {
-        if (taskId == null || taskId.isBlank()) {
+    /**
+     * 取出本次生成使用的参数配置：有覆盖时校验它与落库配置的类型/顺序一致。
+     *
+     * <p>取值域只影响随机采样，类型与顺序一旦不一致，生成出来的输入行就会与判题侧
+     * {@code Main} 的读取顺序/类型对不上——那是把错误数据悄悄写进题库，所以这里直接拒绝。</p>
+     */
+    private String resolveGenerationConfig(String storedConfig, String override) {
+        if (override == null || override.isBlank()) {
+            return storedConfig;
+        }
+        try {
+            JsonNode stored = objectMapper.readTree(storedConfig);
+            JsonNode custom = objectMapper.readTree(override);
+            if (!custom.isArray() || !stored.isArray() || custom.size() != stored.size()) {
+                throw new BizException(QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID);
+            }
+            for (int index = 0; index < stored.size(); index++) {
+                if (!stored.get(index).path("type").asText()
+                        .equals(custom.get(index).path("type").asText())) {
+                    throw new BizException(QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID);
+                }
+            }
+            return override;
+        } catch (JsonProcessingException exception) {
+            throw new BizException(QuestionErrorCode.FUNCTION_PARAM_CONFIG_INVALID, exception);
+        }
+    }
+
+    private FunctionTestCaseGenerationTaskVo loadTask(String taskId) {        if (taskId == null || taskId.isBlank()) {
             throw new BizException(QuestionErrorCode.TASK_ID_INVALID);
         }
         Object value = redisTemplate.opsForValue().get(taskKey(taskId));

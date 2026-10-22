@@ -48,6 +48,10 @@ public class FeignHeaderAutoConfiguration {
             if (ip != null) {
                 template.header("X-Real-IP", ip);
             }
+            String token=UserContext.getToken();
+            if(token!=null){
+                template.header("X-User-Token",token);
+            }
         };
     }
 }

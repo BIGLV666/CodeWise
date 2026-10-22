@@ -18,11 +18,56 @@ spring:
       config:
         server-addr: ${NACOS_ADDR:localhost:8848}
         file-extension: yaml
+  data:
+    redis:
+      # Redis 故障快速失败：Lettuce 命令超时默认 60s，拦截器（凭证失效 Lua）+ 限流
+      # 两处 Redis 调用会把单个请求拖到分钟级；两者均 fail-open，2s 内降级即可。
+      # 这两项同时被 Redisson 自动配置读取（setTimeout / setConnectTimeout）。
+      timeout: 2s
+      connect-timeout: 2s
 
 server:
   port: 8085
 codewise:
   internal-token: ${CODEWISE_INTERNAL_TOKEN}
+  # 函数题导入时的题面重写：走「按身份借用端点」这条路（不走 AUTO）。
+  # 默认端点 opencode-go 是订阅制上游、每次请求要求会话头，所以必须指定端点而非让 AUTO 轮转。
+  # session 只需跨轮稳定（同批导入复用一个会话，复用上游 prompt cache），服务端会把它规整成 ses_ 形状。
+  function-description:
+    provider: ${FUNCTION_DESCRIPTION_PROVIDER:opencode-go}
+    # 留空 = 用端点默认模型；填了就用指定模型（形如 deepseek-v4.1-flash）
+    model: ${FUNCTION_DESCRIPTION_MODEL:}
+    session: ${FUNCTION_DESCRIPTION_SESSION:codewise-function-description}
+    max-tokens: 8192
+    max-description-length: 20000
+
+# AI 端点：由 Nacos 下发 ai.models，每条配置按 type 选一个 AiProviderCreator 生成端点。
+# 示例（真实值放 Nacos，勿提交密钥）：
+# ai:
+#   health-check.enabled: true        # false = 不起周期探测线程，改为调用时按失败计数发现故障
+#   summary.provider: ollama          # 会话摘要固定用哪个端点（按名借用，不做故障切换）
+#   models:
+#     - name: GLM                     # 端点身份：日志/健康记账/key 池都用它，需唯一
+#       type: openai                  # 缺省 openai（Authorization: Bearer <key>）
+#       url: https://open.bigmodel.cn/api/paas/v4/chat/completions
+#       modelName: [glm-4-flash, glm-4-air]
+#       defaultModelName: glm-4-flash # 端点身份：健康记账、key 池、按名借用都用它
+#       apiKeys: [sk-xxx]             # key 池，每次调用随机取一个
+#       enabled: true
+#       priority: 1                   # 越小越优先（AUTO 轮转）
+#       timeout: 120000
+#       headers: { x-tenant: cw }     # 可选，附加请求头原样下发
+#     - name: opencode-go             # 订阅制上游（OpenCode Go），协议差异见 OpenCodeProtocol
+#       type: opencode-go
+#       url: https://opencode.ai/inference/go/v1/chat/completions
+#       defaultModelName: deepseek-v4.1-flash
+#       apiKeys: [oc_sk_xxx]
+#       enabled: true
+#       priority: 2
+#       # 注意：该端点每次请求都必须带 x-opencode-session（由调用方传入的会话 id 派生），
+#       # 所以只适合「指定模型」那条路；放进 AUTO 轮转会让没有会话概念的调用方（测试用例
+#       # 生成、函数产物生成）拿到 400。
+# 新增一种接入方式 = 新增一个 AiProviderCreator(+AiProtocol) Bean，本文件与工厂都不用改。
 
 # 本服务不生产事件：显式关闭 OutboxPro（其自动配置默认 matchIfMissing=true）
 outboxpro:
@@ -39,7 +84,7 @@ api:
     rate-limit:
       type: redis
       algorithm: sliding-window
-      default-limit: -1
+      default-limit: 60
       default-window: 60
       status-code: 429
       message: "AI 请求过于频繁，请稍后重试"

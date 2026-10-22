@@ -16,16 +16,20 @@ RUN (getent passwd 1000 >/dev/null && userdel -r "$(id -nu 1000)") || true \
 
 # 函数模式生成的判题代码 import jackson（反序列化 JSON 测试输入），
 # 编译 classpath 为 /opt/judge/lib/*，这里随镜像内置固定版本三件套
-# （与 CodeWise Spring Boot 3.2.4 BOM 的 jackson 2.15.x 对齐）
+# （与 CodeWise Spring Boot 3.2.4 BOM 的 jackson 2.15.x 对齐）。
+#
+# GNU time（/usr/bin/time）是判题内存指标的来源：run 脚本用它包住被测程序，
+# 以 %M 报告子进程峰值 RSS（KB）。缺少它时判题仍能跑，但 memory_used 只能记 0。
 ARG JACKSON_VERSION=2.15.4
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl \
+ && apt-get install -y --no-install-recommends curl time \
  && rm -rf /var/lib/apt/lists/* \
  && for a in jackson-databind jackson-core jackson-annotations; do \
         curl -fsSL "https://repo1.maven.org/maven2/com/fasterxml/jackson/core/$a/${JACKSON_VERSION}/$a-${JACKSON_VERSION}.jar" \
           -o "/opt/judge/lib/$a-${JACKSON_VERSION}.jar"; \
     done \
- && ls -la /opt/judge/lib
+ && ls -la /opt/judge/lib \
+ && /usr/bin/time -f 'GNU time OK: %M KB' true
 
 USER judge
 WORKDIR /workspace

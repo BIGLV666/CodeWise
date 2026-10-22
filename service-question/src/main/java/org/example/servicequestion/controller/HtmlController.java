@@ -2,6 +2,7 @@ package org.example.servicequestion.controller;
 
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.Result;
+import org.example.servicecommon.aop.RequireAdmin;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.service.HtmlService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,7 @@ public class HtmlController {
     @Autowired
     private HtmlService htmlService;
     @PostMapping("/html")
+    @RequireAdmin
     @RateLimit(limit = 20, window = 60)
     public Result<Question> html(@RequestParam("file") MultipartFile file) throws Exception {
 

@@ -98,7 +98,7 @@ public class LikeTask {
             long bucketId = redisBucketSwitcher.switchBucket(bucketSelectorKey);
             String sourceKey = bucketPrefix + "-" + bucketId;
             String processingKey = sourceKey + ":processing:" + UUID.randomUUID();
-            Boolean renamed = redisTemplate.renameIfAbsent(sourceKey, processingKey);
+            Boolean renamed = redisBucketSwitcher.renameIfSourceExists(sourceKey, processingKey);
             if (!renamed) {
                 log.info("点赞桶为空，task={}, bucketId={}", taskName, bucketId);
                 return;

@@ -24,7 +24,6 @@
         <dependency>
             <groupId>io.github.biglv666</groupId>
             <artifactId>api-governance-spring-boot-starter</artifactId>
-            <version>0.1.0</version>
         </dependency>
         <!-- Spring Web -->
         <dependency>

@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
 from dsh_bridge.manager import RuntimeManager
-from dsh_bridge.runtime import AiRuntimeConfig
+from dsh_bridge.runtime import AiRuntimeConfig, RuntimeBusyError
 from dsh_bridge.settings import DshSettings
 
 
@@ -97,15 +102,129 @@ def test_drop_invalidate_only_keeps_token_cleanup(tmp_paths):
 
 
 def test_idle_reaper_closes_runtime(tmp_paths):
-    """空闲超时（0.05s）后，扫描循环应关闭并移除运行时。"""
-
-    import time
-
-    manager, factory, created = _manager(tmp_paths, reap_interval=0.05)
+    manager, factory, created = _manager(tmp_paths)
     try:
-        manager.obtain(4, _config(), factory)
-        time.sleep(0.3)
-        assert len(created) == 1
-        assert created[0].closed is True
+        runtime = manager.obtain(4, _config(), factory)
+        runtime.last_used = 0
+        manager._reap_once()
+        assert runtime.closed
+        assert manager.obtain(4, _config(), factory) is not runtime
+        assert len(created) == 2
+    finally:
+        manager.shutdown_all()
+
+
+def test_busy_owner_cannot_be_released_by_failed_claim_or_stale_owner(tmp_paths):
+    manager, factory, _ = _manager(tmp_paths)
+    try:
+        runtime = manager.obtain(1, _config(), factory)
+        owner = manager.claim_turn(1)
+        with pytest.raises(RuntimeBusyError):
+            manager.claim_turn(1)
+        manager.release_turn(1, object())
+        with pytest.raises(RuntimeBusyError):
+            manager.claim_turn(1)
+        assert not runtime.closed
+        manager.release_turn(1, owner)
+        successor = manager.claim_turn(1)
+        assert successor is not owner
+        manager.release_turn(1, owner)
+        with pytest.raises(RuntimeBusyError):
+            manager.claim_turn(1)
+        manager.release_turn(1, successor)
+    finally:
+        manager.shutdown_all()
+
+
+def test_reaper_excludes_active_turn_until_actual_owner_releases(tmp_paths):
+    manager, factory, _ = _manager(tmp_paths)
+    try:
+        active = manager.obtain(1, _config(), factory)
+        idle = manager.obtain(2, _config(), factory)
+        active.last_used = idle.last_used = 0
+        owner = manager.claim_turn(1)
+        manager._reap_once()
+        assert idle.closed
+        assert not active.closed
+        assert manager.obtain(1, _config(), factory) is active
+        manager.release_turn(1, object())
+        manager._reap_once()
+        assert not active.closed
+        manager.release_turn(1, owner)
+        manager._reap_once()
+        assert active.closed
+    finally:
+        manager.shutdown_all()
+
+
+def test_drop_closes_runtime_but_preserves_active_owner(tmp_paths):
+    manager, factory, _ = _manager(tmp_paths)
+    try:
+        runtime = manager.obtain(1, _config(), factory)
+        owner = manager.claim_turn(1)
+        manager.drop(1, invalidate_only=False)
+        assert runtime.closed
+        assert not runtime.invalidated
+        with pytest.raises(RuntimeBusyError):
+            manager.claim_turn(1)
+        manager.release_turn(1, owner)
+        assert manager.claim_turn(1) is not owner
+    finally:
+        manager.shutdown_all()
+
+
+
+
+def test_reaper_close_window_rejects_new_claim_until_close_finishes(tmp_paths):
+    """回收已摘除但尚未 close 完成时，不能启动同会话新轮次。"""
+    manager, factory, _ = _manager(tmp_paths)
+    close_started = threading.Event()
+    allow_close = threading.Event()
+    try:
+        runtime = manager.obtain(9, _config(), factory)
+        runtime.last_used = 0
+
+        def blocked_close():
+            close_started.set()
+            assert allow_close.wait(2)
+            runtime.closed = True
+
+        runtime.close = blocked_close
+        reaper = threading.Thread(target=manager._reap_once, daemon=True)
+        reaper.start()
+        assert close_started.wait(1)
+        owner = None
+        try:
+            with pytest.raises(RuntimeBusyError):
+                owner = manager.claim_turn(9)
+        finally:
+            allow_close.set()
+            reaper.join(2)
+            if owner is not None:
+                manager.release_turn(9, owner)
+        assert not reaper.is_alive()
+        assert runtime.closed
+    finally:
+        allow_close.set()
+        manager.shutdown_all()
+
+
+def test_concurrent_claim_spike_has_exactly_one_owner(tmp_paths):
+    manager, _, _ = _manager(tmp_paths)
+    barrier = threading.Barrier(16)
+
+    def claim(_):
+        barrier.wait(timeout=3)
+        try:
+            return manager.claim_turn(1)
+        except RuntimeBusyError:
+            return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            for _ in range(20):
+                owners = [owner for owner in executor.map(claim, range(16)) if owner is not None]
+                assert len(owners) == 1
+                manager.release_turn(1, owners[0])
     finally:
         manager.shutdown_all()

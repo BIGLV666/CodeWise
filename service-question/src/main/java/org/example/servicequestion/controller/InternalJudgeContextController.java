@@ -1,5 +1,6 @@
 package org.example.servicequestion.controller;
 
+import io.github.biglv666.apigovernance.annotation.Skip;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.judge.JudgeContextDto;
 import org.example.serviceapi.dto.user.UserDto;
@@ -40,6 +41,7 @@ import java.util.Objects;
  * </ul>
  */
 @RestController
+@Skip(reason = "系统内部端点（service-ai 判题失败分析经 Feign 调用），鉴权依赖 X-Internal-Token 与管理员校验，不参与限流")
 @RequestMapping("/api/question/internal")
 public class InternalJudgeContextController {
 

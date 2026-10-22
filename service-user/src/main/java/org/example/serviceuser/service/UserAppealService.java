@@ -16,6 +16,7 @@ import org.example.serviceuser.vo.AppealVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -125,7 +126,12 @@ public class UserAppealService {
      * @param approve 是否批准申诉，true-批准，false-拒绝
      * @throws BizException 如果申诉记录不存在或已处理、申诉用户不存在，或更新申诉记录、解封用户失败
      *
+     * <p>该方法必须为事务，申诉记录用乐观锁（WHERE status=0）更新成功之后，
+     * 若紧接着的用户状态更新失败，管理员重试会被"该申诉已处理完成"挡掉，而用户实际没被解封。
+     * 让两处 DB 写同进同退。</p>
+     *
      */
+    @Transactional(rollbackFor = Exception.class)
     public void processUserAppeal(Long userAppealId, String processResult, boolean approve) {
         UserAppeal userAppeal = userAppealMapper.selectById(userAppealId);
         if (userAppeal == null) {

@@ -35,7 +35,7 @@ CodeWise 面向在线刷题场景，核心目标是把高延迟、高风险的�
 
 管理员接口不再各自写判断逻辑，而是标注 `@RequireAdmin`（类级或方法级，定义在 `service-common` 的 `aop` 包）。`AdminAuthAspect` 实现 api-governance 的 `PreFilter`，经 `META-INF/spring` 自动配置注册，凡引入 `service-common` 的服务都自动生效：它用 `UserContext.getUserId()` 经 `UserFeignClient` 回查 `roleId`，`2` 为管理员、`0` 为 root 才放行，其余情况通过 `FilterContext.setRejectReason(...)` 返回拒绝——切面内不抛异常，否则过滤器链会把异常包装成无业务含义的「过滤器异常」。
 
-对外接口普遍标注 `@RateLimit(limit, window)`（当前 169 处），由 `api-governance-spring-boot-starter` 以 Redis 滑动窗口实现，超限返回 429 与业务化中文提示；`default-limit: -1` 表示只对显式标注的路由生效。用户、题目、复习、社区、消息、AI 六个服务显式配置 `api.governance.enabled: true`（网关是 WebFlux 不参与，判题服务带依赖但没有该配置块，其管理接口依赖 `@RequireAdmin`）。限流键由 `service-common` 的 `RateLimiterConfig` 统一决定：登录用户按 `apiKey#user:<userId>`，未登录按 `apiKey#ip:<clientIp>` 并把配额放大 20 倍，避免共享出口 IP 误伤，也避免换 IP 绕过配额。已启用治理的服务另有 `/api/<service>/governance` 管理端点，用于查看运行期限流与日志配置。
+对外接口普遍标注 `@RateLimit(limit, window)`（当前 169 处），由 `api-governance-spring-boot-starter` 以 Redis 滑动窗口实现，超限返回 429 与业务化中文提示；`default-limit: 60`（配 `default-window: 60`）表示未标注路由也按 60 次/分钟兜底限流，`-1` 才表示只对显式标注的路由生效。用户、题目、复习、社区、消息、AI 六个服务显式配置 `api.governance.enabled: true`（网关是 WebFlux 不参与，也不引入该 starter——它是 Servlet 形态，`0.5.0` 起自动配置类签名引用 `jakarta.servlet.Filter`，网关类路径没有 servlet API，Spring 自省会抛 `NoClassDefFoundError` 导致网关反复重启；判题服务带依赖但没有该配置块，其管理接口依赖 `@RequireAdmin`）。限流键由 `service-common` 的 `RateLimiterConfig` 统一决定：登录用户按 `apiKey#user:<userId>`，未登录按 `apiKey#ip:<clientIp>` 并把配额放大 20 倍，避免共享出口 IP 误伤，也避免换 IP 绕过配额。已启用治理的服务另有 `/api/<service>/governance` 管理端点，用于查看运行期限流与日志配置。
 
 ## 4. 异步判题设计
 

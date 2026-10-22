@@ -10,6 +10,7 @@ import org.example.servicecommon.config.WebsocketContexts;
 import org.example.servicecommon.dto.ReviewJudgeRecordDto;
 import org.example.servicecommon.dto.WebsocketSendDto;
 import org.example.servicecommon.event.EnvelopeCodec;
+import org.example.servicequestion.MQ.MessageAcknowledgements;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicequestion.entry.JudgeRecord;
 import org.example.servicequestion.entry.SubmitRecord;
@@ -106,7 +107,7 @@ public class SubmitRecordHandel implements MessageHandler {
         } catch (IllegalArgumentException e) {
             // 毒消息：重投也无法恢复，直接丢弃
             log.error("判题结果消息载荷解析失败，按毒消息丢弃, deliveryTag: {}", deliveryTag, e);
-            channel.basicAck(deliveryTag, false);
+            MessageAcknowledgements.ack(channel, deliveryTag);
             return;
         }
 
@@ -117,13 +118,13 @@ public class SubmitRecordHandel implements MessageHandler {
 
             if (judgeRecord == null || judgeRecord.getSubmitRecordId() == null) {
                 log.error("判题结果数据不完整, judgeRecordId: {}", judgeRecordId);
-                channel.basicAck(deliveryTag, false);  // 确认并丢弃
+                MessageAcknowledgements.ack(channel, deliveryTag);  // 确认并丢弃
                 return;
             }
             SubmitRecord submitRecord = submitRecordMapper.selectById(judgeRecord.getSubmitRecordId());
             if (submitRecord == null) {
                 log.error("提交记录不存在: submitRecordId: {}", judgeRecord.getSubmitRecordId());
-                channel.basicAck(deliveryTag, false);
+                MessageAcknowledgements.ack(channel, deliveryTag);
                 return;
             }
 
@@ -134,7 +135,7 @@ public class SubmitRecordHandel implements MessageHandler {
                     status -> applyJudgeResult(judgeRecord, submitRecord, judgeResultDto)));
 
             // ★ ACK 严格在事务提交之后（幂等跳过同样 ACK），只确认一次，不批量确认
-            channel.basicAck(deliveryTag, false);
+            MessageAcknowledgements.ack(channel, deliveryTag);
 
             if (applied) {
                 clearRetryCountBestEffort(messageBody);
@@ -271,11 +272,11 @@ public class SubmitRecordHandel implements MessageHandler {
             } catch (Exception redisException) {
                 log.warn("失败消息留存 Redis 异常", redisException);
             }
-            channel.basicNack(deliveryTag, false, false);
+            MessageAcknowledgements.nack(channel, deliveryTag, false);
             return;
         }
         log.warn("判题结果消费失败，第 {} 次重试将重新入队", retryCount, cause);
-        channel.basicNack(deliveryTag, false, true);
+        MessageAcknowledgements.nack(channel, deliveryTag, true);
     }
 
     /** 消息体 MD5，作为 Redis Hash field 的稳定消息键。 */

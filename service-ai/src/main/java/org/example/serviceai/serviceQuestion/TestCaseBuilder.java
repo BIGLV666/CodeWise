@@ -1,6 +1,7 @@
 package org.example.serviceai.serviceQuestion;
 
-import org.example.serviceai.service.AIService;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
 import org.example.servicecommon.dto.QuestionMessage;
 import org.example.servicecommon.dto.TestMessage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,11 +13,11 @@ import java.util.List;
 public class TestCaseBuilder {
 
     @Autowired
-    private AIService aiService;
+    private AiFacade aiFacade;
 
     public List<TestMessage> buildTestCases(QuestionMessage questionMessage) {
         String prompt = buildPrompt(questionMessage);
-        String aiResponse = aiService.callAi(prompt);
+        String aiResponse = aiFacade.chat(AiRequest.auto(prompt));
         return TestCaseParser.parse(aiResponse, questionMessage.getQuestionId(), questionMessage.getCreateUserId());
     }
 

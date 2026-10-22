@@ -15,6 +15,7 @@ public class RedisBucketSwitcher {
     private RedisTemplate<String, Object> redisTemplate;
 
     private final DefaultRedisScript<Long> switchBucketScript;
+    private final DefaultRedisScript<Long> renameBucketScript;
 
     public RedisBucketSwitcher() {
         switchBucketScript = new DefaultRedisScript<>();
@@ -22,6 +23,17 @@ public class RedisBucketSwitcher {
         switchBucketScript.setScriptSource(
                 new ResourceScriptSource(new ClassPathResource("lua/switch_bucket.lua"))
         );
+        renameBucketScript = new DefaultRedisScript<>();
+        renameBucketScript.setResultType(Long.class);
+        renameBucketScript.setScriptSource(
+                new ResourceScriptSource(new ClassPathResource("lua/rename_bucket_if_exists.lua"))
+        );
+    }
+
+    /** 缺失源桶按空桶处理；存在性检查与重命名必须原子执行。 */
+    public boolean renameIfSourceExists(String sourceKey, String targetKey) {
+        Long renamed = redisTemplate.execute(renameBucketScript, List.of(sourceKey, targetKey));
+        return Long.valueOf(1).equals(renamed);
     }
 
     /** 原子切换双桶，并返回刚刚封闭的桶编号。 */

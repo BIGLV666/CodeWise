@@ -1,5 +1,6 @@
 package org.example.serviceai.controller;
 
+import io.github.biglv666.apigovernance.annotation.Skip;
 import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.service.FunctionArtifactService;
 import org.example.serviceapi.dto.Result;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Value;
 
 @RestController
+@Skip(reason = "系统内部端点（service-question 生成函数题产物经 Feign 调用），鉴权依赖 X-CodeWise-Internal-Token 校验，不参与限流")
 @RequestMapping("/api/ai/internal")
 public class FunctionArtifactController {
     private final FunctionArtifactService functionArtifactService;

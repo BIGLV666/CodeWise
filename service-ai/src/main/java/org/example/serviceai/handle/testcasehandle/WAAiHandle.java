@@ -11,8 +11,9 @@ import org.example.serviceai.entry.ConsumedEvent;
 import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.entry.MessageStatus;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
 import org.example.serviceai.exception.AiErrorCode;
-import org.example.serviceai.service.AIService;
 import org.example.serviceai.service.ConsumedEventService;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.ai.AiAdviceWADto;
@@ -62,7 +63,7 @@ public class WAAiHandle implements AiMessageHandler {
     @Autowired
     private ObjectMapper objectMapper;
     @Autowired
-    private AIService aiService;
+    private AiFacade aiFacade;
     @Autowired
     private RabbitTemplate rabbitTemplate;
     @Autowired
@@ -227,7 +228,7 @@ public class WAAiHandle implements AiMessageHandler {
 
         // r == 1：新根会话，生成首次建议
         String prompt = AdvicePromptBuilder.buildInitial(aiAdviceWADto, judgeContext);
-        String res = aiService.callAi(prompt);
+        String res = aiFacade.chat(AiRequest.auto(prompt));
         if (res.contains("信息不全")) {
             // AI 判定输入信息不足：重试无意义，置终态 FAILED 留存后正常完成（ACK，不重试）
             log.warn("AI 判定信息不全，放弃生成并标记终态: eventId={}", eventId);

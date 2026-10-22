@@ -55,7 +55,8 @@ python main.py                      # 本地默认 127.0.0.1:8000
 | `DSH_SESSION_ROOT_BASE` / `DSH_TOKEN_DIR` | 否 | 会话 JSONL 根目录与 token 文件目录，默认 `data/dsh-sessions`、`data/tokens` |
 | `DSH_IDLE_TIMEOUT_SECONDS` | 否 | 空闲运行时回收阈值，默认 600 |
 | `DSH_DEFAULT_CONTEXT_WINDOW` | 否 | 注入模型的上下文窗口（影响 compaction 触发），默认 65536 |
-| `DSH_REQUEST_TIMEOUT_SECONDS` / `AGENT_MAX_TOKENS` | 否 | 单请求超时（默认不限）/ 输出上限 |
+| `DSH_REQUEST_TIMEOUT_SECONDS` / `AGENT_MAX_TOKENS` | 否 | JSON-RPC 单请求超时（默认不限）/ 输出上限 |
+| `DSH_TURN_TIMEOUT_SECONDS` | 否 | 整轮执行超时，默认 300 秒，包含等待会话 idle |
 | `EXA_API_KEY` 或 `PERPLEXITY_API_KEY` | 否 | web_search 供应商 key；都不配则只有 web_fetch；都在时优先 Exa |
 
 > 注意：`.env.example` 中的 `JWT_ALGORITHM` 未被任何代码读取（算法由密钥长度推导），属冗余配置。服务本身没有 `/health` 端点，Dockerfile/compose 健康检查用 `GET /docs`（Swagger UI）。
@@ -78,7 +79,9 @@ python main.py                      # 本地默认 127.0.0.1:8000
 | `agent_memory` | **已弃用**（2026-09） | 旧对话摘要表；摘要已由 dsh compaction（JSONL 会话日志）接管，仅为回滚保留 |
 | `user_ai_config` | 在用（只读） | 用户自定义模型配置（group_name、model_names JSON、ai_url、加密 api_key）；DDL 由 `service-ai/src/main/resources/sql/codewise_ai.sql` 拥有，Agent 侧按 `user_ai_config_id + user_id` 校验归属后解密使用 |
 
-运行期还会在 `data/` 下落地非数据库状态：会话 JSONL 日志（dsh 记忆载体，按 `cw-<conversation_id>` 确定性 session id 恢复）与 token 临时文件。
+运行期还会在 `data/` 下落地非数据库状态：会话 JSONL 日志与 token 临时文件。JSONL 只是运行期工作日志——
+**dsh 无法跨进程恢复会话**（恢复判定要求 seed 逐字节相等），故会话 id 为 `cw-<会话号>-<配置摘要>-<实例后缀>`，
+且每个新实例的首轮由门面回放 MySQL 里的 `agent_message` 历史来接续上下文（历史事实来源是数据库）。
 
 ## 5. HTTP 端点（7 个，前缀 `/api/agent`）
 
@@ -94,17 +97,20 @@ python main.py                      # 本地默认 127.0.0.1:8000
 
 `call` / `stream` 请求体（`dto/CallAiRequest.py`）：`user_config_id`、`conversation_id`、`question`（1–10000 字符）、可选 `model_name`（缺省取配置中第一个模型；必须在 `model_names` 列表内）。响应为 `{code, message, data}` 手写包装（`dto/Result.py`，非 service-api 的 Java `Result<T>`）。
 
-SSE 事件契约（`dsh_bridge/bridge.py`，透传 dsh 原生词汇）：过程帧 `session.event`（`assistant/chunk`、`tool/call`、`tool/result`、`turn/start|end`、`compaction/*`）；终止帧 `done`（含最终全文）/ `error`。`error` 帧的 `message` 是面向用户的固定文案（由 `dsh_bridge/service.py` 的 `_user_message` 翻译），不带堆栈、密钥与下游原始报错：同会话上一轮未结束 →「上一轮对话还在进行中，请稍候再发送新消息」；运行时通信故障 →「Agent 服务中断，请重试」；回答为空 →「模型未返回有效内容」；其余 →「Agent 调用失败，请稍后重试」。HTTP 响应一旦开始就无法再改状态码，生成器自身抛出的异常由 `api/CallAiApi.py` 兜底成 `error` 帧，文案取 `AgentErrorCode.AGENT_CALL_FAILED`「这次回复没有成功，请稍后重试」（`4001001`）。非流式 `/call` 用 HTTP 状态码表达同类失败：会话不存在 → `404`，调用失败 → `400`。全部错误码集中在 `util/error_codes.py`（`AgentErrorCode`，服务号 10，编码规则与 Java 侧 `CommonErrorCode` 一致）。
+SSE 事件契约（`dsh_bridge/bridge.py`，透传 dsh 原生词汇）：过程帧 `session.event`（`assistant/chunk`、`tool/call`、`tool/result`、`turn/start|end`、`compaction/*`）；终止帧 `done`（含最终全文）/ `error`。`error` 帧的 `message` 是面向用户的固定文案（由 `dsh_bridge/service.py` 的 `_user_message` 翻译），不带堆栈、密钥与下游原始报错：同会话上一轮未结束 →「上一轮对话还在进行中，请稍候再发送新消息」；运行时通信故障 →「Agent 服务中断，请重试」；回答为空 →「模型未返回有效内容」；其余 →「这次回复没有成功，请稍后重试」。HTTP 响应一旦开始就无法再改状态码，生成器自身抛出的异常由 `api/CallAiApi.py` 兜底成 `error` 帧，文案取 `AgentErrorCode.AGENT_CALL_FAILED`「这次回复没有成功，请稍后重试」（`4001001`）。非流式 `/call` 用 HTTP 状态码表达同类失败：会话不存在 → `404`，调用失败 → `400`。全部错误码集中在 `util/error_codes.py`（`AgentErrorCode`，服务号 10，编码规则与 Java 侧 `CommonErrorCode` 一致）。
 
 ## 6. dsh 运行时桥接生命周期
 
-`DshAgentService.stream_turn`：校验参数与会话归属 → 解密用户 AI 配置 → 落库 USER 消息 → `RuntimeManager.obtain(conversation_id, ai_config)`。
+`DshAgentService.stream_turn`：校验参数与会话归属 → 解密用户 AI 配置 → 取得会话轮次所有权 → `RuntimeManager.obtain(conversation_id, ai_config)`。
 
-- 每会话一个 Node 子进程（懒启动、跨轮复用）；配置指纹（config id|模型|URL|密钥 SHA-256 前 16 位|max_tokens）变化时关闭旧进程重建，JSONL 日志无损续接上下文。
-- 后台守护线程按 `DSH_IDLE_TIMEOUT_SECONDS` 回收空闲进程；`atexit` 统一关停。
-- 子进程 env 只注入会话级凭据（模型 key、token 文件路径、网关地址、DSH_MODEL_ID/CONTEXT_WINDOW/SYSTEM_PROMPT 等），密钥不落盘、不打日志。
-- 传输层故障（`TransportClosedError`）时丢弃进程引用，下一轮自动重建；最终回答为空也按 error 收尾并丢弃运行时。
-- USER/ASSISTANT 消息与 done 帧在同一数据库事务内提交（流结束后 `get_db` 统一 commit，异常 rollback）。
+- 每会话一个 Node 子进程（懒启动、跨轮复用）；轮次所有权防止重复请求或配置切换打断正在运行的轮次。
+- 后台守护线程按 `DSH_IDLE_TIMEOUT_SECONDS` 回收空闲进程，运行中的会话不参与回收；`atexit` 统一关停。
+- 子进程 env 只注入会话级凭据（模型 key、token 文件路径、网关地址、DSH_MODEL_ID/CONTEXT_WINDOW/SYSTEM_PROMPT 等），模型密钥不落盘。
+- 运行时失败、空回答或非 `completed` 结束原因均按 error 收尾并关闭运行时、清理 token；跨线程异常显式保留原始 traceback，客户端只接收安全文案。
+- 成功完成后，USER/ASSISTANT 消息在一个数据库事务中提交，提交成功才发送 done；失败或取消轮次不新增历史消息。done 帧的网络交付不是数据库事务的一部分，客户端未收到时可重新加载历史确认结果。
+- SSE 监听 HTTP 断开，前端在离开页面、切换/删除会话或清空页面时使用 AbortController 取消请求。取消只影响当前轮次，释放会话所有权并回收子进程和 token；有界队列避免无人消费时无限积压。
+- `DSH_TURN_TIMEOUT_SECONDS` 默认 300 秒，覆盖等待模型、工具和会话 idle 的整轮执行，超时返回 error 并回收资源。原始 JSONL 文件保留供排障和恢复，不自动删除；取消不能回滚工具已完成的业务写入。
+
 
 ## 7. 工具清单 → Java 接口映射
 
@@ -199,7 +205,7 @@ OpenAI 兼容协议，双适配器并存于 `cordis.yml`，由 `DSH_PROVIDER` �
 - 镜像：`Dockerfile` 基于 `node:22-bookworm-slim` 双运行时（apt 装 python3.11 + pip；`npm ci` 预装 agent-runtime 闭包），非 root `node` 用户运行，`EXPOSE 8000`，健康检查 `curl /docs`。构建：`docker build -t codewise/codewise-agent:latest codewise-agent/`。
 - compose（`deploy/docker-compose.yml`）：服务 `codewise-agent`，不映射宿主端口；注入 `DATABASE_URL`、`JWT_SECRET`、`API_KEY_MASTER_KEY`、`CODEWISE_GATEWAY_URL=http://service-gateway:8082`、DSH 相关变量。
 - nginx（`deploy/nginx.conf`）：`location /agentapi/` 剥前缀反代 `codewise-agent:8000`，禁缓冲 + `proxy_read_timeout 300s`（SSE）。前端以 `VITE_AGENT_BASE_URL=/agentapi` 构建。
-- `data/`（会话 JSONL、token 文件）为运行态可丢弃数据：token 每轮刷新、JSONL 丢失仅影响单会话记忆；compose 未给它挂卷，升级重建即清空。
+- `data/`（会话 JSONL、token 文件）为运行态可丢弃数据：token 每轮刷新；JSONL 丢失**不再影响**会话记忆（记忆由门面回放 MySQL 历史接续，只损失本轮之前 dsh 未落库的过程细节）；compose 未给它挂卷，升级重建即清空。
 
 ## 10. 测试
 
@@ -219,4 +225,4 @@ pytest 用临时 SQLite 与占位密钥（`tests/conftest.py` 在导入项目模
 - **SSRF 双防线**：网关工具钉死部署配置的 origin + 静态路径白名单（fail-closed）；模型可控 URL 只出现在 `web_fetch`，由 `codewise-web` 守卫拦截环回/私有/保留地址（含 DNS 重绑定前缀、IPv4-mapped、NAT64、6to4 变体，解析失败即拒绝）。
 - **写操作**：收藏/笔记/计划/社区/复习配置均为真实写接口，以用户自身 JWT 执行，权限等同网页端本人操作；当前默认放行，dsh 审批（permission-presets）可在不改工具定义的前提下接入。
 - **run_code 信任边界**：worker 线程是 containment 而非 security boundary（可读 `.env`、`data/tokens/*`、发任意外网请求），对外暴露前必须 OS 层隔离；cordis.yml 已收紧单次预算（computeMs 10s / maxWallMs 60s / 输出 1 MiB / 堆 256 MB）。
-- **限制**：同会话并发轮次被拒；CORS 仅开发源 `http://localhost:5173`；无 `/health`（健康检查用 `/docs`）；`agent_memory` 表已弃用；会话记忆随 `data/` 目录丢失而丢（token/JSONL 均为运行态数据）。
+- **限制**：同会话并发轮次被拒；CORS 仅开发源 `http://localhost:5173`；无 `/health`（健康检查用 `/docs`）；`agent_memory` 表已弃用；会话记忆不再依赖 `data/`（新实例首轮由门面回放 MySQL 历史，见上文），`data/` 丢失只损失 JSONL 过程细节。

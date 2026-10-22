@@ -18,6 +18,7 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Date;
 import java.util.Objects;
 import java.util.Set;
 
@@ -111,6 +112,17 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
     }
 
 
+    /**
+     * 凭证签发时间（epoch 秒），供下游比对用户级失效线。
+     *
+     * <p>正常签发的 token 一定带 {@code iat}；万一缺失就下发空串，让下游按
+     * 「无法证明凭证比失效线新」处理，而不是伪造一个当前时间把旧凭证放过去。</p>
+     */
+    private static String issuedAtSeconds(Claims claims) {
+        Date issuedAt = claims.getIssuedAt();
+        return issuedAt == null ? "" : String.valueOf(issuedAt.getTime() / 1000L);
+    }
+
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         ServerHttpRequest request = exchange.getRequest();
@@ -126,6 +138,9 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         requestBuilder.headers(httpHeaders -> {
             httpHeaders.remove("X-User-Id");
             httpHeaders.remove("X-User-Name");
+            httpHeaders.remove("X-User-Token");
+            // 凭证签发时间：下游拦截器用它比对用户级失效线（封禁/改密），伪造值必须剥离
+            httpHeaders.remove("X-User-Token-Iat");
             httpHeaders.remove("X-Internal-Token");
             httpHeaders.remove("X-Real-IP");
             if (!trustForwardedFor) {
@@ -138,14 +153,11 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
                 .header("X-Real-IP", ip)
                 .header("X-Internal-Token", internalToken);
 
-        System.out.println("🔍 请求路径: " + path);
-        System.out.println("📌 客户端 IP: " + ip);
 
         // 4. 放行登录/注册/找回密码（身份头已在步骤 2 剥离，此处不带 X-User-Id/X-User-Name 透传）
         if (isPublicPath(path)) {
-            System.out.println("✅ 放行: " + path);
+
             ServerHttpRequest newRequest = requestBuilder.build();
-            System.out.println("📌 newRequest 的 X-Real-IP: " + newRequest.getHeaders().getFirst("X-Real-IP"));
             return chain.filter(exchange.mutate().request(newRequest).build());
         }
         // ====== WebSocket 握手特殊处理 ======
@@ -154,7 +166,6 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
         boolean isWebSocket = "websocket".equalsIgnoreCase(upgrade);
 
         if (isWebSocket || path.contains("/websocket")) {
-            System.out.println("🔌 WebSocket 握手请求: " + path);
 
             // 从 URL 参数获取 token（SockJS 降级方案）
             String token = request.getQueryParams().getFirst("token");
@@ -169,7 +180,6 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
 
             // 验证 Token
             if (token == null || token.isEmpty() || !jwtUtil.validateToken(token)) {
-                System.out.println("❌ WebSocket 认证失败: token无效");
                 return rejectUnauthorized(exchange);
             }
 
@@ -178,13 +188,14 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             // userName claim 缺失时置空字符串，与鉴权分支口径一致（不让伪造头透传）
             Object userNameClaim = claims.get("userName");
             String userName = userNameClaim == null ? "" : userNameClaim.toString();
-            System.out.println("✅ WebSocket 认证成功: userId=" + userId);
 
             // 注入 userId/userName 到请求头，透传给下游
             ServerHttpRequest newRequest = requestBuilder
                     .header("X-User-Id", String.valueOf(userId))
                     .header("X-User-Name", userName)
+                    .header("X-User-Token-Iat", issuedAtSeconds(claims))
                     .header("X-Internal-Token", internalToken)
+                    .header("X-User-Token",token)
                     .build();
 
             ServerWebExchange newExchange = exchange.mutate().request(newRequest).build();
@@ -205,14 +216,21 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             return rejectUnauthorized(exchange);
         }
 
-        Long userId = jwtUtil.getUserIdFromToken(token);
-        String userName = jwtUtil.getUserNameFromToken(token);
+        // 只解析一次：userId / userName / iat 都取自同一份 claims
+        Claims claims = jwtUtil.parseToken(token);
+        Long userId = Long.parseLong(claims.getSubject());
+        Object userNameClaim = claims.get("userName");
+        String userName = userNameClaim == null ? "" : userNameClaim.toString();
 
 
         // 6. 在同一个 requestBuilder 上继续添加请求头
+        // X-User-Token：下游登出/失效线校验需要原始 token，客户端伪造值已在步骤 2 剥离
+        // X-User-Token-Iat：下游无法自行解析 JWT（多数服务没有 jwt.secret），由网关透传签发时间
         ServerHttpRequest newRequest = requestBuilder
                 .header("X-User-Id", String.valueOf(userId))
-                .header("X-User-Name", String.valueOf(userName))
+                .header("X-User-Name", userName)
+                .header("X-User-Token", token)
+                .header("X-User-Token-Iat", issuedAtSeconds(claims))
                 .header("X-Internal-Token", internalToken)
                 .build();
 

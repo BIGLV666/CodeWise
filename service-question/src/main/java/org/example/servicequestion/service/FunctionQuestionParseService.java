@@ -76,6 +76,17 @@ public class FunctionQuestionParseService {
 
     @Transactional
     public Long insert(FunctionDto functionDto) {
+        return insert(functionDto, 1);
+    }
+
+    /**
+     * 建函数题并指定初始状态（1 上架 / 3 私密）。
+     *
+     * <p>批量导入用 3：隐藏用例是异步生成的，只有用例回填成功后才由调用方发布，
+     * 避免「用例生成失败但题目已上架」——那种题会被判成 0 个测试点直接通过。</p>
+     */
+    @Transactional
+    public Long insert(FunctionDto functionDto, int status) {
         if(functionDto.getDescription()==null) {
             throw new BizException(QuestionErrorCode.QUESTION_CONTENT_REQUIRED);
         }
@@ -94,7 +105,7 @@ public class FunctionQuestionParseService {
         question.setDifficulty(functionDto.getDifficulty()==null?1:functionDto.getDifficulty());
         question.setTags(functionDto.getTags());
         question.setQuestionType(QuestionType.FUNCTION);
-        question.setStatus(1);
+        question.setStatus(status);
         question.setAiStatue("success");
         question.setCreateUserId(
                 UserContext.getUserId()
@@ -163,6 +174,74 @@ public class FunctionQuestionParseService {
         return question.getQuestionId();
 
 
+    }
+
+    /**
+     * 把最早的若干条隐藏用例提升为公开样例，并回填题目的样例字段。
+     *
+     * <p>样例必须来自标准答案的真实执行结果，不能由题面文本凭空给出：导入流程里题面
+     * 由 AI 原创重写、用例由判题沙箱产出，两者只有在这里对齐，页面上的样例才与判题一致。</p>
+     *
+     * <p>提升后的用例仍然是判题用例（判题读取该题全部用例，不按 is_hidden 过滤），
+     * 只是同时展示给用户。</p>
+     */
+    @Transactional
+    public int promoteSamples(Long questionId, Integer count) {
+        return promoteSamples(questionId, count, false);
+    }
+
+    /**
+     * 提升样例；{@code publish} 为 true 时同时把题目置为已上架（批量导入用例生成成功后调用）。
+     */
+    @Transactional
+    public int promoteSamples(Long questionId, Integer count, boolean publish) {
+        if (questionId == null) {
+            throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
+        }
+        int promoteCount = count == null ? 1 : count;
+        if (promoteCount < 1 || promoteCount > 10) {
+            throw new BizException(QuestionErrorCode.SAMPLE_PROMOTE_COUNT_INVALID, 1, 10);
+        }
+
+        Question question = questionMapper.selectById(questionId);
+        if (question == null) {
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
+        }
+        if (question.getQuestionType() != QuestionType.FUNCTION) {
+            throw new BizException(QuestionErrorCode.NOT_FUNCTION_QUESTION);
+        }
+
+        List<FunctionTestCase> candidates = functionTestCaseMapper.selectList(
+                new LambdaQueryWrapper<FunctionTestCase>()
+                        .eq(FunctionTestCase::getQuestionId, questionId)
+                        .eq(FunctionTestCase::getIsSample, 0)
+                        .orderByAsc(FunctionTestCase::getSortOrder)
+                        .last("LIMIT " + promoteCount)
+        );
+        if (candidates == null || candidates.isEmpty()) {
+            throw new BizException(QuestionErrorCode.SAMPLE_PROMOTE_NO_CASE);
+        }
+
+        for (FunctionTestCase testCase : candidates) {
+            testCase.setIsSample(1);
+            testCase.setIsHidden(0);
+            testCase.setUpdateTime(LocalDateTime.now());
+            if (functionTestCaseMapper.updateById(testCase) == 0) {
+                throw new BizException(QuestionErrorCode.TESTCASE_UPDATE_FAILED);
+            }
+        }
+
+        FunctionTestCase first = candidates.getFirst();
+        question.setSampleInput(first.getInputData());
+        question.setSampleOutput(first.getExpectedOutput());
+        if (publish) {
+            question.setStatus(1);
+        }
+        question.setUpdateTime(LocalDateTime.now());
+        if (questionMapper.updateById(question) == 0) {
+            throw new BizException(QuestionErrorCode.QUESTION_UPDATE_FAILED);
+        }
+        return candidates.size();
     }
 
     @Transactional

@@ -1,6 +1,6 @@
 # CodeWise 项目体量快照
 
-统计日期：2026-09-29（上一版快照为 2026-09-03，口径不变）。覆盖后端 Java 服务、Go 判题原型、Python Agent（含 dsh 插件）与前端仓库（兄弟目录 `CodeWise-frontend/CodeWise-frontend`，经 `deploy/frontend/Dockerfile` 一并构建部署）。
+统计日期：2026-09-29（上一版快照为 2026-09-03，口径不变）。覆盖后端 Java 服务、Go 判题原型、Python Agent（含 dsh 插件）与前端仓库（兄弟目录 `CodeWise-frontend`，与 CodeWise 同级，经 `deploy/frontend/Dockerfile` 一并构建部署）。
 
 统计口径：排除 `.git`、`target`、`node_modules`、`dist`、`.venv`、`__pycache__`、IDE 目录和运行时产物目录（如 `data/function-artifacts`）；行数为文件原始行数，含空行与注释。
 

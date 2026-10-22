@@ -9,7 +9,8 @@ import org.example.serviceai.entry.Conversation;
 import org.example.serviceai.entry.MessageStatus;
 import org.example.serviceai.entry.Message;
 import org.example.serviceai.exception.AiErrorCode;
-import org.example.serviceai.service.AIService;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
 import org.example.serviceai.service.ConsumedEventService;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.notification.NotificationDto;
@@ -50,7 +51,7 @@ import static org.mockito.Mockito.when;
 class WAAiHandleTest {
 
     @Mock
-    private AIService aiService;
+    private AiFacade aiFacade;
     @Mock
     private RabbitTemplate rabbitTemplate;
     @Mock
@@ -92,7 +93,7 @@ class WAAiHandleTest {
 
         handler.handle(BODY, amqpMessageOf(BODY));
 
-        verifyNoInteractions(questionFeignClient, aiService, rabbitTemplate, aiConversationRepository);
+        verifyNoInteractions(questionFeignClient, aiFacade, rabbitTemplate, aiConversationRepository);
         verify(consumedEventService, never()).complete(anyString());
     }
 
@@ -107,7 +108,7 @@ class WAAiHandleTest {
             saved.setConversationId(1L);
             return 1;
         });
-        when(aiService.callAi(anyString())).thenReturn("建议内容");
+        when(aiFacade.chat(any(AiRequest.class))).thenReturn("建议内容");
         when(aiConversationRepository.appendMessage(anyLong(), any(Message.class)))
                 .thenAnswer(invocation -> {
                     Message message = invocation.getArgument(1);
@@ -119,7 +120,7 @@ class WAAiHandleTest {
 
         // 正常链路：生成 → 落结果引用 → 发通知 → 完成
         verify(aiConversationRepository).save(any());
-        verify(aiService).callAi(anyString());
+        verify(aiFacade).chat(any(AiRequest.class));
         verify(consumedEventService).markResultRef("evt-1", 123L);
         verify(rabbitTemplate).convertAndSend(
                 eq(MqContexts.NOTIFICATION_EXCHANGE),
@@ -140,7 +141,7 @@ class WAAiHandleTest {
             saved.setConversationId(1L);
             return 1;
         });
-        when(aiService.callAi(anyString())).thenReturn("建议内容");
+        when(aiFacade.chat(any(AiRequest.class))).thenReturn("建议内容");
         when(aiConversationRepository.appendMessage(anyLong(), any(Message.class)))
                 .thenAnswer(invocation -> {
                     Message message = invocation.getArgument(1);
@@ -176,7 +177,7 @@ class WAAiHandleTest {
         handler.handle(BODY, amqpMessageOf(BODY));
 
         // 不再拉判题上下文、不再建会话/生成，只重发通知并完成
-        verifyNoInteractions(questionFeignClient, aiService);
+        verifyNoInteractions(questionFeignClient, aiFacade);
         verify(aiConversationRepository, never()).save(any());
         verify(rabbitTemplate).convertAndSend(
                 eq(MqContexts.NOTIFICATION_EXCHANGE),
@@ -193,7 +194,7 @@ class WAAiHandleTest {
                 () -> handler.handle(body, amqpMessageOf(body)));
         // 毒消息码：分发器据此直接死信，不重试
         assertEquals(AiErrorCode.ADVICE_PAYLOAD_INVALID, exception.getErrorCode());
-        verifyNoInteractions(questionFeignClient, aiService, rabbitTemplate);
+        verifyNoInteractions(questionFeignClient, aiFacade, rabbitTemplate);
     }
 
     @Test
@@ -207,7 +208,7 @@ class WAAiHandleTest {
             saved.setConversationId(1L);
             return 1;
         });
-        when(aiService.callAi(anyString())).thenReturn("信息不全：缺少题目描述");
+        when(aiFacade.chat(any(AiRequest.class))).thenReturn("信息不全：缺少题目描述");
 
         handler.handle(BODY, amqpMessageOf(BODY));
 
@@ -307,7 +308,7 @@ class WAAiHandleTest {
         // 不再生成（两种 ask 均不调用），只补结果引用与通知
         verify(adviceConversationService, never()).ask(any(), any(), anyString(), anyString(), any());
         verify(adviceConversationService, never()).ask(any(), any(), anyString(), anyString(), any(), any());
-        verifyNoInteractions(aiService);
+        verifyNoInteractions(aiFacade);
         verify(consumedEventService).markResultRef("evt-1", 77L);
         verify(rabbitTemplate).convertAndSend(
                 eq(MqContexts.NOTIFICATION_EXCHANGE),

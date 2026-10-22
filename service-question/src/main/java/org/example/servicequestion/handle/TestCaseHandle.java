@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
+import org.example.servicequestion.MQ.MessageAcknowledgements;
 import org.example.servicequestion.MQ.MessageHandler;
 import org.example.servicecommon.config.MqContexts;
 import org.example.servicecommon.dto.TestMessage;
@@ -78,7 +79,7 @@ public class TestCaseHandle implements MessageHandler {
 
             if (messages.isEmpty()) {
                 log.warn("没有解析到任何测试用例");
-                channel.basicAck(deliveryTag, false);
+                MessageAcknowledgements.ack(channel, deliveryTag);
                 return;
             }
 
@@ -86,7 +87,7 @@ public class TestCaseHandle implements MessageHandler {
             transactionTemplate.executeWithoutResult(status -> applyTestCases(messages));
 
             // ★ ACK 严格在事务提交之后，只确认一次，不批量确认
-            channel.basicAck(deliveryTag, false);
+            MessageAcknowledgements.ack(channel, deliveryTag);
             log.info("测试用例消息处理完成, questionId: {}", messages.getFirst().getQuestionId());
         } catch (Exception e) {
             log.error("处理测试用例消息失败, deliveryTag: {}", deliveryTag, e);
@@ -170,11 +171,11 @@ public class TestCaseHandle implements MessageHandler {
             } catch (Exception redisException) {
                 log.warn("失败消息留存 Redis 异常", redisException);
             }
-            channel.basicNack(deliveryTag, false, false);
+            MessageAcknowledgements.nack(channel, deliveryTag, false);
             return;
         }
         log.warn("测试用例消息消费失败，第 {} 次重试将重新入队", retryCount, cause);
-        channel.basicNack(deliveryTag, false, true);
+        MessageAcknowledgements.nack(channel, deliveryTag, true);
     }
 
     /** 消息体 MD5，作为 Redis Hash field 的稳定消息键。 */

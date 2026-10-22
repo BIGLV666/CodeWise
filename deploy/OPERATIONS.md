@@ -80,6 +80,15 @@ community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF 
 
 容器内存：compose 为每服务设 `mem_limit`（384m–1.5g，judge 为吞吐主力建议 ≥1.5g），服务运行镜像 ENTRYPOINT 固定 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，堆上限按容器限额 45% 计，防止 JVM 常驻内存超限额被 OOM kill。
 
+GC 日志：同一个 ENTRYPOINT 开了 `-Xlog:gc*`，各服务写到共享卷 `service-logs` 的 `/app/logs/gc-<模块名>.log`（按构建参数 `MODULE` 命名，同卷不冲突），`filecount=5,filesize=10M` 轮转，上限约 60M/服务。读法：
+
+```bash
+docker compose -f deploy/docker-compose.yml exec service-judge ls -la /app/logs
+docker compose -f deploy/docker-compose.yml exec service-judge tail -200 /app/logs/gc-service-judge.log
+```
+
+日志随卷持久化，宿主也可直接在 `/var/lib/docker/volumes/codewise_service-logs/_data/` 读到。注意统一日志的 `file=` 输出**每次 JVM 启动会重置当前文件**（同一轮内按 filecount/filesize 轮转，已滚动出的旧文件保留），所以要看上一轮容器的 GC 数据需在重启前取走。
+
 仍需 Nacos 下发（可选，缺失即功能降级而非启动失败）：真实 SMTP 发信账号（`service-email.yaml`，容器部署直接在 `.env` 配 `SPRING_MAIL_*` 即可）、AI Provider 列表、Ollama 摘要模型地址。
 
 > 注意：Nacos 若已下发同名配置（如数据源），其优先级高于环境变量，切换部署方式时留意清理旧配置。
@@ -92,7 +101,15 @@ community 建 codewise_community 的）启动时自动创建（DDL 幂等，`IF 
 - 投递语义：Relay 认领后经 **Publisher Confirm** 确认才标记 SENT；失败按 1s 起指数退避重试 5 次后转 DEAD；
 - 共享连接工厂被开启 Confirm 模式（CORRELATED）：对非 Outbox 的直发只是增加异步确认开销，无行为变化；
 - question 与 judge 共用 codewise_question 的同一组 `outboxpro_*` 表，双实例 Relay 由
-  `FOR UPDATE SKIP LOCKED` 保证并发安全。
+  `FOR UPDATE SKIP LOCKED` 保证并发安全；
+- **Relay 的发布模板必须用「原样字节」转换器**（`CodewiseOutboxProAutoConfiguration`
+  覆盖了 `MessagePublisher`，见 `OutboxProRelaySupport`）：框架把**已序列化的信封字符串**
+  交给 `convertAndSend`，若让 Relay 复用应用侧那台带 `Jackson2JsonMessageConverter` 的模板，
+  信封会被再包一层 JSON 引号（JSON 引号套 JSON），消费端 `EnvelopeCodec.unwrap` 只解一层会
+  解析失败、消息全被判毒消息丢弃（表现为提交长期 PENDING、死信队列被静默放行）。
+  应用侧模板带 Jackson 是必需的（直发 `EventEnvelope`/`WebsocketSendDto` 等对象），
+  两者编码要求相反，故分开。回归护栏见 `OutboxProRelaySupportTest` 与
+  `OutboxProIntegrationTest`（后者复刻了带 Jackson 模板的生产者配置）。
 
 ## 6. 备份与恢复
 
@@ -112,9 +129,14 @@ docker compose -f deploy/docker-compose.yml exec mysql \
 | --- | --- |
 | 服务间 Feign 503/超时 | Nacos 控制台（`127.0.0.1:8848/nacos`，仅宿主回环可达）确认各服务注册的是容器网段 IP 而非 127.0.0.1 |
 | 判题一直 PENDING | judge 是否 healthy；宿主是否有判题镜像（`docker images \| grep codewise`）；`logs -f service-judge` |
+| **前端全站 502 / 页面提示「服务正在升级或维护」** | 先分辨：宿主机 `curl 127.0.0.1:8082/actuator/health` 正常就**不是后端**，而是前端 nginx 的上游地址过期。`docker logs codewise-frontend` 若满屏 `connect() failed (111: Connection refused) ... upstream: "http://<IP>:8082"`，把那个 IP 与 `docker inspect codewise-service-gateway-1` 的当前 IP 比一下即可确认。nginx 已改为 `resolver 127.0.0.11 valid=10s` + 变量 `proxy_pass`（请求时解析，容器换 IP 最多 10s 自愈），若仍发生先 `docker exec codewise-frontend-1 nginx -s reload` |
+| **改了 `deploy/nginx.conf` 但没生效** | 该文件是 bind mount 单文件，而 `git pull` 用「新文件 + rename」替换：容器里的挂载仍指向**旧 inode**，`nginx -s reload` 重载的还是旧内容，`docker compose up -d` 也不会因挂载文件内容变化而重建容器。改完必须显式重建前端：`docker compose -f deploy/docker-compose.yml up -d --force-recreate frontend`（或 `docker restart codewise-frontend-1` 重新绑定挂载）。校验是否真的生效：`docker exec codewise-frontend-1 grep -n resolver /etc/nginx/conf.d/default.conf` |
 | AI 产物验收失败 | question 容器内 `docker ps` 是否可用（sock 挂载 + docker CLI） |
 | 登录跨域报错 | `CORS_ORIGINS` 未包含实际来源 |
 | 注册收不到邮件 | 看 Mailpit Web（127.0.0.1:8025）是否有信；真实 SMTP 检查 `.env` 的 `SPRING_MAIL_*` |
+| 上传头像/配图返回「文件保存失败」(5000102) | 挂载点属主问题：命名卷挂载点若在镜像里不存在，Docker 会以 `root:root` 新建，而服务以 uid 1000 运行 → 写不进去。`docker exec -u root <c> chown -R codewise:codewise /app/data/uploads` 一次性修正；镜像已把该目录建好，新建卷不会再复现 |
+| 上传成功但图片 404 | `service-user` 的静态资源目录必须跟随 `file.upload.root`（容器内 `/app/data/uploads`）。镜像内已如此，若有人改了上传根目录要同步 `WebConfig#addResourceHandlers` |
+| 上传成功但图片 403「禁止直接访问，请通过网关访问」 | `/uploads/**` 必须**经网关**转发（网关 `AuthGlobalFilter` 已把该前缀列为公开路径、并注入下游必需的 `X-Internal-Token`）。nginx 直连 `service-user:8081` 会 403，别改回去 |
 | Agent 不可用 | `docker compose logs codewise-agent`；dsh 运行时需 node>=22.19（镜像已内置）|
 | 容器反复重启 | `docker compose logs <svc>`；多为密钥缺失启动失败（属预期：无 `CODEWISE_INTERNAL_TOKEN` 不允许起服务） |
 

@@ -2,6 +2,8 @@ package org.example.serviceai.conversation.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceai.ai.AiFacade;
+import org.example.serviceai.ai.AiRequest;
 import org.example.serviceai.conversation.enums.Role;
 import org.example.serviceai.entry.AiConversationMemory;
 import org.example.serviceai.entry.Conversation;
@@ -10,11 +12,11 @@ import org.example.serviceai.exception.AiErrorCode;
 import org.example.serviceai.mapper.AiConversationMemoryMapper;
 import org.example.serviceai.mapper.ConversationMapper;
 import org.example.serviceai.mapper.MessageMapper;
-import org.example.serviceai.service.OllamaService;
 import org.example.serviceapi.exception.BizException;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -31,9 +33,18 @@ public class AiConversationMemaryService {
     @Autowired
     private MessageMapper messageMapper;
     @Autowired
-    private OllamaService ollamaService;
+    private AiFacade aiFacade;
     @Autowired
     private RedissonClient redissonClient;
+
+    /**
+     * 生成会话摘要用的端点名。
+     *
+     * <p>摘要对输出格式有要求，所以按名指定端点、不做故障切换。
+     * 这里刻意只认名字不认实现类——业务层不该知道端点是本地的还是远端的。</p>
+     */
+    @Value("${ai.summary.provider:ollama}")
+    private String summaryProvider;
 
     public AiConversationMemory getMemory(Long conversationId, Long userId) {
         return aiConversationMemoryMapper.selectOne(
@@ -79,7 +90,7 @@ public class AiConversationMemaryService {
             if (aiConversationMemory == null) {
                 recentSubmissions = keepLatestSubmissions(recentSubmissions, 4);
                 String prompt = buildPrompt("INCREMENTAL", conversation, null, recentSubmissions, recentMessages);
-                String answer = requireSummaryAnswer(ollamaService.callAi(prompt));
+                String answer = requireSummaryAnswer(aiFacade.chat(AiRequest.provider(summaryProvider, prompt)));
                 aiConversationMemory = new AiConversationMemory();
                 aiConversationMemory.setConversationId(conversationId);
                 aiConversationMemory.setUserId(userId);
@@ -97,7 +108,7 @@ public class AiConversationMemaryService {
             recentSubmissions = keepLatestSubmissions(recentSubmissions, 4);
             String prompt = buildPrompt(mode, conversation, aiConversationMemory,
                     recentSubmissions, recentMessages);
-            String answer = requireSummaryAnswer(ollamaService.callAi(prompt));
+            String answer = requireSummaryAnswer(aiFacade.chat(AiRequest.provider(summaryProvider, prompt)));
             aiConversationMemory.setUpdateTime(LocalDateTime.now());
             aiConversationMemory.setEndMessageId(batchEndMessageId);
             aiConversationMemory.setSummary(answer);

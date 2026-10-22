@@ -25,7 +25,7 @@ import java.util.function.Consumer;
 
 /**
  * Docker 执行模板：封装容器创建/删除、工作区清理与复制、脚本执行、
- * 文件读取与内存统计等纯 Docker I/O 操作（原 {@code JudgeService} 迁出）。
+ * 文件读取等纯 Docker I/O 操作（原 {@code JudgeService} 迁出）。
  *
  * <p>本类不持有任何容器池状态；执行超时或异常时的「容器污染」标记通过
  * {@link Consumer} 回调参数由调用侧（容器池管理器/判题门面）注入，
@@ -40,7 +40,12 @@ public class DockerExecTemplate {
     private static final long CPU_PERIOD_MICROS = 100_000L;
     private static final long CPU_QUOTA_MICROS = 100_000L;
     private static final long PID_LIMIT = 64L;
-    private static final String JUDGE_USER = "1000:1000";
+    /** 工作区文件属主 uid（镜像内 judge 用户）。 */
+    private static final int JUDGE_UID = 1000;
+    /** 工作区文件属主 gid（镜像内 judge 用户）。 */
+    private static final int JUDGE_GID = 1000;
+    /** 判题容器运行用户，必须与 {@link #JUDGE_UID}/{@link #JUDGE_GID} 一致。 */
+    private static final String JUDGE_USER = JUDGE_UID + ":" + JUDGE_GID;
 
     private final DockerClient dockerClient;
 
@@ -142,6 +147,11 @@ public class DockerExecTemplate {
     /**
      * 复制本地工作目录到容器 /workspace（内存中打包为 tar 后传输）。
      *
+     * <p>tar 条目必须显式带上 {@link #JUDGE_UID}/{@link #JUDGE_GID} 属主，并且显式包含目录条目：
+     * docker cp 由守护进程以 root 身份解包，条目不带属主时落地为 root:root；目录条目缺失时
+     * 子目录（如函数模式的 cases/）由守护进程隐式建为 root:root，判题用户（非 root）既删不掉
+     * 子目录内容、又改不了属主，会让每次归还时的 {@link #cleanContainerWorkspace} 失败。</p>
+     *
      * @param containerId 容器 ID
      * @param workspace   本地临时工作目录
      * @throws IOException 打包或传输失败
@@ -154,14 +164,23 @@ public class DockerExecTemplate {
             tos.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX);
 
             Files.walk(workspace)
-                    .filter(Files::isRegularFile)
-                    .forEach(file -> {
+                    .filter(path -> !path.equals(workspace))
+                    .filter(path -> Files.isDirectory(path) || Files.isRegularFile(path))
+                    .forEach(path -> {
                         try {
-                            String entryName = workspace.relativize(file).toString();
-                            TarArchiveEntry entry = new TarArchiveEntry(entryName);
-                            entry.setSize(Files.size(file));
+                            boolean directory = Files.isDirectory(path);
+                            String entryName = workspace.relativize(path).toString();
+                            // 目录条目名以 "/" 结尾，解包时才会按目录处理
+                            TarArchiveEntry entry = new TarArchiveEntry(directory ? entryName + "/" : entryName);
+                            entry.setUserId(JUDGE_UID);
+                            entry.setGroupId(JUDGE_GID);
+                            if (!directory) {
+                                entry.setSize(Files.size(path));
+                            }
                             tos.putArchiveEntry(entry);
-                            Files.copy(file, tos);
+                            if (!directory) {
+                                Files.copy(path, tos);
+                            }
                             tos.closeArchiveEntry();
                         } catch (IOException e) {
                             // 工作区打包失败属于判题执行环境故障：原始 IO 细节只进日志（cause），
@@ -312,34 +331,6 @@ public class DockerExecTemplate {
         } catch (Exception e) {
             log.warn("读取容器文件失败: {}", path, e);
             return "";
-        }
-    }
-
-    /**
-     * 获取容器内存使用量（KB）。
-     *
-     * @param containerId 容器 ID
-     * @return 内存峰值（KB）；获取失败返回 0
-     */
-    public int getContainerMemory(String containerId) {
-        try {
-            final int[] memoryKB = {0};
-
-            dockerClient.statsCmd(containerId)
-                    .exec(new ResultCallback.Adapter<com.github.dockerjava.api.model.Statistics>() {
-                        @Override
-                        public void onNext(com.github.dockerjava.api.model.Statistics stats) {
-                            if (stats != null && stats.getMemoryStats() != null) {
-                                long usage = stats.getMemoryStats().getUsage();
-                                memoryKB[0] = (int) (usage / 1024);
-                            }
-                        }
-                    });
-
-            return memoryKB[0];
-        } catch (Exception e) {
-            log.warn("获取内存使用失败: {}", e.getMessage());
-            return 0;
         }
     }
 

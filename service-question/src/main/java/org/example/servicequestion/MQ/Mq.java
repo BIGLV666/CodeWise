@@ -2,6 +2,7 @@ package org.example.servicequestion.MQ;
 
 import com.rabbitmq.client.Channel;
 import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 
 import org.example.servicecommon.config.MqContexts;
 import org.springframework.amqp.core.Message;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
+@Slf4j
 public class Mq {
 
     @Autowired
@@ -56,17 +58,12 @@ public class Mq {
             } else {
                 System.err.println("没有找到处理路由键 [" + routingKey + "] 的处理器！");
                 // 没有对应的处理器，拒绝消息，不重新入队（false表示不重新入队）
-                channel.basicNack(deliveryTag, false, false);
+                MessageAcknowledgements.nack(channel, deliveryTag, false);
             }
         } catch (Exception e) {
-            System.err.println("消息处理异常: " + e.getMessage());
-            try {
-                // 发生异常，拒绝消息。第三个参数 false 表示不重新入队（会进入死信队列）
-                // 如果设为 true，会不断重试，可能导致死循环
-                channel.basicNack(deliveryTag, false, false);
-            } catch (Exception ex) {
-                ex.printStackTrace();
-            }
+            // 业务 handler 的失败路径必须自行 settle 且不抛出；这里只处理真正未捕获的基础设施异常。
+            log.error("消息处理异常，routingKey={}，deliveryTag={}，兜底重新入队", routingKey, deliveryTag, e);
+            MessageAcknowledgements.nack(channel, deliveryTag, true);
         }
     }
 }

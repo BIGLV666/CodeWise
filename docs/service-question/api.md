@@ -322,8 +322,92 @@ Authorization: Bearer <token>
 GET /api/question/function/leetcode/artifacts/status?taskId=<taskId>
 Authorization: Bearer <token>
 ```
-
 返回：`Result<LeetCodeArtifactTaskVo>`。
+
+### 批量导入函数题（本地仓库/外部题库）
+
+```http
+POST /api/question/function/batch-import
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+请求体：`FunctionBatchImportRequest`
+
+```json
+{
+  "caseCount": 20,
+  "seed": 20261019,
+  "allowDescriptionGeneration": true,
+  "defaultSource": "原创改编",
+  "items": [
+    {
+      "title": "在二叉树中增加一行",
+      "difficulty": 2,
+      "tags": "二叉树,广度优先搜索",
+      "methodName": "addOneRow",
+      "className": "Solution",
+      "parameterConfig": "[{\"type\":\"TreeNode\",\"name\":\"root\"},{\"type\":\"int\",\"name\":\"val\"},{\"type\":\"int\",\"name\":\"depth\"}]",
+      "outputType": "TreeNode",
+      "solutionCode": "class Solution { public TreeNode addOneRow(TreeNode root, int val, int depth) { ... } }",
+      "referenceCode": "…可选的参考实现/对拍代码，仅用于题面重写…",
+      "notes": "…可选的作者笔记，仅用于题面重写…"
+    }
+  ]
+}
+```
+
+字段说明（`items` 每项）：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `title` | `String` | 是 | 题目标题 |
+| `description` | `String` | 否 | 题面正文；为空且 `allowDescriptionGeneration=true` 时由 service-ai 依据解法源码原创重写 |
+| `inputDesc` / `outputDesc` / `hint` | `String` | 否 | 为空时采用重写结果 |
+| `difficulty` | `Integer` | 否 | 1/2/3；为空且重写题面时采用模型建议，仍为空则按 1 |
+| `tags` | `String` | 否 | 逗号分隔；非空时不覆盖 |
+| `source` | `String` | 否 | 来源标注，缺省取请求级 `defaultSource`，再缺省「原创改编」 |
+| `timeLimit` / `memoryLimit` | `Integer` | 否 | 缺省 2000 / 256 |
+| `className` / `methodName` | `String` | 方法名必填 | 提交类名缺省 `Solution`；判题代码生成依赖这对值 |
+| `parameterConfig` | `String` | 是 | 参数类型与名称数组；类型限于 `int` / `long` / `String` / `int[]` / `String[]` / `int[][]` / `ListNode` / `TreeNode` |
+| `outputType` | `String` | 是 | 返回值类型 |
+| `solutionCode` | `String` | 是 | 标准答案（须为**已验证过**的解法）：既用于题面重写，也作为判题产出隐藏用例的标准答案，沙箱内要求能编译出 `class Solution` |
+| `referenceCode` / `notes` | `String` | 否 | 参考实现与作者笔记，只参与题面重写，不参与判题 |
+| `caseCount` / `seed` | `Integer`/`Long` | 否 | 覆盖请求级取值 |
+
+返回：`Result<FunctionBatchImportTaskVo>`，`data` 为异步任务快照（`taskId`、`status`、`total`、`submitted`、`failed`、`items[]`，每条含 `title`、`questionId`、`generationTaskId`、`descriptionGenerated`、`status`、`errorMessage`）。
+
+说明：
+
+- 控制器类级 `@RequireAdmin`：仅管理员（roleId=2）或 root（roleId=0）可调用。
+- 单次最多 50 条；条目必填项缺失时整批请求被拒（提示第几条）。
+- 处理是**异步且逐条隔离**的：任务状态 `RUNNING → SUCCESS/PARTIAL/FAILED`，单条失败只标记该条并把原因写进 `errorMessage`，不影响其他条目。
+- 逐条流程：题面（缺省时重写）→ 建题与函数配置（`samples` 留空，`status=3` 私密）→ 以本条解法为标准答案提交隐藏用例生成（复用随机测试生成链路，见上文）。
+- 题面重写会顺带返回**参数取值域建议**（`parameterRanges`），服务端按参数名合并进随机生成配置（只影响采样，不改落库配置），保证题面写的约束（正整数、0~9 的数字、只含 `1-9` 与 `#` 的字符串等）与实际用例一致；条目里显式给出的 `parameterRanges` 优先。
+- 条目进入 `GENERATING` 表示题目已建、用例仍在异步生成：用 `generationTaskId` 查既有生成任务接口，成功后调「提升样例」接口回填公开样例。
+- 身份显式传递：任务在线程池里执行，`userId` 在创建任务时捕获并在工作线程重新写入，避免写出空的 `create_user_id`。
+
+### 查询批量导入任务状态
+
+```http
+GET /api/question/function/batch-import/status?taskId=<taskId>
+Authorization: Bearer <token>
+```
+
+返回：`Result<FunctionBatchImportTaskVo>`。任务快照存 Redis（键前缀 `function_batch_import_task:`，TTL 6 小时），仅管理员可查。
+
+### 提升隐藏用例为公开样例
+
+```http
+POST /api/question/function/test-cases/sample/{questionId}?count=1&publish=true
+Authorization: Bearer <token>
+```
+
+说明：把该题**最早的**若干条隐藏用例（`is_sample=0`）提升为公开样例（`is_sample=1`、`is_hidden=0`），并把第一条回填到题目的 `sample_input`/`sample_output`。判题读取该题全部用例、不按 `is_hidden` 过滤，所以提升不会减少判题覆盖。`count` 缺省 1，范围 1~10；题目不是函数题报 `4000206`，已无隐藏用例可提升报 `4090207`。
+
+`publish`（缺省 `false`）为 `true` 时同时把题目置为上架（`status=1`）。批量导入的题目建库时是私密（`status=3`），调用方在隐藏用例生成成功后带上 `publish=true` 完成上架——这样「用例生成失败」的题不会以 0 个测试点的形态暴露给用户。
+
+返回：`Result<Integer>`，`data` 为本次提升的用例条数。
 
 ## service-question 判题与提交记录
 

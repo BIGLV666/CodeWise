@@ -10,11 +10,14 @@ SSE 事件契约（与 dsh 会话事件词汇对齐，前端可按 dsh Web UI �
 - ``error``：本轮失败，message 面向用户。
 """
 
+import asyncio
 import json
-from collections.abc import Iterator
+import queue
+import threading
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+import anyio
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from util.error_codes import AgentErrorCode
@@ -86,6 +89,7 @@ def call_ai(
 @router.post("/stream")
 def stream_ai(
     request: CallAiRequest,
+    http_request: Request,
     user_id: int = Depends(get_current_user_id),
     token: str = Depends(get_token_from_header),
 ) -> StreamingResponse:
@@ -93,26 +97,72 @@ def stream_ai(
 
     call_ai_dto = build_call_dto(request, user_id)
 
-    def event_generator() -> Iterator[str]:
-        try:
-            # Session 必须由生成器持有。流式响应真正迭代结束后才会离开 with，
-            # 此时 get_db 才统一 commit；中途异常则 rollback。
-            with get_db() as session:
-                service = DshAgentService(session)
-                for event_name, payload in service.stream_turn(call_ai_dto, token):
-                    yield sse_event(event_name, payload)
+    async def event_generator():
+        cancel_event = threading.Event()
+        frames: queue.Queue[str] = queue.Queue(maxsize=128)
+        producer_done = threading.Event()
+        loop = asyncio.get_running_loop()
+        ready = asyncio.Event()
 
-        except Exception as exc:
-            # HTTP 响应开始后不能再改变状态码，因此通过 error 事件通知前端。
-            # 事件文案固定来自枚举，原始异常只进日志。
-            logger.exception("Agent 流式调用失败: %s", exc)
-            yield sse_event(
-                "error",
-                {
+        def wake_consumer() -> None:
+            try:
+                loop.call_soon_threadsafe(ready.set)
+            except RuntimeError:
+                if not loop.is_closed():
+                    raise
+
+        def put_frame(frame: str) -> None:
+            while not cancel_event.is_set():
+                try:
+                    frames.put(frame, timeout=0.1)
+                    wake_consumer()
+                    return
+                except queue.Full:
+                    continue
+
+        def produce() -> None:
+            try:
+                # 数据库 Session 只由生产线程创建、使用和关闭。
+                with get_db() as session:
+                    service = DshAgentService(session)
+                    turn = service.stream_turn(call_ai_dto, token, cancel_event)
+                    try:
+                        for event_name, payload in turn:
+                            if cancel_event.is_set():
+                                break
+                            put_frame(sse_event(event_name, payload))
+                    finally:
+                        turn.close()
+            except Exception:
+                logger.exception("Agent 流式调用失败 conversation_id=%s", request.conversation_id)
+                put_frame(sse_event("error", {
                     "conversation_id": request.conversation_id,
                     "message": AgentErrorCode.AGENT_CALL_FAILED.message,
-                },
-            )
+                }))
+            finally:
+                producer_done.set()
+                wake_consumer()
+
+        producer = threading.Thread(target=produce, name=f"agent-stream-{request.conversation_id}", daemon=True)
+        producer.start()
+        try:
+            while True:
+                if await http_request.is_disconnected():
+                    break
+                ready.clear()
+                try:
+                    yield frames.get_nowait()
+                except queue.Empty:
+                    if producer_done.is_set():
+                        break
+                    try:
+                        await asyncio.wait_for(ready.wait(), timeout=0.1)
+                    except TimeoutError:
+                        pass
+        finally:
+            cancel_event.set()
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(producer.join, 7)
 
     return StreamingResponse(
         event_generator(),

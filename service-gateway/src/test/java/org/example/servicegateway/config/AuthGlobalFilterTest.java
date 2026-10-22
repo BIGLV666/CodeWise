@@ -75,6 +75,7 @@ class AuthGlobalFilterTest {
                         .remoteAddress(REMOTE)
                         .header("X-User-Id", "999")
                         .header("X-User-Name", "attacker")
+                        .header("X-User-Token", "forged-token")
                         .header("X-Internal-Token", "forged-token")
                         .header("X-Real-IP", "1.2.3.4")
                         .build());
@@ -85,6 +86,7 @@ class AuthGlobalFilterTest {
         ServerHttpRequest forwarded = forwarded(chain);
         assertThat(forwarded.getHeaders().getFirst("X-User-Id")).isNull();
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isNull();
+        assertThat(forwarded.getHeaders().getFirst("X-User-Token")).isNull();
         assertThat(forwarded.getHeaders().getFirst("X-Internal-Token")).isEqualTo(INTERNAL_TOKEN);
         assertThat(forwarded.getHeaders().getFirst("X-Real-IP")).isEqualTo("203.0.113.7");
     }
@@ -103,6 +105,7 @@ class AuthGlobalFilterTest {
                         .header("Authorization", "Bearer " + token)
                         .header("X-User-Id", "1")
                         .header("X-User-Name", "attacker")
+                        .header("X-User-Token", "forged-token")
                         .header("X-Internal-Token", "forged-token")
                         .build());
         GatewayFilterChain chain = mockChain();
@@ -112,6 +115,7 @@ class AuthGlobalFilterTest {
         ServerHttpRequest forwarded = forwarded(chain);
         assertThat(forwarded.getHeaders().getFirst("X-User-Id")).isEqualTo("42");
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isEqualTo("alice");
+        assertThat(forwarded.getHeaders().getFirst("X-User-Token")).isEqualTo(token);
         assertThat(forwarded.getHeaders().getFirst("X-Internal-Token")).isEqualTo(INTERNAL_TOKEN);
     }
 
@@ -191,6 +195,7 @@ class AuthGlobalFilterTest {
                         .header("Upgrade", "websocket")
                         .header("X-User-Id", "1")
                         .header("X-User-Name", "attacker")
+                        .header("X-User-Token", "forged-token")
                         .build());
         GatewayFilterChain chain = mockChain();
 
@@ -199,6 +204,7 @@ class AuthGlobalFilterTest {
         ServerHttpRequest forwarded = forwarded(chain);
         assertThat(forwarded.getHeaders().getFirst("X-User-Id")).isEqualTo("42");
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isEqualTo("alice");
+        assertThat(forwarded.getHeaders().getFirst("X-User-Token")).isEqualTo(token);
         assertThat(forwarded.getHeaders().getFirst("X-Internal-Token")).isEqualTo(INTERNAL_TOKEN);
     }
 
@@ -226,5 +232,88 @@ class AuthGlobalFilterTest {
         ServerHttpRequest forwarded = forwarded(chain);
         assertThat(forwarded.getHeaders().getFirst("X-User-Id")).isEqualTo("7");
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isEmpty();
+    }
+
+    /**
+     * 验收点 6a：受保护路径 → 注入 X-User-Token-Iat（epoch 秒，取自 JWT iat），
+     * 供下游 UserAuthInterceptor 与用户级失效线（封禁／改密）比较。
+     */
+    @Test
+    void authenticatedRequestInjectsIssuedAtForRevocationCheck() {
+        String token = jwtUtil.generateToken(42L, "alice");
+        long expectedIat = jwtUtil.parseToken(token).getIssuedAt().getTime() / 1000L;
+        AuthGlobalFilter filter = new AuthGlobalFilter(jwtUtil, INTERNAL_TOKEN, false);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/user/profile")
+                        .remoteAddress(REMOTE)
+                        .header("Authorization", "Bearer " + token)
+                        // 客户端伪造：必须被剥离后由网关重新注入真实 iat
+                        .header("X-User-Token-Iat", "1")
+                        .build());
+        GatewayFilterChain chain = mockChain();
+
+        filter.filter(exchange, chain).block();
+
+        assertThat(forwarded(chain).getHeaders().getFirst("X-User-Token-Iat"))
+                .isEqualTo(String.valueOf(expectedIat));
+    }
+
+    /** 验收点 6b：公共路径不透传 iat（身份头整体剥离），伪造值也不会残留。 */
+    @Test
+    void publicPathStripsIssuedAtHeader() {
+        AuthGlobalFilter filter = new AuthGlobalFilter(jwtUtil, INTERNAL_TOKEN, false);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/user/login")
+                        .remoteAddress(REMOTE)
+                        .header("X-User-Token-Iat", "1")
+                        .build());
+        GatewayFilterChain chain = mockChain();
+
+        filter.filter(exchange, chain).block();
+
+        assertThat(forwarded(chain).getHeaders().getFirst("X-User-Token-Iat")).isNull();
+    }
+
+    /** 验收点 6c：WebSocket 握手分支同样注入 iat。 */
+    @Test
+    void websocketBranchInjectsIssuedAt() {
+        String token = jwtUtil.generateToken(42L, "alice");
+        long expectedIat = jwtUtil.parseToken(token).getIssuedAt().getTime() / 1000L;
+        AuthGlobalFilter filter = new AuthGlobalFilter(jwtUtil, INTERNAL_TOKEN, false);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/websocket?token=" + token)
+                        .remoteAddress(REMOTE)
+                        .header("Upgrade", "websocket")
+                        .build());
+        GatewayFilterChain chain = mockChain();
+
+        filter.filter(exchange, chain).block();
+
+        assertThat(forwarded(chain).getHeaders().getFirst("X-User-Token-Iat"))
+                .isEqualTo(String.valueOf(expectedIat));
+    }
+
+    /**
+     * 验收点 6d：token 缺 iat claim → 下发空串（下游据此按「无法证明凭证比失效线新」处理），
+     * 而不是伪造当前时间把旧凭证放过去。
+     */
+    @Test
+    void tokenWithoutIssuedAtClaimInjectsEmptyValue() {
+        String token = Jwts.builder()
+                .subject("7")
+                .expiration(new Date(System.currentTimeMillis() + 60000))
+                .signWith(Keys.hmacShaKeyFor(JWT_SECRET.getBytes(StandardCharsets.UTF_8)))
+                .compact();
+        AuthGlobalFilter filter = new AuthGlobalFilter(jwtUtil, INTERNAL_TOKEN, false);
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/user/profile")
+                        .remoteAddress(REMOTE)
+                        .header("Authorization", "Bearer " + token)
+                        .build());
+        GatewayFilterChain chain = mockChain();
+
+        filter.filter(exchange, chain).block();
+
+        assertThat(forwarded(chain).getHeaders().getFirst("X-User-Token-Iat")).isEmpty();
     }
 }

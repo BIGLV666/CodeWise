@@ -45,15 +45,17 @@ curl http://localhost:8082/actuator/health        # {"status":"UP"}
 
 ## 构建了什么
 
-- 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；容器内 Maven 多阶段构建按 `-N install` 根 POM → `service-api` → `service-common` → 目标模块的顺序执行（仓库无聚合 POM）；运行阶段固定 JVM 参数 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，与 compose 各服务 `mem_limit`（384m–1.5g）配合防止容器 OOM kill；
+- 8 个服务镜像：共用模板 [`Dockerfile.service`](Dockerfile.service)，`--build-arg MODULE=...` 区分；容器内 Maven 多阶段构建按 `-N install` 根 POM → `service-api` → `service-common` → 目标模块的顺序执行（仓库无聚合 POM）；运行阶段固定 JVM 参数 `-XX:MaxRAMPercentage=45.0 -XX:MaxMetaspaceSize=160m -Xss512k`，与 compose 各服务 `mem_limit`（384m–1.5g）配合防止容器 OOM kill；另开启 GC 日志，落到 `service-logs` 卷里的 `/app/logs/gc-<模块名>.log`（`filecount=5,filesize=10M`，上限约 60M/服务，轮转不无限追加），查看方式见 [`OPERATIONS.md`](OPERATIONS.md) 排障清单；
 - 判题基础镜像：[`judge-base/Dockerfile`](judge-base/Dockerfile)（JDK17 + uid 1000 judge 用户 + jackson 2.15.x 函数题依赖三件套内置到 `/opt/judge/lib`）；
 - Python Agent 镜像：`codewise-agent/Dockerfile`（node:22-bookworm-slim 单镜像双运行时：Node 22 + Debian 自带 Python 3.11），nginx 以 `/agentapi/` 反代；
-- 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend/CodeWise-frontend`（pnpm + `VITE_AGENT_BASE_URL=/agentapi`）并挂载 [`nginx.conf`](nginx.conf)；[`frontend/Dockerfile`](frontend/Dockerfile) 为内容一致的独立构建参考。
+- 前端镜像：compose 内联构建兄弟仓库 `../../CodeWise-frontend`（pnpm + `VITE_AGENT_BASE_URL=/agentapi`）并挂载 [`nginx.conf`](nginx.conf)；[`frontend/Dockerfile`](frontend/Dockerfile) 为内容一致的独立构建参考。**前端仓库须与 CodeWise 同级**（`git clone https://github.com/BIGLV666/CodeWise-frontend.git` 到 CodeWise 的上级目录），否则前端镜像构建会因构建上下文不存在而失败。
 
 ## 遇到问题
 
 - 服务间 Feign 503、判题 PENDING、跨域报错等见 [`OPERATIONS.md`](OPERATIONS.md) 第 7 节排障清单；
 - `docker compose -f deploy/docker-compose.yml logs -f service-judge` 是判题问题的第一入口。
+- `service-judge` 的 8086 是明文 HTTP 管理端口，当前 Compose 将其映射到宿主机。直接向它发送 HTTPS 会触发 Tomcat「Invalid character found in method name」；这与 JSON 或 WebSocket 消息解析无关。生产环境应通过防火墙或 TLS 反向代理限制入口；若无需宿主机访问，可在部署前移除 judge 的 `ports` 映射，容器间通信及容器内健康检查仍使用 Docker 网络。本次修复保留映射，以免影响现有运维访问。
+- question/judge 本地配置默认启用公共 RabbitMQ 拓扑，并显式使用 JSON 消息转换器。Nacos 如覆盖 `codewise.mq.enabled` 为 `false`，需由运维预建队列/交换机/绑定；转换器仍独立启用。调试回调兼容历史裸 UUID 与新的 JSON 字符串，HTTP `/api/question/debug` 返回任务 UUID，最终结果由 WebSocket 推送。
 
 ## 发布说明（维护者）
 

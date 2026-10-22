@@ -1,7 +1,7 @@
 package org.example.serviceai.advice;
 
 import org.example.serviceai.exception.AiErrorCode;
-import org.example.serviceai.service.AiProviderHttpException;
+import org.example.serviceai.ai.transport.AiProviderHttpException;
 import org.example.serviceapi.dto.Result;
 import org.junit.jupiter.api.Test;
 

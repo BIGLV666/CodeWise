@@ -32,7 +32,6 @@
         <dependency>
             <groupId>io.github.biglv666</groupId>
             <artifactId>api-governance-spring-boot-starter</artifactId>
-            <version>0.1.0</version>
         </dependency>
 
         <!-- Spring Web -->
@@ -117,6 +116,12 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Lua/Redis 集成测试：起真实 redis 容器，验证脚本原子性与 TTL -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

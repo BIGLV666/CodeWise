@@ -10,6 +10,9 @@ import org.outboxpro.core.event.EventDefinition;
 import org.outboxpro.core.handler.OutboxProHandler;
 import org.outboxpro.core.subscription.EventBinding;
 import org.outboxpro.core.subscription.OutboxProSubscription;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -71,6 +74,8 @@ class OutboxProIntegrationTest {
         registry.add("spring.rabbitmq.password", () -> "guest");
         // service-common 自身自动配置所需
         registry.add("codewise.internal-token", () -> "test-token");
+        // 与生产者服务一致：开启 CodeWise 的 OutboxPro 装配（含 Relay 发布模板覆盖）
+        registry.add("outboxpro.enabled", () -> "true");
         // 兼容性：OutboxPro 默认 "1000ms" 需要 Spring Framework 6.2 的 duration 解析，
         // Boot 3.2.4（Framework 6.1）只认纯毫秒/ISO-8601，显式覆盖为纯毫秒
         registry.add("outboxpro.producer.poll-interval", () -> "1000");
@@ -82,6 +87,20 @@ class OutboxProIntegrationTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class TestBeans {
+
+        /**
+         * 复刻生产者服务的模板形态：带 {@code Jackson2JsonMessageConverter}。
+         *
+         * <p>这是本测试的关键前提——直发 {@code EventEnvelope} 等对象需要 JSON 转换器，
+         * 但同一个转换器若被 Relay 复用就会把已序列化的信封二次编码。若把本 Bean 去掉，
+         * 本测试会退化成「无 JSON 转换器」的宽松环境，从而漏掉线上那类故障。</p>
+         */
+        @Bean
+        RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
+            RabbitTemplate template = new RabbitTemplate(connectionFactory);
+            template.setMessageConverter(new Jackson2JsonMessageConverter());
+            return template;
+        }
 
         @Bean
         EventDefinition<TestPayload> testEventDefinition() {

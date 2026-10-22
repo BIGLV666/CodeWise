@@ -60,7 +60,7 @@ public class SolutionLookTask {
             long bucketId = redisBucketSwitcher.switchBucket(RedisContext.SOLUTION_LOOK_BUCKET_KEY);
             String sourceKey = RedisContext.SOLUTION_LOOK_KEY + "-" + bucketId;
             String processingKey = sourceKey + ":processing:" + UUID.randomUUID();
-            Boolean renamed = redisTemplate.renameIfAbsent(sourceKey, processingKey);
+            Boolean renamed = redisBucketSwitcher.renameIfSourceExists(sourceKey, processingKey);
             if (!Boolean.TRUE.equals(renamed)) {
                 log.info("浏览量桶为空，bucketId={}", bucketId);
                 return;
