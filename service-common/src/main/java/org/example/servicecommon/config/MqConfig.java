@@ -250,6 +250,20 @@ public class MqConfig {
                 .with(QUESTION_DELETE_QUESTION_ROUTING_KEY);
     }
     @Bean
+    public Binding rollbackQuestionBinding() {
+        return BindingBuilder
+                .bind(questionQueue())
+                .to(questionExchange())
+                .with(QUESTION_ROLLBACK_ROUTING_KEY);
+    }
+    @Bean
+    public Binding cleanupGroupQuestionsBinding() {
+        return BindingBuilder
+                .bind(questionQueue())
+                .to(questionExchange())
+                .with(QUESTION_GROUP_CLEANUP_ROUTING_KEY);
+    }
+    @Bean
     public Binding submitRecordBinding() {
         return BindingBuilder
                 .bind(questionQueue())

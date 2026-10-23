@@ -45,4 +45,10 @@ public final class EventTypes {
 
     /** 小组邀请码发送：quiz-nest -> message，payload 为 JoinToken */
     public static final String GROUP_JOIN_TOKEN = "GROUP_JOIN_TOKEN";
+
+    /** 小组自建题目回滚：quiz-nest -> question，payload 为 QuestionRollbackDto（本地关联写入失败时删除已建题目） */
+    public static final String QUESTION_CREATE_ROLLBACK = "QUESTION_CREATE_ROLLBACK";
+
+    /** 小组题库清理：quiz-nest -> question，payload 为 GroupQuestionCleanupDto（最后一名成员退出删组时清理自建题目） */
+    public static final String GROUP_QUESTION_CLEANUP = "GROUP_QUESTION_CLEANUP";
 }

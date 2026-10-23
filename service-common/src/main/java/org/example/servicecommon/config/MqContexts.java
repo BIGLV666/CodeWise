@@ -40,6 +40,10 @@ public  class MqContexts {
     public static final String QUESTION_DELETE_QUESTION_ROUTING_KEY = "question.delete.queue.routing";
     public static final String QUESTION_SUBMIT_RECORD_ROUTING_KEY = "question.submit.record.routing";
     public static final String QUESTION_DEBUG_ROUTING_KEY = "question.debug.routing";
+    /** 小组自建题目回滚：quiz-nest -> question（经 Outbox），payload 为 QuestionRollbackDto */
+    public static final String QUESTION_ROLLBACK_ROUTING_KEY = "question.rollback.routing";
+    /** 小组题库清理：quiz-nest -> question（经 Outbox），payload 为 GroupQuestionCleanupDto */
+    public static final String QUESTION_GROUP_CLEANUP_ROUTING_KEY = "question.group.cleanup.routing";
     //判题队列
     public static final String JUDGE_QUEUE_NAME = "judge.queue";
     public static final String JUDGE_EXCHANGE = "judge.exchange";

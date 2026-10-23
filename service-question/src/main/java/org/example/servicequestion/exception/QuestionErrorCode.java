@@ -58,6 +58,7 @@ public enum QuestionErrorCode implements ErrorCode {
 
     // ---- 权限/可见性（403，账号状态语义为本服务自有）----
     ACCOUNT_UNAVAILABLE(4030201, "当前账号不可用，请联系管理员"),
+    INTERNAL_CALL_UNAUTHORIZED(4030202, "无权调用内部接口"),
 
     // ---- 资源不存在（404，按对象类型区分归属）----
     QUESTION_NOT_FOUND(4040201, "题目不存在或已被删除"),

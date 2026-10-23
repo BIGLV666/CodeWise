@@ -3,8 +3,13 @@ package org.example.servicequestion.FeugnService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
+import org.example.serviceapi.exception.BizException;
+import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.entry.Question;
+import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.QuestionMapper;
+import org.example.servicequestion.service.QuestionService;
+import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -13,14 +18,16 @@ import java.util.List;
 @Service
 public class QuestionServiceFeign {
 
-    public QuestionServiceFeign(QuestionMapper questionMapper) {
+    public QuestionServiceFeign(QuestionMapper questionMapper, QuestionService questionService) {
         this.questionMapper = questionMapper;
+        this.questionService = questionService;
     }
     private final QuestionMapper questionMapper;
+    private final QuestionService questionService;
 
     public QuestionDto getQuestionById( Long id) {
         Question question = questionMapper.selectById(id);
-      
+
         return ToQuestionDto(question);
     }
     public List<QuestionDto> getAllFavoritesByUserId(List<Long> questionIds) {
@@ -78,4 +85,20 @@ public class QuestionServiceFeign {
                .updateTime(question.getUpdateTime()).totalSubmit(question.getTotalSubmit()).totalAc(question.getTotalAc()).passRate(question.getPassRate()).contentHash(question.getContentHash()).build();
     }
 
+    /**
+     * 供其他服务同步建题：复用 {@link QuestionService#addQuestion} 的入参校验、
+     * 防重复提交锁与私密状态（status=3），不在 Feign 入口复制一套规则。
+     *
+     * @param questionDto 建题入参，questionId/status/createUserId 由本服务生成或控制
+     * @return 已落库的题目（含自增 questionId）
+     */
+    public QuestionDto addQuestion(QuestionDto questionDto) {
+        if (questionDto == null) {
+            throw new BizException(QuestionErrorCode.QUESTION_SAVE_FAILED);
+        }
+        InsertQuestionDto insert = new InsertQuestionDto();
+        BeanUtils.copyProperties(questionDto, insert);
+        Question question = questionService.addQuestion(insert);
+        return ToQuestionDto(question);
+    }
 }

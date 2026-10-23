@@ -1,10 +1,13 @@
 package org.example.servicequestion.Feign;
 
+import io.github.biglv666.apigovernance.annotation.Skip;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import org.example.servicequestion.FeugnService.QuestionServiceFeign;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.example.servicequestion.exception.QuestionErrorCode;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -12,8 +15,17 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/question")
 public class QuestionFegin {
-    @Autowired
-    private QuestionServiceFeign questionServiceFeign;
+
+    private final QuestionServiceFeign questionServiceFeign;
+    private final String internalToken;
+
+    public QuestionFegin(
+            QuestionServiceFeign questionServiceFeign,
+            @Value("${codewise.internal-token}") String internalToken) {
+        this.questionServiceFeign = questionServiceFeign;
+        this.internalToken = internalToken;
+    }
+
     @GetMapping("/info/{questionId}")
     public Result<QuestionDto> getQuestion(@PathVariable Long questionId) {
         return Result.success(questionServiceFeign.getQuestionById(questionId));
@@ -28,5 +40,22 @@ public class QuestionFegin {
     @PostMapping("/info/briefquestions")
     public Result<List<QuestionBriefDto>> getFavoritesBrief(@RequestBody List<Long> questionIds) {
         return Result.success(questionServiceFeign.getAllFavoritesBrief(questionIds));
+    }
+
+    /**
+     * 供 quiz-nest 同步创建小组自建题目。
+     *
+     * <p>鉴权依赖 {@code X-CodeWise-Internal-Token}：网关只注入 {@code X-Internal-Token}，
+     * 不会注入该头，外部请求无法伪造；内部调用不占用户维度限流。</p>
+     */
+    @PostMapping("/internal/add")
+    @Skip(reason = "系统内部端点（quiz-nest 添加小组自建题目经 Feign 调用），鉴权依赖 X-CodeWise-Internal-Token 校验，不参与限流")
+    public Result<QuestionDto> addQuestion(
+            @RequestHeader("X-CodeWise-Internal-Token") String requestToken,
+            @RequestBody QuestionDto questionDto) {
+        if (!internalToken.equals(requestToken)) {
+            throw new BizException(QuestionErrorCode.INTERNAL_CALL_UNAUTHORIZED);
+        }
+        return Result.success(questionServiceFeign.addQuestion(questionDto));
     }
 }

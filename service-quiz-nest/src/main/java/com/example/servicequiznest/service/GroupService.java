@@ -67,6 +67,7 @@ public class GroupService {
     private final OutboxProPublisher outboxPublisher;
     private final UserFeignClient userFeignClient;
     private final TransactionTemplate transactionTemplate;
+    private final GroupQuestionService groupQuestionService;
 
     public GroupService(
             GroupMapper groupMapper,
@@ -74,7 +75,8 @@ public class GroupService {
             RedisTemplate<String, Object> redisTemplate,
             OutboxProPublisher outboxPublisher,
             UserFeignClient userFeignClient,
-            TransactionTemplate transactionTemplate
+            TransactionTemplate transactionTemplate,
+            GroupQuestionService groupQuestionService
     ) {
         this.groupMapper = groupMapper;
         this.groupMemberMapper = groupMemberMapper;
@@ -82,6 +84,7 @@ public class GroupService {
         this.outboxPublisher = outboxPublisher;
         this.userFeignClient = userFeignClient;
         this.transactionTemplate = transactionTemplate;
+        this.groupQuestionService = groupQuestionService;
     }
 
     /**
@@ -230,6 +233,7 @@ public class GroupService {
             // 兜底：并发下自己可能刚被晋升为 root 后再走非 root 分支，此时组里已无人，别留下孤儿组
             if (groupMapper.deleteGroupIfNoApprovedMember(groupId) != 0) {
                 groupMapper.deleteAllMembers(groupId);
+                groupQuestionService.deleteGroupQuestions(groupId);
             }
             return true;
         }
@@ -313,6 +317,7 @@ public class GroupService {
             throw new BizException(QuizNestErrorCode.LEAVE_GROUP_FAILED);
         }
         groupMapper.deleteAllMembers(groupId);
+        groupQuestionService.deleteGroupQuestions(groupId);
     }
 
     /**
@@ -341,6 +346,7 @@ public class GroupService {
                     throw new BizException(QuizNestErrorCode.JOIN_GROUP_FAILED, e);
                 }
                 sleepBeforeJoinRetry(attempt);
+                attempt++;
             }
         }
     }
@@ -366,6 +372,7 @@ public class GroupService {
     private void sleepBeforeJoinRetry(int attempt) {
         try {
             Thread.sleep(10L * attempt);
+
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new BizException(QuizNestErrorCode.JOIN_GROUP_FAILED, interrupted);

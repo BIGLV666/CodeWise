@@ -25,14 +25,24 @@ public enum QuizNestErrorCode implements ErrorCode {
     NOT_USERID_SEND_JOIN_TOKEN(4001107, "请选择要邀请的用户"),
     CANNOT_INVITE_SELF(4001108, "不能邀请自己加入小组"),
     INVITE_CONTEXT_TOO_LONG(4001109, "邀请留言不能超过200字"),
+    QUESTION_REQUIRED(4001110,"题目内容不可为空，请补充后重试"),
+    QUESTION_TITLE_REQUIRED(4001111,"标题不能为空"),
+    QUESTION_CONTENT_REQUIRED(4001112,"题目详情不能为空"),
+    QUESTION_TITLE_TOO_LONG(4001113,"标题长度不能超过 %s 个字符"),
+    QUESTION_TAGS_TOO_LONG(4001114,"标签长度不能超过 %s 个字符"),
+    QUESTION_TEXT_TOO_LONG(4001115,"%s内容过长，请缩短后重试"),
+    QUESTION_TIME_LIMIT_INVALID(4001116,"时间限制必须为正整数"),
+    QUESTION_MEMORY_LIMIT_INVALID(4001117,"内存限制必须为正整数"),
 
     // ---------- 无权限 403 ----------
     NO_PERMISSION_UPDATE_GROUP(4031101, "无权限修改小组"),
     NO_PERMISSION_SEND_JOIN_TOKEN(4031102, "您暂无权限邀请他人，请联系管理员"),
+    NO_PERMISSION_ADD_QUESTION(4031103,"您暂无权限添加题目，请联系管理员"),
 
     // ---------- 资源不存在 404 ----------
     NOTFOUND_USER_IN_GROUP(4041101, "您不是该小组成员"),
     NOTFOUND_GROUP(4041102, "您选择的小组不存在，请确认后重试"),
+    NOTFOUND_QUESTION(4041102,"您添加的题目不存在请核对后重试"),
 
     // ---------- 状态冲突 409 ----------
     DUPLICATE_REQUEST(4091101, "该创建请求已提交，请勿重复提交"),
@@ -40,13 +50,15 @@ public enum QuizNestErrorCode implements ErrorCode {
     SUBMIT_APPLICATION(4091103, "您的提交申请已提交，请耐心等待"),
     GROUP_NOT_INVITE(4091104, "该小组无需邀请码，可直接加入或提交申请"),
     INVITEE_ALREADY_MEMBER(4091105, "对方已经是该小组成员，无需再次邀请"),
+    QUESTION_ALREADY_IN_GROUP(4091106, "该题目已在小组题库中，请勿重复添加"),
 
     // ---------- 服务内部 500 ----------
     CREATE_FAILED(5001101, "小组创建失败，请稍后重试"),
     UPDATE_FAILED(5001102, "小组修改失败，请稍后重试"),
     LEAVE_GROUP_FAILED(5001103, "退出小组失败，请稍后重试"),
     JOIN_GROUP_FAILED(5001104, "加入小组失败，请稍后重试"),
-    SEND_JOIN_TOKEN_FAILED(5001105, "邀请码发送失败，请稍后重试");
+    SEND_JOIN_TOKEN_FAILED(5001105, "邀请码发送失败，请稍后重试"),
+    ADD_QUESTION_FAILED(5001105,"添加题目失败请稍后重试");
 
     private final int code;
     private final String message;

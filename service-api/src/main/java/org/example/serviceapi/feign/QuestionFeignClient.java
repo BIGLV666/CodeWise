@@ -5,10 +5,7 @@ import org.example.serviceapi.dto.judge.JudgeContextDto;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.springframework.cloud.openfeign.FeignClient;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
@@ -38,4 +35,20 @@ public interface QuestionFeignClient {
      */
     @GetMapping("/api/question/internal/judge-context/{judgeRecordId}")
     Result<JudgeContextDto> getJudgeContext(@PathVariable("judgeRecordId") Long judgeRecordId);
+
+    /**
+     * 供给其他服务同步添加题目。
+     *
+     * <p>仅限服务间调用：请求头 {@code X-CodeWise-Internal-Token} 由调用方按
+     * {@code codewise.internal-token} 配置显式传入，网关不会注入该头，外部请求无法伪造。
+     * 返回成功即题目已落库；失败时题目服务自身事务已回滚，调用方无需补偿。</p>
+     *
+     * @param internalToken 内部调用凭证
+     * @param questionDto   建题入参（questionId/status/createUserId 由题目服务生成）
+     * @return 已落库的题目（含 questionId）
+     */
+    @PostMapping("/api/question/internal/add")
+    Result<QuestionDto> addQuestion(
+            @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
+            @RequestBody QuestionDto questionDto);
 }

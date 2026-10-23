@@ -63,7 +63,7 @@ public class QuestionService {
 
 
     public Long getTotalQuestionCount() {
-        Long total = 0L;
+        long total = 0L;
         // Redis 经 Jackson 序列化：无类型信息时小数值会反序列化成 Integer，
         // 不能硬转 Long，统一按 Number 读取
         Object cached = redisTemplate.opsForValue().get(RedisContext.QUESTION_TOTAL_KEY);
@@ -294,6 +294,43 @@ public class QuestionService {
         if (delete <= 0) {
             throw new BizException(QuestionErrorCode.QUESTION_DELETE_FAILED);
         }
+    }
+
+    /**
+     * 内部补偿：删除同步创建后未能写入小组关联的题目。
+     *
+     * <p>回滚消息可能重复投递，或题目已被人工清理；此时删除返回 0 行视为「已回滚」，
+     * 不抛异常，保证消费端可以幂等 ACK。该入口不做管理员校验，仅由 MQ 处理器调用。</p>
+     *
+     * @param questionId 待回滚题目 id
+     * @return 实际删除返回 true；题目不存在返回 false
+     */
+    public boolean rollbackCreatedQuestion(Long questionId) {
+        if (questionId == null) {
+            return false;
+        }
+        return questionMapper.deleteById(questionId) > 0;
+    }
+
+    /**
+     * 内部补偿：批量删除小组自建题目。
+     *
+     * <p>按 500 一批执行，避免超大组的 IN 列表超过 SQL 参数上限；不存在的 id 直接跳过，
+     * 重复投递天然幂等。仅由 MQ 清理处理器调用，不做管理员校验。</p>
+     *
+     * @param questionIds 待删除题目 id
+     * @return 实际删除行数
+     */
+    public int deleteQuestionsBatch(List<Long> questionIds) {
+        if (questionIds == null || questionIds.isEmpty()) {
+            return 0;
+        }
+        int deleted = 0;
+        for (int from = 0; from < questionIds.size(); from += 500) {
+            int to = Math.min(from + 500, questionIds.size());
+            deleted += questionMapper.deleteBatchIds(questionIds.subList(from, to));
+        }
+        return deleted;
     }
 
     private void requireQuestionAdmin() {

@@ -39,3 +39,20 @@ CREATE TABLE IF NOT EXISTS `group_member` (
     KEY `idx_group_member_group_status` (`group_id`, `join_status`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT = '小组成员';
+
+-- 小组题库：只存题目索引，题目正文在 service-question
+-- group_id + question_id 唯一：同一道题在同一个小组里只能出现一次
+-- is_plat_from_question：1 引用平台题目（同步只写索引）/ 0 小组自建（先同步建题再回写 question_id）
+CREATE TABLE IF NOT EXISTS `group_question` (
+    `group_question_id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '小组题库记录ID',
+    `question_id` BIGINT NOT NULL COMMENT '题目ID（service-question 的 question.question_id）',
+    `create_user_id` BIGINT NOT NULL COMMENT '添加人ID',
+    `group_id` BIGINT NOT NULL COMMENT '小组ID',
+    `is_plat_from_question` TINYINT NOT NULL DEFAULT 0 COMMENT '是否平台题目：1 平台题目 / 0 小组自建',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`group_question_id`),
+    UNIQUE KEY `uk_group_question_group_question` (`group_id`, `question_id`),
+    KEY `idx_group_question_question` (`question_id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT = '小组题库（题目索引）';

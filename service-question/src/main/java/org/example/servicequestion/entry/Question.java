@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.enums.QuestionType;
 import org.springframework.util.DigestUtils;
@@ -72,6 +73,10 @@ public class Question {
         this.passRate = BigDecimal.ZERO;
         this.aiStatue ="success";
         this.contentHash= DigestUtils.md5DigestAsHex(description.getBytes());
+    }
+
+    public Question(QuestionDto questionDto) {
 
     }
+
 }
