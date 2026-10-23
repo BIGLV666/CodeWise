@@ -14,6 +14,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -123,5 +124,10 @@ public class UserController {
         userService.freezeUser(banReason, password);
         return Result.success("success");
     }
-
+    /**参数二者含有其一即可，模糊或者精确查询用户，返回脱敏信息列表*/
+    @GetMapping("/user/list")
+    @RateLimit(limit = 5, window = 60)
+    public  Result<List<UserDto>> findUserList(@RequestParam(required = false) String name,@RequestParam(required = false) Long userId){
+        return Result.success(userService.findUser(userId,name));
+    }
 }

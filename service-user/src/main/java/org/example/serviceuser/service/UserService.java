@@ -723,5 +723,54 @@ public class UserService {
         }
     }
 
+    /**
+     * 按用户 id 或昵称/用户名查询用户，返回脱敏后的 {@link UserDto} 列表。
+     *
+     * <p>{@code userId} 非空时按主键精确查询，列表最多一个元素；否则按 {@code name} 对
+     * {@code nick_name}、{@code user_name} 做模糊匹配，用户名/昵称精确命中的用户排在前面。</p>
+     *
+     * @param userId 用户 id；非空时优先按主键查询
+     * @param name   昵称或用户名，仅在 {@code userId} 为空时使用
+     * @return 脱敏用户列表（最多 50 条），无匹配时抛出 {@link UserErrorCode#USER_NOT_FOUND}
+     */
+    public List<UserDto> findUser(Long userId,String name){
+        if(userId!=null){
+            User user = userMapper.selectById(userId);
+            //只有不为null时候返回，否则进入按照用户名查询
+            if(user!=null)
+                return List.of(parseUserDto(user));
+        }
+
+        //进行到此说明id未命中，在此需要name兜底，name不可为空
+        if(name==null||name.isBlank())throw new BizException(UserErrorCode.NICKNAME_MISSING);
+        //按昵称或用户名模糊匹配，命中其一即可（SQL 见 UserMapper#findUserByName）
+        List<User> users=userMapper.findUserByName(name);
+        if(users==null||users.isEmpty())throw new BizException(UserErrorCode.USER_NOT_FOUND);
+        return users.stream().map(this::parseUserDto).toList();
+    }
+
+    /**
+     * 把用户实体转换成脱敏后的 {@link UserDto}。
+     *
+     * <p>只暴露公开资料，不包含密码、邮箱、手机号等敏感字段。</p>
+     *
+     * @param user 用户实体
+     * @return 脱敏用户信息，包含 userId、userName、nickName、bio、totalSubmit、
+     *         totalAc、rating、lastLoginTime、avatarUrl、createTime
+     */
+    private UserDto parseUserDto(User user){
+        return UserDto.builder().userId(user.getUserId().toString())
+                .userName(user.getUserName())
+                .nickName(user.getNickName())
+                .bio(user.getBio())
+                .totalSubmit(user.getTotalSubmit())
+                .totalAc(user.getTotalAc())
+                .rating(user.getRating())
+                .lastLoginTime(user.getLastLoginTime())
+                .avatarUrl(user.getAvatarUrl())
+                .createTime(user.getCreateTime())
+                .build();
+    }
+
 
 }

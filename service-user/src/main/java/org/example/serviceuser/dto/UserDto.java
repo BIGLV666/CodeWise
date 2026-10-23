@@ -1,5 +1,7 @@
 package org.example.serviceuser.dto;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import org.example.serviceuser.entry.User;
 
@@ -7,6 +9,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
+@Builder
+@AllArgsConstructor
 public class UserDto {
 
     private String userId;
@@ -61,5 +65,6 @@ public class UserDto {
         this.banTime = user.getBanTime();
 
     }
+    public UserDto (){}
 
 }
