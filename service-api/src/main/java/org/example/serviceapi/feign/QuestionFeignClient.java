@@ -51,4 +51,9 @@ public interface QuestionFeignClient {
     Result<QuestionDto> addQuestion(
             @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
             @RequestBody QuestionDto questionDto);
+
+    @DeleteMapping("/api/question/internal/delete")
+    Result<String> deleteQuestion(
+            @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
+            @RequestParam Long questionId);
 }

@@ -1,6 +1,8 @@
 package org.example.servicequestion.FeugnService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.exception.BizException;
@@ -8,21 +10,30 @@ import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.QuestionMapper;
+import org.example.servicequestion.mapper.TestCaseMapper;
 import org.example.servicequestion.service.QuestionService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
 
 @Service
+@Slf4j
 public class QuestionServiceFeign {
 
-    public QuestionServiceFeign(QuestionMapper questionMapper, QuestionService questionService) {
+    public QuestionServiceFeign(
+            QuestionMapper questionMapper,
+            QuestionService questionService,
+            TestCaseMapper testCaseMapper
+    ) {
         this.questionMapper = questionMapper;
         this.questionService = questionService;
+        this.testCaseMapper=testCaseMapper;
     }
     private final QuestionMapper questionMapper;
+    private final TestCaseMapper testCaseMapper;
     private final QuestionService questionService;
 
     public QuestionDto getQuestionById( Long id) {
@@ -100,5 +111,25 @@ public class QuestionServiceFeign {
         BeanUtils.copyProperties(questionDto, insert);
         Question question = questionService.addQuestion(insert);
         return ToQuestionDto(question);
+    }
+
+
+    @Transactional
+    public void deleteQuestion(Long id) {
+        if(id == null)throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
+        //小组题目均为私密，所以在此只能删除私密的题目
+        int r=questionMapper.deleteById(
+                new QueryWrapper<Question>().eq("question_id", id).eq("status",3)
+        );
+        //r==0时候我们需要回源判断一次是删除失败还是不存在该题目，如果删除失败抛出异常即可，不存在就继续进行，尝试删除样例
+        if(r==0){
+            long count=questionMapper.selectCount(new QueryWrapper<Question>().eq("question_id",id));
+            if(count!=0)throw new BizException(QuestionErrorCode.QUESTION_DELETE_FAILED);
+        }
+        try{
+            testCaseMapper.deleteByQuestionId(id);
+        }catch (Exception e){
+            log.error("小组自建题目样例删除失败，题目id为{}",id,e);
+        }
     }
 }

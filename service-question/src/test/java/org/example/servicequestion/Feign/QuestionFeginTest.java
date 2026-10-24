@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -74,6 +75,44 @@ class QuestionFeginTest {
         assertThat(feignMapping.value()).containsExactly("/api/question/internal/add");
         assertThat(controllerMapping.value()).containsExactly("/internal/add");
         assertThat(classMapping.value()).containsExactly("/api/question");
+    }
+
+    @Test
+    void feignContractMatchesDeleteEndpoint() throws NoSuchMethodException {
+        DeleteMapping feignMapping = QuestionFeignClient.class
+                .getMethod("deleteQuestion", String.class, Long.class)
+                .getAnnotation(DeleteMapping.class);
+        // 控制器方法是包级可见（避免被外部直接调用），必须用 getDeclaredMethod
+        DeleteMapping controllerMapping = QuestionFegin.class
+                .getDeclaredMethod("deleteQuestion", String.class, Long.class)
+                .getAnnotation(DeleteMapping.class);
+        RequestMapping classMapping = QuestionFegin.class.getAnnotation(RequestMapping.class);
+
+        assertThat(feignMapping).isNotNull();
+        assertThat(feignMapping.value()).containsExactly("/api/question/internal/delete");
+        assertThat(controllerMapping.value()).containsExactly("/internal/delete");
+        assertThat(classMapping.value()).containsExactly("/api/question");
+        assertThat(classMapping.value()[0] + controllerMapping.value()[0])
+                .as("类级路径 + 方法级路径必须与 Feign 契约一致")
+                .isEqualTo(feignMapping.value()[0]);
+    }
+
+    @Test
+    void deleteRejectsForgedInternalToken() {
+        assertThatThrownBy(() -> controller().deleteQuestion("wrong-token", 9L))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getCode())
+                .isEqualTo(QuestionErrorCode.INTERNAL_CALL_UNAUTHORIZED.getCode());
+        verifyNoInteractions(questionServiceFeign);
+    }
+
+    @Test
+    void deleteDelegatesWithValidInternalToken() {
+        Result<String> result = controller().deleteQuestion(INTERNAL_TOKEN, 9L);
+
+        assertThat(result.getCode()).isEqualTo(200);
+        assertThat(result.getMessage()).isEqualTo("success");
+        verify(questionServiceFeign).deleteQuestion(9L);
     }
 
     @Test

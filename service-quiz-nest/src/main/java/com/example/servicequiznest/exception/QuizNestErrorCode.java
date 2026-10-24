@@ -33,6 +33,9 @@ public enum QuizNestErrorCode implements ErrorCode {
     QUESTION_TEXT_TOO_LONG(4001115,"%s内容过长，请缩短后重试"),
     QUESTION_TIME_LIMIT_INVALID(4001116,"时间限制必须为正整数"),
     QUESTION_MEMORY_LIMIT_INVALID(4001117,"内存限制必须为正整数"),
+    INVALID_GROUP_ID(4001118,"非法小组Id"),
+    INVALID_QUESTION_ID(4001119,"非法题目Id"),
+
 
     // ---------- 无权限 403 ----------
     NO_PERMISSION_UPDATE_GROUP(4031101, "无权限修改小组"),
@@ -42,7 +45,8 @@ public enum QuizNestErrorCode implements ErrorCode {
     // ---------- 资源不存在 404 ----------
     NOTFOUND_USER_IN_GROUP(4041101, "您不是该小组成员"),
     NOTFOUND_GROUP(4041102, "您选择的小组不存在，请确认后重试"),
-    NOTFOUND_QUESTION(4041102,"您添加的题目不存在请核对后重试"),
+    NOTFOUND_QUESTION(4041103,"您添加的题目不存在请核对后重试"),
+    NOTFOUND_GROUP_QUESTION(4041104,"未找到该题目，请核对后重试"),
 
     // ---------- 状态冲突 409 ----------
     DUPLICATE_REQUEST(4091101, "该创建请求已提交，请勿重复提交"),
@@ -58,7 +62,8 @@ public enum QuizNestErrorCode implements ErrorCode {
     LEAVE_GROUP_FAILED(5001103, "退出小组失败，请稍后重试"),
     JOIN_GROUP_FAILED(5001104, "加入小组失败，请稍后重试"),
     SEND_JOIN_TOKEN_FAILED(5001105, "邀请码发送失败，请稍后重试"),
-    ADD_QUESTION_FAILED(5001105,"添加题目失败请稍后重试");
+    ADD_QUESTION_FAILED(5001106,"添加题目失败请稍后重试"),
+    DELETE_GROUP_QUESTION_FAILED(5001107,"删除题目失败请稍后重试");
 
     private final int code;
     private final String message;

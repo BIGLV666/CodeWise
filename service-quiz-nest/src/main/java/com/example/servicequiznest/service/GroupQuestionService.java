@@ -4,12 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.example.servicequiznest.dto.CreateGroupQuestionDto;
 import com.example.servicequiznest.entity.GroupMember;
 import com.example.servicequiznest.entity.GroupQuestion;
+import com.example.servicequiznest.enums.GroupJoinStatus;
 import com.example.servicequiznest.enums.GroupMemberRole;
 import com.example.servicequiznest.exception.QuizNestErrorCode;
 import com.example.servicequiznest.mapper.GroupMemberMapper;
 import com.example.servicequiznest.mapper.GroupQuestionMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.exception.CommonErrorCode;
@@ -21,10 +24,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import vo.MinimalQuestionVo;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 @Service
@@ -45,13 +53,14 @@ public class GroupQuestionService {
             GroupQuestionMapper groupQuestionMapper,
             GroupQuestionRollbackPublisher rollbackPublisher,
             GroupQuestionCleanupPublisher cleanupPublisher,
-            @Value("${codewise.internal-token}") String internalToken) {
+            @Value("${codewise.internal-token}") String internalToken
+            ) {
         this.groupMemberMapper = groupMemberMapper;
-        this.questionFeignClient = questionFeignClient;
         this.groupQuestionMapper = groupQuestionMapper;
         this.rollbackPublisher = rollbackPublisher;
         this.cleanupPublisher = cleanupPublisher;
         this.internalToken = internalToken;
+        this.questionFeignClient = questionFeignClient;
     }
 
     /**
@@ -189,12 +198,22 @@ public class GroupQuestionService {
     }
 
     /**
-     * 平台题目就不需要同步添加题目了，只需要在此直接为小组题库加入索引即可
+     * 平台题目就不需要同步添加题目了，只需要在此直接为小组题库加入索引即可。
+     *
+     * <p>题目服务按 id 返回题目时不区分可见性，因此必须在写索引前自行校验：
+     * 公开题任何人可加，私密题仅创建人可加，下架/审核中/状态缺失一律拒绝，
+     * 避免把他人私密题或违规题扩散到小组。不可见统一按「题目不存在」返回，
+     * 不向调用方泄露题目是否存在。</p>
      */
     private void addPlatFromQuestion(CreateGroupQuestionDto dto){
 
        Result< QuestionDto > body=questionFeignClient.getQuestionInfo(dto.getQuestionId());
         if(body==null||body.getData()==null){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_QUESTION);
+        }
+        if(!canBeAddedToGroup(body.getData())){
+            log.warn("拒绝将不可见题目加入小组: groupId={}, questionId={}, userId={}",
+                    dto.getGroupId(), dto.getQuestionId(), UserContext.getUserId());
             throw new BizException(QuizNestErrorCode.NOTFOUND_QUESTION);
         }
 
@@ -214,6 +233,27 @@ public class GroupQuestionService {
             // uk_group_question_group_question：同一道题重复加入同一个小组
             throw new BizException(QuizNestErrorCode.QUESTION_ALREADY_IN_GROUP, e);
         }
+    }
+
+    /**
+     * 平台题目加入小组的可见性规则。
+     *
+     * <ul>
+     *   <li>{@code status=1}（正常公开）：任何人可加入小组；</li>
+     *   <li>{@code status=3}（私密）：仅创建人本人可加入（自己的私密题可进自己的小组）；</li>
+     *   <li>{@code status=0}（下架）/ {@code 2}（审核中）/ 缺失：一律不可加入。</li>
+     * </ul>
+     */
+    private boolean canBeAddedToGroup(QuestionDto question){
+        if(question.getQuestionId()==null){
+            return false;
+        }
+        Integer status = question.getStatus();
+        if(Integer.valueOf(1).equals(status)){
+            return true;
+        }
+        return Integer.valueOf(3).equals(status)
+                && Objects.equals(question.getCreateUserId(), UserContext.getUserId());
     }
 
     /**
@@ -284,6 +324,209 @@ public class GroupQuestionService {
             throw new BizException(QuizNestErrorCode.NO_PERMISSION_ADD_QUESTION);
         }
     }
+
+    /**
+     * 删除小组题目，在本方法中需要判断该题目是否为平台题目，再选择处理方法。
+     * @param groupQuestionId 小组题目记录表主键
+     * @param groupId 小组id
+     */
+    public void deleteGroupQuestion(Long groupQuestionId,Long groupId){
+        if(groupId==null)throw new BizException(QuizNestErrorCode.GROUP_ID_REQUIRED);
+        if(groupId<=0)throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        if(groupQuestionId==null||groupQuestionId<=0)throw new BizException(QuizNestErrorCode.INVALID_QUESTION_ID);
+        checkMemberRole(UserContext.getUserId(),groupId);
+
+        GroupQuestion groupQuestion=groupQuestionMapper.selectById(groupQuestionId);
+        if(groupQuestion==null)throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP_QUESTION);
+        // 索引必须属于当前小组：否则 A 组管理员可凭 B 组的 groupQuestionId 跨组删除
+        if(!Objects.equals(groupQuestion.getGroupId(),groupId)){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP_QUESTION);
+        }
+        //该题目为平台题目，只删小组索引，题目本体保留在题库中
+        if(Integer.valueOf(1).equals(groupQuestion.getIsPlatFromQuestion())){
+            int r=groupQuestionMapper.deleteById(groupQuestionId);
+            if(r==0)throw new BizException(QuizNestErrorCode.DELETE_GROUP_QUESTION_FAILED);
+            return;
+        }
+
+        /*执行到此说明为自建题目，调用deletePrivateQuestion,以删除题目，异常透穿即可，详情可看deletePrivateQuestion注释*/
+        deletePrivateQuestion(groupQuestion.getQuestionId(),groupQuestionId);
+
+
+    }
+
+    /**
+     * 删除小组私有题目，在此依旧选择同步调用题目服务接口
+     * <B>删除方法不做强一致，当题目服务返回成功才删除该记录，假如题目服务删除成功但是接口超时在此不做回调
+     * ，采用懒删除，下次查看该题目时假如题目服务不存在该题目再做删除</B>
+     * @param questionId 需要删除的题目id
+     * @param groupQuestionId 小组题目索引表主键
+     */
+    private void deletePrivateQuestion(Long questionId ,Long groupQuestionId){
+        try {
+            Result<String> body=questionFeignClient.deleteQuestion(internalToken,questionId);
+            if(body==null||body.getCode()!=200||body.getMessage()==null||!"success".equals(body.getMessage())){
+                throw new BizException(QuizNestErrorCode.DELETE_GROUP_QUESTION_FAILED);
+            }
+        }catch (Exception e){
+            log.error("小组题目删除失败，id为{}",questionId,e);
+            throw new BizException(QuizNestErrorCode.DELETE_GROUP_QUESTION_FAILED);
+        }
+
+        //执行到此证明题库已经删除成功，尝试删除题目索引
+        //如果删除失败，用户重试后发现题库不存在这一题，也会进行到此，也就是会二次尝试，如果用户没有重试就留到下次有用户查看时懒删除
+        int r= groupQuestionMapper.deleteById(groupQuestionId);
+        if(r==0){
+            throw new BizException(QuizNestErrorCode.DELETE_GROUP_QUESTION_FAILED);
+        }
+
+
+    }
+
+
+    /**
+     * 游标查询获取该小组的题目列表，返回轻量的题目对象列表。
+     *
+     * <p>游标是 {@code group_question.group_question_id}（自增、稳定），按升序翻页；
+     * 每次多查一条判断 {@code hasNext}，返回给前端的 {@code nextCursor} 始终是
+     * 本页最后一条<b>已消费</b>索引的主键，因此即使本页有题目已被题目服务删除，
+     * 下一次请求也不会重复或跳过数据。</p>
+     *
+     * <p>题目本体通过 {@link QuestionFeignClient#getFavoritesBrief(List)} 批量获取，
+     * 不逐题调用，避免 N+1。小组题目本身是私密的，索引存在即对组员可见，
+     * 不再按题目 status 过滤；题目服务已不存在的题目按注释约定做懒删除
+     * （删索引失败只记日志，不影响本次查询结果）。</p>
+     *
+     * @param groupId  小组 id
+     * @param lastId   上一页返回的游标，为空或非正数表示第一页
+     * @param pageSize 每页条数，为空/非正数取默认值，超过上限按上限截断
+     * @return {@link CursorPageResult} 返回公共依赖的自定义分页返回体
+     */
+    public CursorPageResult<MinimalQuestionVo> cursorQuestion(Long groupId, Long lastId, Integer pageSize){
+        if(groupId==null)throw new BizException(QuizNestErrorCode.GROUP_ID_REQUIRED);
+        if(groupId<=0)throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        checkApprovedMember(UserContext.getUserId(), groupId);
+
+        int limit = normalizePageSize(pageSize);
+        QueryWrapper<GroupQuestion> wrapper = new QueryWrapper<GroupQuestion>()
+                .eq("group_id", groupId)
+                .orderByAsc("group_question_id")
+                .last("LIMIT " + (limit + 1));
+        if(lastId!=null&&lastId>0){
+            wrapper.gt("group_question_id", lastId);
+        }
+
+        List<GroupQuestion> rows = groupQuestionMapper.selectList(wrapper);
+        boolean hasNext = rows.size() > limit;
+        List<GroupQuestion> pageRows = hasNext
+                ? new ArrayList<>(rows.subList(0, limit))
+                : rows;
+        if(pageRows.isEmpty()){
+            return CursorPageResult.<MinimalQuestionVo>builder()
+                    .records(Collections.emptyList())
+                    .nextCursor(null)
+                    .hasNext(false)
+                    .build();
+        }
+        // 游标取「最后一条已消费索引」而不是「最后一条返回记录」：被懒删除的题目不会让游标停滞
+        Long nextCursor = hasNext ? pageRows.get(pageRows.size() - 1).getGroupQuestionId() : null;
+
+        List<Long> questionIds = pageRows.stream()
+                .map(GroupQuestion::getQuestionId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, QuestionBriefDto> briefMap = loadQuestionBriefs(questionIds);
+
+        // 题目服务已不存在的题目：懒删除本地索引（删组/删题超时留下的孤儿数据）
+        List<Long> staleMappingIds = pageRows.stream()
+                .filter(row -> row.getQuestionId()==null||!briefMap.containsKey(row.getQuestionId()))
+                .map(GroupQuestion::getGroupQuestionId)
+                .filter(Objects::nonNull)
+                .toList();
+        if(!staleMappingIds.isEmpty()){
+            lazyDeleteStaleMappings(staleMappingIds, groupId);
+        }
+
+        List<MinimalQuestionVo> records = pageRows.stream()
+                .filter(row -> row.getQuestionId()!=null&&briefMap.containsKey(row.getQuestionId()))
+                .map(row -> new MinimalQuestionVo(briefMap.get(row.getQuestionId()), row.getGroupQuestionId()))
+                .toList();
+
+        return CursorPageResult.<MinimalQuestionVo>builder()
+                .records(records)
+                .nextCursor(nextCursor)
+                .hasNext(hasNext)
+                .build();
+    }
+
+    /**
+     * 浏览鉴权：只要求「已加入」（APPROVED），不要求管理员。
+     *
+     * <p>不能复用 {@link #checkMemberRole}——那是添加题目的管理员校验，
+     * 会把普通成员挡在外面；同时必须校验 {@code join_status}，
+     * 否则 PENDING/REJECTED 占位记录也能看到小组题库。</p>
+     */
+    private void checkApprovedMember(Long userId, Long groupId){
+        GroupMember groupMember = groupMemberMapper.selectOne(new QueryWrapper<GroupMember>()
+                .eq("user_id", userId)
+                .eq("group_id", groupId));
+        if(groupMember==null||!GroupJoinStatus.APPROVED.equals(groupMember.getJoinStatus())){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP);
+        }
+    }
+
+    /** 每页默认条数与上限，避免调用方传超大 pageSize 打穿题目服务。 */
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 50;
+
+    private int normalizePageSize(Integer pageSize){
+        if(pageSize==null||pageSize<=0){
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(pageSize, MAX_PAGE_SIZE);
+    }
+
+    /**
+     * 批量获取题目瘦身信息并建立 questionId 索引。
+     *
+     * <p>题目服务不可用必须显式失败：返回空列表会被误判成「题目都被删了」，
+     * 进而把小组题库索引全部懒删除。</p>
+     */
+    private Map<Long, QuestionBriefDto> loadQuestionBriefs(List<Long> questionIds){
+        if(questionIds.isEmpty()){
+            return Collections.emptyMap();
+        }
+        Result<List<QuestionBriefDto>> body;
+        try {
+            body = questionFeignClient.getFavoritesBrief(questionIds);
+        } catch (Exception e) {
+            log.error("批量查询小组题目瘦身信息失败: questionIds={}", questionIds, e);
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE, e);
+        }
+        if(body==null||body.getCode()==null||body.getCode()!=200||body.getData()==null){
+            log.error("批量查询小组题目瘦身信息返回异常: questionIds={}, body={}", questionIds, body);
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+        }
+        Map<Long, QuestionBriefDto> briefMap = new HashMap<>(body.getData().size());
+        for (QuestionBriefDto brief : body.getData()) {
+            if(brief!=null&&brief.getQuestionId()!=null){
+                briefMap.put(brief.getQuestionId(), brief);
+            }
+        }
+        return briefMap;
+    }
+
+    /** 懒删除失败不能影响列表返回：索引残留会在下一次查询时再次尝试清理。 */
+    private void lazyDeleteStaleMappings(List<Long> mappingIds, Long groupId){
+        try {
+            groupQuestionMapper.deleteByIds(mappingIds);
+            log.info("小组题库懒删除已失效题目索引: groupId={}, mappingIds={}", groupId, mappingIds);
+        } catch (Exception e) {
+            log.warn("小组题库懒删除失败，保留索引待下次清理: groupId={}, mappingIds={}", groupId, mappingIds, e);
+        }
+    }
+
 
 
 

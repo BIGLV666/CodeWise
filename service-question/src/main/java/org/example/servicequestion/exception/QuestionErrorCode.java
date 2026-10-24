@@ -96,7 +96,8 @@ public enum QuestionErrorCode implements ErrorCode {
     ARTIFACT_STATUS_READ_FAILED(5000214, "生成任务状态读取失败，请稍后重试"),
     QUESTION_IMPORT_FAILED(5000215, "题目导入失败，请稍后重试"),
     QUESTION_COUNT_UPDATE_FAILED(5000216, "题目统计更新失败，稍后将自动重试"),
-    DESCRIPTION_GENERATE_FAILED(5000217, "题面生成失败，请稍后重试或直接补充题面后再导入");
+    DESCRIPTION_GENERATE_FAILED(5000217, "题面生成失败，请稍后重试或直接补充题面后再导入"),
+    DELETE_GROUP_QUESTION_FAILED(5000218,"小组题目删除失败");
 
     private final int code;
     private final String message;

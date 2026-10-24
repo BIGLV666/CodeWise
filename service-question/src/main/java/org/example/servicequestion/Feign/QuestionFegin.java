@@ -1,6 +1,7 @@
 package org.example.servicequestion.Feign;
 
 import io.github.biglv666.apigovernance.annotation.Skip;
+import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
@@ -14,10 +15,12 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/question")
+@Slf4j
 public class QuestionFegin {
 
     private final QuestionServiceFeign questionServiceFeign;
     private final String internalToken;
+
 
     public QuestionFegin(
             QuestionServiceFeign questionServiceFeign,
@@ -57,5 +60,23 @@ public class QuestionFegin {
             throw new BizException(QuestionErrorCode.INTERNAL_CALL_UNAUTHORIZED);
         }
         return Result.success(questionServiceFeign.addQuestion(questionDto));
+    }
+
+
+    @DeleteMapping("/internal/delete")
+    @Skip(reason = "系统内部端点（quiz-nest 删除小组自建题目经 Feign 调用），鉴权依赖 X-CodeWise-Internal-Token 校验，不参与限流")
+    Result<String> deleteQuestion(
+            @RequestHeader("X-CodeWise-Internal-Token") String requestToken,
+            @RequestParam Long questionId){
+        if (!internalToken.equals(requestToken)) {
+            throw new BizException(QuestionErrorCode.INTERNAL_CALL_UNAUTHORIZED);
+        }
+        try{
+            questionServiceFeign.deleteQuestion(questionId);
+        }catch (Exception e){
+            log.error("小组自建题目删除失败，id为{}",questionId,e);
+            throw new BizException(QuestionErrorCode.DELETE_GROUP_QUESTION_FAILED, e);
+        }
+        return Result.success("success");
     }
 }

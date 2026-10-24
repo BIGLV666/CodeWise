@@ -103,7 +103,8 @@ class GroupQuestionServiceValidationTest {
     @DisplayName("平台题目：不要求标题/描述等自建字段，直接建索引")
     void platformQuestionIgnoresCustomFields() {
         when(groupMemberMapper.selectOne(any())).thenReturn(rootMember());
-        when(questionFeignClient.getQuestionInfo(7L)).thenReturn(Result.success(new QuestionDto()));
+        when(questionFeignClient.getQuestionInfo(7L))
+                .thenReturn(Result.success(visibleQuestion(7L, 1, 999L)));
         when(groupQuestionMapper.insert(any(GroupQuestion.class))).thenReturn(1);
 
         groupQuestionService.addQuestion(CreateGroupQuestionDto.builder()
@@ -128,6 +129,45 @@ class GroupQuestionServiceValidationTest {
         assertCode(CreateGroupQuestionDto.builder().groupId(GROUP_ID).questionId(-1L).build(),
                 CommonErrorCode.PARAM_INVALID);
         verifyNoInteractions(groupMemberMapper, questionFeignClient, groupQuestionMapper, rollbackPublisher);
+    }
+
+    @Test
+    @DisplayName("平台题目可见性：公开题任何人可加，私密题仅创建人可加")
+    void platformQuestionVisibilityAllowsPublicAndOwnPrivate() {
+        when(groupMemberMapper.selectOne(any())).thenReturn(rootMember());
+        when(questionFeignClient.getQuestionInfo(1L))
+                .thenReturn(Result.success(visibleQuestion(1L, 1, 999L)));
+        when(questionFeignClient.getQuestionInfo(2L))
+                .thenReturn(Result.success(visibleQuestion(2L, 3, USER_ID)));
+        when(groupQuestionMapper.insert(any(GroupQuestion.class))).thenReturn(1);
+
+        groupQuestionService.addQuestion(CreateGroupQuestionDto.builder()
+                .groupId(GROUP_ID).questionId(1L).build());
+        groupQuestionService.addQuestion(CreateGroupQuestionDto.builder()
+                .groupId(GROUP_ID).questionId(2L).build());
+
+        verify(groupQuestionMapper, times(2)).insert(any(GroupQuestion.class));
+    }
+
+    @Test
+    @DisplayName("平台题目不可见：他人私密/下架/审核中/状态缺失一律拒绝且不写索引")
+    void platformQuestionInvisibleRejected() {
+        when(groupMemberMapper.selectOne(any())).thenReturn(rootMember());
+        when(questionFeignClient.getQuestionInfo(11L))
+                .thenReturn(Result.success(visibleQuestion(11L, 3, 999L)));
+        when(questionFeignClient.getQuestionInfo(12L))
+                .thenReturn(Result.success(visibleQuestion(12L, 0, USER_ID)));
+        when(questionFeignClient.getQuestionInfo(13L))
+                .thenReturn(Result.success(visibleQuestion(13L, 2, USER_ID)));
+        when(questionFeignClient.getQuestionInfo(14L))
+                .thenReturn(Result.success(visibleQuestion(14L, null, USER_ID)));
+
+        for (long questionId = 11L; questionId <= 14L; questionId++) {
+            assertCode(CreateGroupQuestionDto.builder()
+                            .groupId(GROUP_ID).questionId(questionId).build(),
+                    QuizNestErrorCode.NOTFOUND_QUESTION);
+        }
+        verify(groupQuestionMapper, never()).insert(any(GroupQuestion.class));
     }
 
     @Test
@@ -166,7 +206,8 @@ class GroupQuestionServiceValidationTest {
     @DisplayName("平台题目重复添加：唯一键冲突转为业务错误，不泄露 SQL")
     void duplicatePlatformQuestionReturnsBusinessError() {
         when(groupMemberMapper.selectOne(any())).thenReturn(rootMember());
-        when(questionFeignClient.getQuestionInfo(7L)).thenReturn(Result.success(new QuestionDto()));
+        when(questionFeignClient.getQuestionInfo(7L))
+                .thenReturn(Result.success(visibleQuestion(7L, 1, 999L)));
         when(groupQuestionMapper.insert(any(GroupQuestion.class)))
                 .thenThrow(new DuplicateKeyException("uk_group_question_group_question"));
 
@@ -340,6 +381,14 @@ class GroupQuestionServiceValidationTest {
                 .sampleOutput("3")
                 .timeLimit(1000)
                 .memoryLimit(256);
+    }
+
+    private static QuestionDto visibleQuestion(long questionId, Integer status, Long createUserId) {
+        return QuestionDto.builder()
+                .questionId(questionId)
+                .status(status)
+                .createUserId(createUserId)
+                .build();
     }
 
     private static GroupMember rootMember() {

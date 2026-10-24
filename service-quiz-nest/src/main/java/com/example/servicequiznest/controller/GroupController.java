@@ -5,8 +5,10 @@ import com.example.servicequiznest.dto.GroupDto;
 import com.example.servicequiznest.dto.JoinGroupDto;
 import com.example.servicequiznest.dto.SendJoinTokenDto;
 import com.example.servicequiznest.entity.Group;
+import com.example.servicequiznest.service.GroupQuestionService;
 import com.example.servicequiznest.service.GroupService;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
+import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import vo.MinimalQuestionVo;
 
 /**
  * 小组对外接口（网关路由 {@code /api/quiz/**}）。
@@ -33,9 +36,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class GroupController {
 
     private final GroupService groupService;
+    private final GroupQuestionService groupQuestionService;
 
-    public GroupController(GroupService groupService) {
+    public GroupController(GroupService groupService, GroupQuestionService groupQuestionService) {
         this.groupService = groupService;
+        this.groupQuestionService = groupQuestionService;
     }
 
     /**
@@ -74,6 +79,22 @@ public class GroupController {
     @RateLimit(limit = 100, window = 60)
     public Result<Group> getGroup(@PathVariable Long groupId) {
         return Result.success(groupService.getGroup(groupId));
+    }
+
+    /**
+     * 小组题库游标分页：仅本组成员可看，按加入题库的先后（索引主键升序）返回。
+     *
+     * @param groupId  小组 id
+     * @param lastId   上一页的 {@code nextCursor}，首页不传
+     * @param pageSize 每页条数，默认 20，上限 50
+     */
+    @GetMapping("/{groupId}/questions")
+    @RateLimit(limit = 100, window = 60)
+    public Result<CursorPageResult<MinimalQuestionVo>> cursorQuestions(
+            @PathVariable Long groupId,
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(required = false) Integer pageSize) {
+        return Result.success(groupQuestionService.cursorQuestion(groupId, lastId, pageSize));
     }
 
     /**

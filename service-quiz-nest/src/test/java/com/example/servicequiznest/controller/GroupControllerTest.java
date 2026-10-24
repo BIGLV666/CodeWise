@@ -5,8 +5,10 @@ import com.example.servicequiznest.dto.GroupDto;
 import com.example.servicequiznest.dto.JoinGroupDto;
 import com.example.servicequiznest.dto.SendJoinTokenDto;
 import com.example.servicequiznest.entity.Group;
+import com.example.servicequiznest.service.GroupQuestionService;
 import com.example.servicequiznest.service.GroupService;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
+import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,8 +21,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import vo.MinimalQuestionVo;
 
 import java.lang.reflect.Method;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
@@ -39,11 +43,14 @@ class GroupControllerTest {
     @Mock
     private GroupService groupService;
 
+    @Mock
+    private GroupQuestionService groupQuestionService;
+
     @InjectMocks
     private GroupController groupController;
 
     @Test
-    @DisplayName("路由委托：创建凭证/建组/改组/详情/退出/加入/发邀请")
+    @DisplayName("路由委托：创建凭证/建组/改组/详情/题目列表/退出/加入/发邀请")
     void routesDelegateToService() {
         CreateGroupDto createDto = new CreateGroupDto();
         Group created = new Group();
@@ -58,6 +65,14 @@ class GroupControllerTest {
 
         when(groupService.getGroup(88L)).thenReturn(created);
         assertThat(groupController.getGroup(88L).getData()).isSameAs(created);
+
+        CursorPageResult<MinimalQuestionVo> page = CursorPageResult.<MinimalQuestionVo>builder()
+                .records(List.of())
+                .hasNext(false)
+                .build();
+        when(groupQuestionService.cursorQuestion(88L, null, 20)).thenReturn(page);
+        assertThat(groupController.cursorQuestions(88L, null, 20).getData()).isSameAs(page);
+        verify(groupQuestionService).cursorQuestion(88L, null, 20);
 
         when(groupService.getToken()).thenReturn("create-token");
         assertThat(groupController.getCreateToken().getData()).isEqualTo("create-token");
@@ -101,7 +116,7 @@ class GroupControllerTest {
                     .isPositive();
             assertThat(rateLimit.window()).as("路由 %s 的 window", method.getName()).isPositive();
         }
-        assertThat(routes).as("应扫描到 7 条路由").isEqualTo(7);
+        assertThat(routes).as("应扫描到 8 条路由").isEqualTo(8);
     }
 
     private boolean isRoute(Method method) {

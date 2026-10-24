@@ -6,6 +6,7 @@ import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.QuestionMapper;
+import org.example.servicequestion.mapper.TestCaseMapper;
 import org.example.servicequestion.service.QuestionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,6 +33,8 @@ class QuestionServiceFeignTest {
 
     @Mock
     private QuestionService questionService;
+    @Mock
+    private TestCaseMapper testCaseMapper;
 
     @Test
     void addQuestionDelegatesToQuestionService() {
@@ -57,7 +60,7 @@ class QuestionServiceFeignTest {
                 .build();
         when(questionService.addQuestion(any(InsertQuestionDto.class))).thenReturn(saved);
 
-        QuestionDto result = new QuestionServiceFeign(questionMapper, questionService).addQuestion(request);
+        QuestionDto result = new QuestionServiceFeign(questionMapper, questionService,testCaseMapper).addQuestion(request);
 
         ArgumentCaptor<InsertQuestionDto> captor = ArgumentCaptor.forClass(InsertQuestionDto.class);
         verify(questionService).addQuestion(captor.capture());
@@ -80,7 +83,7 @@ class QuestionServiceFeignTest {
 
     @Test
     void nullRequestRejected() {
-        assertThatThrownBy(() -> new QuestionServiceFeign(questionMapper, questionService).addQuestion(null))
+        assertThatThrownBy(() -> new QuestionServiceFeign(questionMapper, questionService,testCaseMapper).addQuestion(null))
                 .isInstanceOf(BizException.class)
                 .extracting(e -> ((BizException) e).getCode())
                 .isEqualTo(QuestionErrorCode.QUESTION_SAVE_FAILED.getCode());
