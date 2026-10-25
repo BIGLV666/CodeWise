@@ -27,6 +27,7 @@ import org.example.servicequestion.vo.QuestionVo;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -60,6 +62,9 @@ public class QuestionService {
     private UserFeignClient userFeignClient;
     @Autowired
     private FunctionConfigMapper  functionConfigMapper;
+
+    @Autowired
+    private GroupQuestionPermissionService groupQuestionPermissionService;
 
 
     public Long getTotalQuestionCount() {
@@ -146,32 +151,23 @@ public class QuestionService {
         }
 
 
-
-        if(question.getStatus().equals(3)){
-            Result<UserDto>userDtoResult=userFeignClient.getUserInfo(UserContext.getUserId());
-            if(userDtoResult.getCode()!=200){
-                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
-            }
-            if(userDtoResult.getData()==null){
-                throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
-            }
-            if(!UserContext.getUserId().equals(question.getCreateUserId())&&!userDtoResult.getData().getRoleId().equals(2)){
-                // 私密题仅创建者与管理员可见
+        // 私密题目可能是小组题：创建者/组员/平台管理员可读，其余人按无权限处理
+        if (Integer.valueOf(3).equals(question.getStatus())) {
+            if (!groupQuestionPermissionService.canAccessPrivateQuestion(question)) {
                 throw new BizException(CommonErrorCode.CONTENT_RESTRICTED);
             }
         }
-        if(question.getStatus().equals(0)){
+        if(Integer.valueOf(0).equals(question.getStatus())){
             throw new BizException(QuestionErrorCode.QUESTION_OFF_SHELF);
         }
-        if(question.getStatus().equals(2)){
+        if(Integer.valueOf(2).equals(question.getStatus())){
             throw new BizException(QuestionErrorCode.QUESTION_UNDER_REVIEW);
         }
 
 
         if(question.getQuestionType().equals(QuestionType.FUNCTION)){
             FunctionConfig functionConfig=functionConfigMapper.selectOne(new QueryWrapper<FunctionConfig>().eq("question_id", questionId));
-            QuestionVo questionVo=new QuestionVo(question,functionConfig);
-            return questionVo;
+            return new QuestionVo(question,functionConfig);
         }
         return new QuestionVo(question,null);
 
@@ -280,6 +276,63 @@ public class QuestionService {
             return updatequestion;
         }
         throw new BizException(QuestionErrorCode.QUESTION_UPDATE_FAILED);
+    }
+
+    /**
+     * 服务间修改小组自建题目。
+     *
+     * <p>与管理员改题入口的区别：</p>
+     * <ul>
+     *   <li>不做管理员校验——调用方 quiz-nest 已校验小组 ROOT/ADMIN；</li>
+     *   <li>只允许 {@code status=3} 的私密题，防止内部调用改到平台公开题；</li>
+     *   <li>正文变化时同步更新 content_hash，保持 (create_user_id, content_hash) 的去重语义。</li>
+     * </ul>
+     *
+     * <p>仅由 {@code /api/question/internal/put} 调用，参数校验与管理员改题共用
+     * {@link #validateOrdinaryQuestion(InsertQuestionDto)}。</p>
+     *
+     * @param insertQuestionDto 改题入参（全量）
+     * @param questionId       题目 id（由 quiz-nest 根据小组索引解析，不接受用户指定）
+     * @return 更新后的题目
+     */
+    @Transactional
+    public Question updateGroupQuestion(InsertQuestionDto insertQuestionDto, Long questionId) {
+        if (questionId == null) {
+            throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
+        }
+        validateOrdinaryQuestion(insertQuestionDto);
+        Question question = questionMapper.selectById(questionId);
+        if (Objects.isNull(question)) {
+            throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
+        }
+        // 小组题目统一以私密题（status=3）落库；平台公开/审核/下架题不允许被内部接口改写
+        if (!Integer.valueOf(3).equals(question.getStatus())) {
+            throw new BizException(QuestionErrorCode.GROUP_QUESTION_UPDATE_FORBIDDEN);
+        }
+        question.setTitle(insertQuestionDto.getTitle());
+        question.setDescription(insertQuestionDto.getDescription());
+        question.setInputDesc(insertQuestionDto.getInputDesc());
+        question.setOutputDesc(insertQuestionDto.getOutputDesc());
+        question.setSampleInput(insertQuestionDto.getSampleInput());
+        question.setSampleOutput(insertQuestionDto.getSampleOutput());
+        question.setHint(insertQuestionDto.getHint());
+        question.setTags(insertQuestionDto.getTags());
+        question.setTimeLimit(insertQuestionDto.getTimeLimit());
+        question.setMemoryLimit(insertQuestionDto.getMemoryLimit());
+        question.setContentHash(DigestUtils.md5DigestAsHex(insertQuestionDto.getDescription().getBytes()));
+        question.setUpdateTime(LocalDateTime.now());
+
+        int update;
+        try {
+            update = questionMapper.updateById(question);
+        } catch (DuplicateKeyException e) {
+            // uk_id_hash(create_user_id, content_hash)：同一用户的题目正文不能重复
+            throw new BizException(QuestionErrorCode.QUESTION_CONTENT_DUPLICATED, e);
+        }
+        if (update <= 0) {
+            throw new BizException(QuestionErrorCode.QUESTION_UPDATE_FAILED);
+        }
+        return question;
     }
 
     @Transactional
@@ -438,7 +491,7 @@ public class QuestionService {
         List<ReturnQuestionDto> records;
 
         Long nextCursor = null;
-        Boolean hasNext = false;
+        boolean hasNext = false;
 
         if (!list.isEmpty()) {
             if (list.size() > pageSize) {

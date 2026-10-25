@@ -4,6 +4,7 @@ import io.github.biglv666.apigovernance.annotation.Skip;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
+import org.example.serviceapi.dto.question.UpdateGroupQuestionDto;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.exception.BizException;
 import org.example.servicequestion.FeugnService.QuestionServiceFeign;
@@ -62,6 +63,23 @@ public class QuestionFegin {
         return Result.success(questionServiceFeign.addQuestion(questionDto));
     }
 
+
+    /**
+     * 供 quiz-nest 修改小组自建题目。
+     *
+     * <p>鉴权依赖 {@code X-CodeWise-Internal-Token}：网关只注入 {@code X-Internal-Token}，
+     * 不会注入该头，外部请求无法伪造；内部调用不占用户维度限流。</p>
+     */
+    @PutMapping("/internal/put")
+    @Skip(reason = "系统内部端点（quiz-nest 修改小组自建题目经 Feign 调用），鉴权依赖 X-CodeWise-Internal-Token 校验，不参与限流")
+    public Result<QuestionDto> updateQuestion(
+            @RequestHeader("X-CodeWise-Internal-Token") String requestToken,
+            @RequestBody UpdateGroupQuestionDto updateGroupQuestionDto) {
+        if (!internalToken.equals(requestToken)) {
+            throw new BizException(QuestionErrorCode.INTERNAL_CALL_UNAUTHORIZED);
+        }
+        return Result.success(questionServiceFeign.updateGroupQuestion(updateGroupQuestionDto));
+    }
 
     @DeleteMapping("/internal/delete")
     @Skip(reason = "系统内部端点（quiz-nest 删除小组自建题目经 Feign 调用），鉴权依赖 X-CodeWise-Internal-Token 校验，不参与限流")

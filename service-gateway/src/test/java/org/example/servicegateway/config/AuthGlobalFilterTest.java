@@ -77,6 +77,7 @@ class AuthGlobalFilterTest {
                         .header("X-User-Name", "attacker")
                         .header("X-User-Token", "forged-token")
                         .header("X-Internal-Token", "forged-token")
+                        .header("X-CodeWise-Internal-Token", "forged-internal-token")
                         .header("X-Real-IP", "1.2.3.4")
                         .build());
         GatewayFilterChain chain = mockChain();
@@ -88,6 +89,7 @@ class AuthGlobalFilterTest {
         assertThat(forwarded.getHeaders().getFirst("X-User-Name")).isNull();
         assertThat(forwarded.getHeaders().getFirst("X-User-Token")).isNull();
         assertThat(forwarded.getHeaders().getFirst("X-Internal-Token")).isEqualTo(INTERNAL_TOKEN);
+        assertThat(forwarded.getHeaders().getFirst("X-CodeWise-Internal-Token")).isNull();
         assertThat(forwarded.getHeaders().getFirst("X-Real-IP")).isEqualTo("203.0.113.7");
     }
 

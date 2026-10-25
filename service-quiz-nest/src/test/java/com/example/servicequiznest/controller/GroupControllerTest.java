@@ -1,15 +1,19 @@
 package com.example.servicequiznest.controller;
 
 import com.example.servicequiznest.dto.CreateGroupDto;
+import com.example.servicequiznest.dto.CreateGroupQuestionDto;
 import com.example.servicequiznest.dto.GroupDto;
 import com.example.servicequiznest.dto.JoinGroupDto;
 import com.example.servicequiznest.dto.SendJoinTokenDto;
+import com.example.servicequiznest.dto.UpdateGroupQuestionDto;
 import com.example.servicequiznest.entity.Group;
 import com.example.servicequiznest.service.GroupQuestionService;
 import com.example.servicequiznest.service.GroupService;
+import com.example.servicequiznest.vo.GroupQuestionVo;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,7 +25,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import vo.MinimalQuestionVo;
+import com.example.servicequiznest.vo.MinimalQuestionVo;
 
 import java.lang.reflect.Method;
 import java.util.List;
@@ -74,6 +78,29 @@ class GroupControllerTest {
         assertThat(groupController.cursorQuestions(88L, null, 20).getData()).isSameAs(page);
         verify(groupQuestionService).cursorQuestion(88L, null, 20);
 
+        CreateGroupQuestionDto addQuestionDto = CreateGroupQuestionDto.builder()
+                .groupId(999L)
+                .questionId(7L)
+                .build();
+        Result<Void> added = groupController.addQuestion(88L, addQuestionDto);
+        assertThat(added.getCode()).isEqualTo(200);
+        // 路径 groupId 必须覆盖请求体，防止 body/path 不一致把题加到别的小组
+        assertThat(addQuestionDto.getGroupId()).isEqualTo(88L);
+        verify(groupQuestionService).addQuestion(addQuestionDto);
+
+        GroupQuestionVo detail = new GroupQuestionVo(QuestionDto.builder().questionId(7L).build(), 100L);
+        when(groupQuestionService.getQuestion(100L, 88L)).thenReturn(detail);
+        assertThat(groupController.getQuestion(88L, 100L).getData()).isSameAs(detail);
+
+        UpdateGroupQuestionDto updateQuestionDto = UpdateGroupQuestionDto.builder().title("改后标题").build();
+        Result<Void> updated = groupController.updateQuestion(88L, 100L, updateQuestionDto);
+        assertThat(updated.getCode()).isEqualTo(200);
+        verify(groupQuestionService).updateGroupQuestion(updateQuestionDto, 100L, 88L);
+
+        Result<Void> deleted = groupController.deleteQuestion(88L, 100L);
+        assertThat(deleted.getCode()).isEqualTo(200);
+        verify(groupQuestionService).deleteGroupQuestion(100L, 88L);
+
         when(groupService.getToken()).thenReturn("create-token");
         assertThat(groupController.getCreateToken().getData()).isEqualTo("create-token");
 
@@ -116,7 +143,7 @@ class GroupControllerTest {
                     .isPositive();
             assertThat(rateLimit.window()).as("路由 %s 的 window", method.getName()).isPositive();
         }
-        assertThat(routes).as("应扫描到 8 条路由").isEqualTo(8);
+        assertThat(routes).as("应扫描到 12 条路由").isEqualTo(12);
     }
 
     private boolean isRoute(Method method) {

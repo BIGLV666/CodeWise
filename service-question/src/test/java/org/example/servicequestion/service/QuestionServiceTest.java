@@ -18,6 +18,7 @@ import org.example.servicequestion.exception.QuestionErrorCode;
 import org.example.servicequestion.mapper.FunctionConfigMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
+import org.example.servicequestion.vo.QuestionVo;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -56,6 +57,7 @@ class QuestionServiceTest {
     @Mock private RedisTemplate<String, Object> redisTemplate;
     @Mock private UserFeignClient userFeignClient;
     @Mock private FunctionConfigMapper functionConfigMapper;
+    @Mock private GroupQuestionPermissionService groupQuestionPermissionService;
     @InjectMocks private QuestionService questionService;
 
     @AfterEach
@@ -101,6 +103,55 @@ class QuestionServiceTest {
     void mutationsRejectAnonymousBeforeFeignOrDatabase(boolean update) {
         assertBusinessError(CommonErrorCode.LOGIN_REQUIRED, () -> mutate(update));
         verifyNoInteractions(userFeignClient, questionMapper);
+    }
+
+    @Test
+    void getQuestionByIdAllowsVisiblePrivateQuestion() {
+        UserContext.setUserId(OTHER_USER_ID);
+        Question question = privateQuestion();
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(question);
+        when(groupQuestionPermissionService.canAccessPrivateQuestion(question)).thenReturn(true);
+
+        QuestionVo result = questionService.getQuestionById(QUESTION_ID);
+
+        assertEquals(QUESTION_ID, result.getQuestionId());
+        verify(groupQuestionPermissionService).canAccessPrivateQuestion(question);
+    }
+
+    @Test
+    void getQuestionByIdRejectsInvisiblePrivateQuestion() {
+        UserContext.setUserId(OTHER_USER_ID);
+        Question question = privateQuestion();
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(question);
+        when(groupQuestionPermissionService.canAccessPrivateQuestion(question)).thenReturn(false);
+
+        assertBusinessError(CommonErrorCode.CONTENT_RESTRICTED,
+                () -> questionService.getQuestionById(QUESTION_ID));
+    }
+
+    @Test
+    void getQuestionByIdPropagatesGroupPermissionDownstreamFailure() {
+        UserContext.setUserId(OTHER_USER_ID);
+        Question question = privateQuestion();
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(question);
+        when(groupQuestionPermissionService.canAccessPrivateQuestion(question))
+                .thenThrow(new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE));
+
+        assertBusinessError(CommonErrorCode.DOWNSTREAM_UNAVAILABLE,
+                () -> questionService.getQuestionById(QUESTION_ID));
+    }
+
+    @Test
+    void getQuestionByIdDoesNotCheckGroupPermissionForPublicQuestion() {
+        UserContext.setUserId(OTHER_USER_ID);
+        Question question = privateQuestion();
+        question.setStatus(1);
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(question);
+
+        QuestionVo result = questionService.getQuestionById(QUESTION_ID);
+
+        assertEquals(QUESTION_ID, result.getQuestionId());
+        verifyNoInteractions(groupQuestionPermissionService);
     }
 
     @ParameterizedTest
@@ -375,5 +426,14 @@ class QuestionServiceTest {
         Question question = Question.builder().questionId(QUESTION_ID).createUserId(OWNER_ID).build();
         when(questionMapper.selectById(QUESTION_ID)).thenReturn(question);
         return question;
+    }
+
+    private Question privateQuestion() {
+        return Question.builder()
+                .questionId(QUESTION_ID)
+                .status(3)
+                .createUserId(OWNER_ID)
+                .questionType(org.example.servicequestion.enums.QuestionType.ACM)
+                .build();
     }
 }

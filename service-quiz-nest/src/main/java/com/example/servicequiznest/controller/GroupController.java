@@ -1,12 +1,15 @@
 package com.example.servicequiznest.controller;
 
 import com.example.servicequiznest.dto.CreateGroupDto;
+import com.example.servicequiznest.dto.CreateGroupQuestionDto;
 import com.example.servicequiznest.dto.GroupDto;
 import com.example.servicequiznest.dto.JoinGroupDto;
 import com.example.servicequiznest.dto.SendJoinTokenDto;
+import com.example.servicequiznest.dto.UpdateGroupQuestionDto;
 import com.example.servicequiznest.entity.Group;
 import com.example.servicequiznest.service.GroupQuestionService;
 import com.example.servicequiznest.service.GroupService;
+import com.example.servicequiznest.vo.GroupQuestionVo;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
@@ -19,7 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import vo.MinimalQuestionVo;
+import com.example.servicequiznest.vo.MinimalQuestionVo;
 
 /**
  * 小组对外接口（网关路由 {@code /api/quiz/**}）。
@@ -95,6 +98,58 @@ public class GroupController {
             @RequestParam(required = false) Long lastId,
             @RequestParam(required = false) Integer pageSize) {
         return Result.success(groupQuestionService.cursorQuestion(groupId, lastId, pageSize));
+    }
+
+    /**
+     * 向小组题库添加题目：平台题目只传 {@code questionId}，自建题目传完整出题字段。
+     *
+     * <p>小组 id 以路径为准，请求体里的 groupId 会被覆盖，避免 body/path 不一致时
+     * 把题目加到别的小组。</p>
+     */
+    @PostMapping("/{groupId}/questions")
+    @RateLimit(limit = 10, window = 60)
+    public Result<Void> addQuestion(@PathVariable Long groupId,
+                                    @RequestBody(required = false) CreateGroupQuestionDto createGroupQuestionDto) {
+        if (createGroupQuestionDto != null) {
+            createGroupQuestionDto.setGroupId(groupId);
+        }
+        groupQuestionService.addQuestion(createGroupQuestionDto);
+        return Result.success("题目添加成功");
+    }
+
+    /**
+     * 查看小组题目详情：仅本组已加入成员可看。
+     */
+    @GetMapping("/{groupId}/questions/{groupQuestionId}")
+    @RateLimit(limit = 100, window = 60)
+    public Result<GroupQuestionVo> getQuestion(@PathVariable Long groupId,
+                                               @PathVariable Long groupQuestionId) {
+        return Result.success(groupQuestionService.getQuestion(groupQuestionId, groupId));
+    }
+
+    /**
+     * 修改小组自建题目：仅本组 ROOT/ADMIN 可操作，平台题目不允许在组内修改。
+     */
+    @PutMapping("/{groupId}/questions/{groupQuestionId}")
+    @RateLimit(limit = 20, window = 60)
+    public Result<Void> updateQuestion(@PathVariable Long groupId,
+                                       @PathVariable Long groupQuestionId,
+                                       @RequestBody UpdateGroupQuestionDto updateGroupQuestionDto) {
+        groupQuestionService.updateGroupQuestion(updateGroupQuestionDto, groupQuestionId, groupId);
+        return Result.success("题目修改成功");
+    }
+
+    /**
+     * 删除小组题目：仅本组 ROOT/ADMIN 可操作。
+     *
+     * <p>平台题目只删小组索引；小组自建题目会同步删除题目本体。</p>
+     */
+    @DeleteMapping("/{groupId}/questions/{groupQuestionId}")
+    @RateLimit(limit = 20, window = 60)
+    public Result<Void> deleteQuestion(@PathVariable Long groupId,
+                                       @PathVariable Long groupQuestionId) {
+        groupQuestionService.deleteGroupQuestion(groupQuestionId, groupId);
+        return Result.success("题目删除成功");
     }
 
     /**

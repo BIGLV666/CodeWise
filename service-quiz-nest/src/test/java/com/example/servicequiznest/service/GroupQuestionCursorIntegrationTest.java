@@ -18,7 +18,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
-import vo.MinimalQuestionVo;
+import com.example.servicequiznest.vo.MinimalQuestionVo;
 
 import java.util.ArrayList;
 import java.util.HashSet;

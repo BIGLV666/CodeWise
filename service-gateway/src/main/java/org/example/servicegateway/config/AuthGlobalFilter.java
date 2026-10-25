@@ -25,11 +25,12 @@ import java.util.Set;
 /**
  * 网关全局鉴权过滤器：先剥离、后注入。
  *
- * <p>转发前无条件剥离客户端可伪造的四个头（X-User-Id、X-User-Name、
- * X-Internal-Token、X-Real-IP），再由本过滤器按鉴权结果注入唯一可信值；
+ * <p>转发前无条件剥离客户端可伪造的身份/内部调用头（X-User-Id、X-User-Name、
+ * X-User-Token、X-User-Token-Iat、X-Internal-Token、X-CodeWise-Internal-Token、
+ * X-Real-IP），再由本过滤器按鉴权结果注入唯一可信值；
  * 网关未注入的头一律不会透传下游，公共路径与 WebSocket 分支同理。
  * X-Forwarded-For 仅在 {@code codewise.gateway.trust-forwarded-for=false}
- * （默认，直连部署）时一并剥离；四个头的处置见 {@link #filter} 与 {@link #getClientIp}。</p>
+ * （默认，直连部署）时一并剥离；各头的处置见 {@link #filter} 与 {@link #getClientIp}。</p>
  */
 @Component
 public class AuthGlobalFilter implements GlobalFilter, Ordered {
@@ -142,6 +143,8 @@ public class AuthGlobalFilter implements GlobalFilter, Ordered {
             // 凭证签发时间：下游拦截器用它比对用户级失效线（封禁/改密），伪造值必须剥离
             httpHeaders.remove("X-User-Token-Iat");
             httpHeaders.remove("X-Internal-Token");
+            // 服务间内部凭证：网关不注入该头，必须剥离客户端伪造值，避免直连网关调用内部端点
+            httpHeaders.remove("X-CodeWise-Internal-Token");
             httpHeaders.remove("X-Real-IP");
             if (!trustForwardedFor) {
                 httpHeaders.remove("X-Forwarded-For");

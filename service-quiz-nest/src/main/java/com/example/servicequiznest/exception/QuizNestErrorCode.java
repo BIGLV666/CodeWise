@@ -41,6 +41,8 @@ public enum QuizNestErrorCode implements ErrorCode {
     NO_PERMISSION_UPDATE_GROUP(4031101, "无权限修改小组"),
     NO_PERMISSION_SEND_JOIN_TOKEN(4031102, "您暂无权限邀请他人，请联系管理员"),
     NO_PERMISSION_ADD_QUESTION(4031103,"您暂无权限添加题目，请联系管理员"),
+    NOT_ALLOWED_UPDATE_PLATFORM_QUESTION(4031104,"平台题目不支持在小组内修改"),
+    INTERNAL_CALL_UNAUTHORIZED(4031105,"无权调用内部接口"),
 
     // ---------- 资源不存在 404 ----------
     NOTFOUND_USER_IN_GROUP(4041101, "您不是该小组成员"),
@@ -55,6 +57,7 @@ public enum QuizNestErrorCode implements ErrorCode {
     GROUP_NOT_INVITE(4091104, "该小组无需邀请码，可直接加入或提交申请"),
     INVITEE_ALREADY_MEMBER(4091105, "对方已经是该小组成员，无需再次邀请"),
     QUESTION_ALREADY_IN_GROUP(4091106, "该题目已在小组题库中，请勿重复添加"),
+    QUESTION_CONTENT_DUPLICATED(4091107, "题目内容与已有题目重复，请调整后重试"),
 
     // ---------- 服务内部 500 ----------
     CREATE_FAILED(5001101, "小组创建失败，请稍后重试"),

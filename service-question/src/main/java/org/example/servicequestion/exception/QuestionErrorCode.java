@@ -59,6 +59,8 @@ public enum QuestionErrorCode implements ErrorCode {
     // ---- 权限/可见性（403，账号状态语义为本服务自有）----
     ACCOUNT_UNAVAILABLE(4030201, "当前账号不可用，请联系管理员"),
     INTERNAL_CALL_UNAUTHORIZED(4030202, "无权调用内部接口"),
+    GROUP_QUESTION_UPDATE_FORBIDDEN(4030203, "仅小组自建题目支持修改"),
+
 
     // ---- 资源不存在（404，按对象类型区分归属）----
     QUESTION_NOT_FOUND(4040201, "题目不存在或已被删除"),
@@ -78,6 +80,7 @@ public enum QuestionErrorCode implements ErrorCode {
     RANDOM_INPUT_INSUFFICIENT(4090205, "本次生成的测试输入重复较多，请更换随机种子后重试"),
     SUBMIT_RECORD_STATE_CONFLICT(4090206, "提交记录状态已变化，稍后将自动重试"),
     SAMPLE_PROMOTE_NO_CASE(4090207, "该题还没有可用于展示的测试用例，请先生成测试用例"),
+    QUESTION_CONTENT_DUPLICATED(4090208, "题目内容与已有题目重复，请调整后重试"),
 
     // ---- 系统内部/判题与生成链路（500，面向用户不带技术细节）----
     QUESTION_TOTAL_QUERY_FAILED(5000201, "题目总数加载失败，请稍后重试"),
@@ -97,7 +100,8 @@ public enum QuestionErrorCode implements ErrorCode {
     QUESTION_IMPORT_FAILED(5000215, "题目导入失败，请稍后重试"),
     QUESTION_COUNT_UPDATE_FAILED(5000216, "题目统计更新失败，稍后将自动重试"),
     DESCRIPTION_GENERATE_FAILED(5000217, "题面生成失败，请稍后重试或直接补充题面后再导入"),
-    DELETE_GROUP_QUESTION_FAILED(5000218,"小组题目删除失败");
+    DELETE_GROUP_QUESTION_FAILED(5000218,"小组题目删除失败"),
+    ;
 
     private final int code;
     private final String message;

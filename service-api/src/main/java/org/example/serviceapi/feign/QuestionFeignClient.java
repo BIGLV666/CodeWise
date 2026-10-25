@@ -4,6 +4,7 @@ import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.judge.JudgeContextDto;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
+import org.example.serviceapi.dto.question.UpdateGroupQuestionDto;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.*;
 
@@ -56,4 +57,10 @@ public interface QuestionFeignClient {
     Result<String> deleteQuestion(
             @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
             @RequestParam Long questionId);
+
+    @PutMapping("/api/question/internal/put")
+    Result<QuestionDto> putQuestion(
+            @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
+            @RequestBody UpdateGroupQuestionDto questionDto
+            );
 }

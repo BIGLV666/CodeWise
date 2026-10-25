@@ -1,11 +1,8 @@
 package org.example.servicequestion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import org.example.serviceapi.dto.Result;
-import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.exception.CommonErrorCode;
-import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.InsertTestCaseDto;
 import org.example.servicequestion.entry.Question;
@@ -26,7 +23,7 @@ public class TestCaseService {
     @Autowired
     private QuestionMapper questionMapper;
     @Autowired
-    private UserFeignClient userFeignClient;
+    private GroupQuestionPermissionService groupQuestionPermissionService;
 
     public List<Map<String,Object>> getAllTestCase(){
 
@@ -131,15 +128,11 @@ public class TestCaseService {
         if (question == null) {
             throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
-        Result<UserDto> userResult = userFeignClient.getUserInfo(userId);
-        if (userResult.getCode() != 200) {
-            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
-        }
-        if (userResult.getData() == null) {
-            throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
-        }
-        if (!userId.equals(question.getCreateUserId()) && !userResult.getData().getRoleId().equals(2)) {
+        // 私密题=小组题：组内 ROOT/ADMIN 可维护；其他状态仅平台管理员可维护
+        if (!groupQuestionPermissionService.canMaintainQuestionSamples(question)) {
             throw new BizException(CommonErrorCode.NO_PERMISSION);
         }
     }
+
+
 }

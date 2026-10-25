@@ -11,7 +11,7 @@ import com.example.servicequiznest.enums.GroupType;
 import com.example.servicequiznest.exception.QuizNestErrorCode;
 import com.example.servicequiznest.mapper.GroupMapper;
 import com.example.servicequiznest.mapper.GroupMemberMapper;
-import com.example.servicequiznest.util.GroupUtil;
+import com.example.servicequiznest.util.check.CheckGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.event.EventTypes;
@@ -115,7 +115,7 @@ public class GroupService {
      */
     @Transactional(rollbackFor = Exception.class)
     public Group cerateGroup(CreateGroupDto createGroupDto) {
-        GroupUtil.checkGroup(createGroupDto);
+        CheckGroup.checkCreate(createGroupDto);
         boolean tryLock;
         try {
             tryLock = Boolean.TRUE.equals(redisTemplate.opsForValue().setIfAbsent(
@@ -158,7 +158,7 @@ public class GroupService {
      * @return 修改后的小组
      */
     public Group updateGroup(GroupDto groupDto) {
-        GroupUtil.checkGroup(groupDto);
+        CheckGroup.checkUpdate(groupDto);
         Group g = new Group(groupDto);
         g.setUserId(UserContext.getUserId());
 

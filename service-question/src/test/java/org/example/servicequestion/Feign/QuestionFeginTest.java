@@ -3,6 +3,7 @@ package org.example.servicequestion.Feign;
 import io.github.biglv666.apigovernance.annotation.Skip;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.question.QuestionDto;
+import org.example.serviceapi.dto.question.UpdateGroupQuestionDto;
 import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.feign.QuestionFeignClient;
 import org.example.servicequestion.FeugnService.QuestionServiceFeign;
@@ -13,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 
@@ -116,6 +118,53 @@ class QuestionFeginTest {
     }
 
     @Test
+    void updateRejectsForgedInternalToken() {
+        assertThatThrownBy(() -> controller().updateQuestion("wrong-token", updateRequest()))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getCode())
+                .isEqualTo(QuestionErrorCode.INTERNAL_CALL_UNAUTHORIZED.getCode());
+        verifyNoInteractions(questionServiceFeign);
+    }
+
+    @Test
+    void updateDelegatesWithValidInternalToken() {
+        QuestionDto updated = QuestionDto.builder().questionId(9L).title("改后标题").build();
+        when(questionServiceFeign.updateGroupQuestion(any(UpdateGroupQuestionDto.class))).thenReturn(updated);
+
+        Result<QuestionDto> result = controller().updateQuestion(INTERNAL_TOKEN, updateRequest());
+
+        assertThat(result.getCode()).isEqualTo(200);
+        assertThat(result.getData()).isSameAs(updated);
+        verify(questionServiceFeign).updateGroupQuestion(any(UpdateGroupQuestionDto.class));
+    }
+
+    @Test
+    void internalPutRouteIsRateLimitSkipped() throws NoSuchMethodException {
+        Method method = QuestionFegin.class.getMethod(
+                "updateQuestion", String.class, UpdateGroupQuestionDto.class);
+        assertThat(method.isAnnotationPresent(Skip.class)).isTrue();
+    }
+
+    @Test
+    void feignContractMatchesPutEndpoint() throws NoSuchMethodException {
+        PutMapping feignMapping = QuestionFeignClient.class
+                .getMethod("putQuestion", String.class, UpdateGroupQuestionDto.class)
+                .getAnnotation(PutMapping.class);
+        PutMapping controllerMapping = QuestionFegin.class
+                .getMethod("updateQuestion", String.class, UpdateGroupQuestionDto.class)
+                .getAnnotation(PutMapping.class);
+        RequestMapping classMapping = QuestionFegin.class.getAnnotation(RequestMapping.class);
+
+        assertThat(feignMapping).isNotNull();
+        assertThat(feignMapping.value()).containsExactly("/api/question/internal/put");
+        assertThat(controllerMapping.value()).containsExactly("/internal/put");
+        assertThat(classMapping.value()).containsExactly("/api/question");
+        assertThat(classMapping.value()[0] + controllerMapping.value()[0])
+                .as("类级路径 + 方法级路径必须与 Feign 契约一致")
+                .isEqualTo(feignMapping.value()[0]);
+    }
+
+    @Test
     void feignSendsInternalTokenHeader() throws NoSuchMethodException {
         Method method = QuestionFeignClient.class.getMethod("addQuestion", String.class, QuestionDto.class);
 
@@ -126,5 +175,10 @@ class QuestionFeginTest {
 
     private QuestionFegin controller() {
         return new QuestionFegin(questionServiceFeign, INTERNAL_TOKEN);
+    }
+
+    private static UpdateGroupQuestionDto updateRequest() {
+        return new UpdateGroupQuestionDto(
+                9L, "改后标题", "改后描述", "输入", "输出", "1 2", "3", "提示", "数学", 2000, 512);
     }
 }

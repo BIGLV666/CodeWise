@@ -31,7 +31,7 @@
 | `service-community` | `8087` | `/api/community/**` | 帖子、题解、评论和点赞 |
 | `service-message` | `8083` | `/api/message/**`、`/websocket/**` | 通知中心与 WebSocket 推送 |
 | `service-ai` | `8085` | `/api/ai/**` | AI 建议、会话与自定义模型 |
-| `service-quiz-nest` | `8088` | `/api/quiz/**` | 小组（建组/改组/退出与 root 晋升/加入/邀请码）与后续 Quiz 业务 |
+| `service-quiz-nest` | `8088` | `/api/quiz/**` | 小组（建组/改组/退出与 root 晋升/加入/邀请码/题库增删改查）与后续 Quiz 业务 |
 | `service-judge` | `8086` | `/api/judge/**` | 容器池与失败提交管理（管理员） |
 
 `codewise-agent`（FastAPI，8000）不经过网关路由：生产环境由 nginx 以 `/agentapi/` 反代，前端直连其 `/api/agent/**`（7 个端点，含 SSE 流式 `/api/agent/stream`），JWT 由 Agent 自行校验。
@@ -117,7 +117,7 @@ X-Real-IP: <clientIp>
 | --- | --- | --- | --- |
 | `CommonErrorCode` | `service-api` | 16 | 跨服务通用语义，优先复用 |
 | `UserErrorCode` | `service-user` | 42 | 账号、角色、登录注册 |
-| `QuestionErrorCode` | `service-question` | 59 | 题目、测试用例、提交与生成链路 |
+| `QuestionErrorCode` | `service-question` | 74 | 题目、测试用例、提交与生成链路 |
 | `ReviewErrorCode` | `service-review` | 49 | 复习项、收藏夹、笔记、进度计划 |
 | `CommunityErrorCode` | `service-community` | 31 | 帖子、评论、点赞、申诉 |
 | `MessageErrorCode` | `service-message` | 13 | 通知、事件认领、推送、小组邀请码 |
@@ -126,7 +126,7 @@ X-Real-IP: <clientIp>
 | `InfraErrorCode` | `service-common` | 6 | 信封编解码、必需配置缺失 |
 | `GatewayErrorCode` | `service-gateway` | 8 | 网关自身兜底（不依赖 service-api，文案与 `CommonErrorCode` 对齐） |
 | `AgentErrorCode` | `codewise-agent` | 5 | Python agent 鉴权与会话 |
-| `QuizNestErrorCode` | `service-quiz-nest` | 23 | 小组创建、修改、退出、加入与邀请码 |
+| `QuizNestErrorCode` | `service-quiz-nest` | 42 | 小组创建、修改、退出、加入、邀请码与小组题库 |
 
 收敛规则（写在 `service-common/.../advice/AbstractGlobalExceptionHandler`，各服务的 `Advice`/`advice` 子类只声明 `basePackages`）：
 
@@ -141,7 +141,7 @@ X-Real-IP: <clientIp>
 
 ## 内部服务接口
 
-以下接口也由 `@RestController` 暴露，但主要用于 Feign 服务间调用。契约统一在 `service-api/.../feign/`：`UserFeignClient`、`QuestionFeignClient`、`AiArtifactFeignClient`，请求头由 `FeignRequestInterceptor` 自动透传身份与内部 Token。
+以下接口也由 `@RestController` 暴露，但主要用于 Feign 服务间调用。契约统一在 `service-api/.../feign/`：`UserFeignClient`、`QuestionFeignClient`、`GroupFeignClient`、`AiArtifactFeignClient`，请求头由 `FeignRequestInterceptor` 自动透传身份与内部 Token。
 
 ### 查询单个题目信息
 
@@ -232,6 +232,21 @@ Content-Type: application/json
 返回：`Result<FunctionArtifactGenerateResponse>`。
 
 说明：`service-question` 导入函数题时调用 `service-ai` 生成随机输入与标准答案产物。该端点除网关的内部 Token 外，还额外校验请求头 `X-CodeWise-Internal-Token` 与服务配置 `codewise.internal-token` 是否一致，两端必须使用同一个 `CODEWISE_INTERNAL_TOKEN`。产物落盘在 `data/function-artifacts/`（运行数据，不入库）。
+
+### 查询小组题目权限
+
+```http
+GET /api/quiz/internal/questions/{questionId}/member
+GET /api/quiz/internal/questions/{questionId}/admin
+X-CodeWise-Internal-Token: <与 CODEWISE_INTERNAL_TOKEN 同值>
+```
+
+返回：`Result<Boolean>`。
+
+- `member`：判断当前用户能否读取私密题目。公开题不会走此接口；私密题无论是否为平台题，都要求用户是该组 APPROVED 成员，平台管理员（`roleId != 1`）也可读。
+- `admin`：判断当前用户能否维护题目样例。平台题恒为 `false`；小组自建题要求用户是该组 APPROVED 的 ROOT/ADMIN。
+
+说明：由 `GroupFeignClient` 暴露，供 `service-question` 校验小组私密题权限；与函数题产物接口一样，除公共内部 Token 外还校验 `X-CodeWise-Internal-Token`，网关不会注入该头，外部请求无法伪造。
 
 ### Agent 专用接口
 

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.question.QuestionBriefDto;
 import org.example.serviceapi.dto.question.QuestionDto;
+import org.example.serviceapi.dto.question.UpdateGroupQuestionDto;
 import org.example.serviceapi.exception.BizException;
 import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.entry.Question;
@@ -110,6 +111,36 @@ public class QuestionServiceFeign {
         InsertQuestionDto insert = new InsertQuestionDto();
         BeanUtils.copyProperties(questionDto, insert);
         Question question = questionService.addQuestion(insert);
+        return ToQuestionDto(question);
+    }
+
+
+    /**
+     * 服务间修改小组自建题目。
+     *
+     * <p>record 没有 getter，不能复用 {@code BeanUtils.copyProperties}，因此显式逐字段
+     * 映射到 {@link InsertQuestionDto}；真正的权限与状态校验在
+     * {@link QuestionService#updateGroupQuestion(InsertQuestionDto, Long)} 内完成。</p>
+     *
+     * @param updateGroupQuestionDto 改题入参，questionId 由 quiz-nest 根据小组索引解析
+     * @return 更新后的题目
+     */
+    public QuestionDto updateGroupQuestion(UpdateGroupQuestionDto updateGroupQuestionDto) {
+        if (updateGroupQuestionDto == null || updateGroupQuestionDto.questionId() == null) {
+            throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
+        }
+        InsertQuestionDto insert = new InsertQuestionDto();
+        insert.setTitle(updateGroupQuestionDto.title());
+        insert.setDescription(updateGroupQuestionDto.description());
+        insert.setInputDesc(updateGroupQuestionDto.inputDesc());
+        insert.setOutputDesc(updateGroupQuestionDto.outputDesc());
+        insert.setSampleInput(updateGroupQuestionDto.sampleInput());
+        insert.setSampleOutput(updateGroupQuestionDto.sampleOutput());
+        insert.setHint(updateGroupQuestionDto.hint());
+        insert.setTags(updateGroupQuestionDto.tags());
+        insert.setTimeLimit(updateGroupQuestionDto.timeLimit());
+        insert.setMemoryLimit(updateGroupQuestionDto.memoryLimit());
+        Question question = questionService.updateGroupQuestion(insert, updateGroupQuestionDto.questionId());
         return ToQuestionDto(question);
     }
 

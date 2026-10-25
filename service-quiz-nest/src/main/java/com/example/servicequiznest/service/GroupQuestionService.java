@@ -2,6 +2,7 @@ package com.example.servicequiznest.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.example.servicequiznest.dto.CreateGroupQuestionDto;
+import com.example.servicequiznest.dto.UpdateGroupQuestionDto;
 import com.example.servicequiznest.entity.GroupMember;
 import com.example.servicequiznest.entity.GroupQuestion;
 import com.example.servicequiznest.enums.GroupJoinStatus;
@@ -9,6 +10,10 @@ import com.example.servicequiznest.enums.GroupMemberRole;
 import com.example.servicequiznest.exception.QuizNestErrorCode;
 import com.example.servicequiznest.mapper.GroupMemberMapper;
 import com.example.servicequiznest.mapper.GroupQuestionMapper;
+import com.example.servicequiznest.util.check.CheckGroupQuestion;
+import com.example.servicequiznest.util.convert.GroupQuestionConvert;
+import com.example.servicequiznest.vo.GroupQuestionVo;
+import com.example.servicequiznest.vo.MinimalQuestionVo;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
@@ -23,10 +28,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
-import vo.MinimalQuestionVo;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -46,6 +48,18 @@ public class GroupQuestionService {
     private final GroupQuestionCleanupPublisher cleanupPublisher;
     /** 调用题目服务内部建题接口的凭证（网关不注入该头，外部无法伪造）。 */
     private final String internalToken;
+
+    /*
+     * service-question 的 QuestionErrorCode 中与改题链路相关的错误码。
+     * quiz-nest 不依赖 service-question 模块，无法直接引用其枚举，因此在这里登记后翻译为
+     * 本服务文案；新增映射时必须同步 service-question/QuestionErrorCode。
+     */
+    /** 仅小组自建题目支持修改（4030203）。 */
+    private static final int QUESTION_NOT_EDITABLE_CODE = 4030203;
+    /** 题目不存在或已被删除（4040201）。 */
+    private static final int QUESTION_NOT_FOUND_CODE = 4040201;
+    /** 题目正文与已有题目重复（4090208）。 */
+    private static final int QUESTION_CONTENT_DUPLICATED_CODE = 4090208;
 
     public GroupQuestionService(
             QuestionFeignClient questionFeignClient,
@@ -76,8 +90,7 @@ public class GroupQuestionService {
      * @throws org.example.serviceapi.exception.BizException 抛出自定义异常
      */
     public void addQuestion(CreateGroupQuestionDto dto){
-        if(dto==null)throw new BizException(QuizNestErrorCode.QUESTION_REQUIRED);
-        checkQuestionDto(dto);
+        CheckGroupQuestion.checkCreate(dto);
         checkMemberRole(UserContext.getUserId(),dto.getGroupId());
         if(dto.getQuestionId()!=null){
             addPlatFromQuestion(dto);
@@ -96,7 +109,8 @@ public class GroupQuestionService {
     private void addCustomQuestion(CreateGroupQuestionDto dto){
         Result<QuestionDto> body;
         try {
-            body = questionFeignClient.addQuestion(internalToken, createGroupQuestionDtoToQuestionDto(dto));
+            body = questionFeignClient.addQuestion(internalToken,
+                    GroupQuestionConvert.createGroupQuestionDtoToQuestionDto(dto));
         } catch (Exception e) {
             // 题目服务自身事务已回滚，本地没有需要补偿的数据
             log.error("同步创建小组题目失败: groupId={}", dto.getGroupId(), e);
@@ -177,27 +191,6 @@ public class GroupQuestionService {
     }
 
     /**
-     * 自建题目 DTO 转题目服务入参。
-     *
-     * <p>只映射出题字段；questionId/status/createUserId 等由题目服务生成或控制，
-     * 不能由调用方指定。</p>
-     */
-    private QuestionDto createGroupQuestionDtoToQuestionDto(CreateGroupQuestionDto dto){
-        return QuestionDto.builder()
-                .title(dto.getTitle())
-                .description(dto.getDescription())
-                .inputDesc(dto.getInputDesc())
-                .outputDesc(dto.getOutputDesc())
-                .sampleInput(dto.getSampleInput())
-                .sampleOutput(dto.getSampleOutput())
-                .hint(dto.getHint())
-                .tags(dto.getTags())
-                .timeLimit(dto.getTimeLimit())
-                .memoryLimit(dto.getMemoryLimit())
-                .build();
-    }
-
-    /**
      * 平台题目就不需要同步添加题目了，只需要在此直接为小组题库加入索引即可。
      *
      * <p>题目服务按 id 返回题目时不区分可见性，因此必须在写索引前自行校验：
@@ -254,59 +247,6 @@ public class GroupQuestionService {
         }
         return Integer.valueOf(3).equals(status)
                 && Objects.equals(question.getCreateUserId(), UserContext.getUserId());
-    }
-
-    /**
-     * 校验新增题目入参。
-     *
-     * <p>平台题目（{@code questionId} 非空）只校验 id，其余字段按约定忽略，
-     * 不能因为调用方没传标题就拒绝；小组自建题目则校验必填项与长度上限，
-     * 上限与 service-question 的 {@code question} 表保持一致，避免同步建题时
-     * 才由下游报错。</p>
-     *
-     * @param dto 已验证非空的入参
-     */
-    private void checkQuestionDto(CreateGroupQuestionDto dto){
-        if(dto.getGroupId()==null){
-            throw new BizException(QuizNestErrorCode.GROUP_ID_REQUIRED);
-        }
-        if(dto.getQuestionId()!=null){
-            //平台题目只引用已有题目，title/description 等字段不参与入库，不能要求必填
-            if(dto.getQuestionId()<=0){
-                throw new BizException(CommonErrorCode.PARAM_INVALID);
-            }
-            return;
-        }
-        if(!StringUtils.hasText(dto.getTitle())){
-            throw new BizException(QuizNestErrorCode.QUESTION_TITLE_REQUIRED);
-        }
-        if(!StringUtils.hasText(dto.getDescription())){
-            throw new BizException(QuizNestErrorCode.QUESTION_CONTENT_REQUIRED);
-        }
-        if(dto.getTitle().codePointCount(0,dto.getTitle().length())>200){
-            throw new BizException(QuizNestErrorCode.QUESTION_TITLE_TOO_LONG,200);
-        }
-        if(dto.getTags()!=null&&dto.getTags().codePointCount(0,dto.getTags().length())>255){
-            throw new BizException(QuizNestErrorCode.QUESTION_TAGS_TOO_LONG,255);
-        }
-        validateTextLength(dto.getInputDesc(),"输入描述");
-        validateTextLength(dto.getOutputDesc(),"输出描述");
-        validateTextLength(dto.getSampleInput(),"样例输入");
-        validateTextLength(dto.getSampleOutput(),"样例输出");
-        validateTextLength(dto.getHint(),"提示");
-        if(dto.getTimeLimit()==null||dto.getTimeLimit()<=0){
-            throw new BizException(QuizNestErrorCode.QUESTION_TIME_LIMIT_INVALID);
-        }
-        if(dto.getMemoryLimit()==null||dto.getMemoryLimit()<=0){
-            throw new BizException(QuizNestErrorCode.QUESTION_MEMORY_LIMIT_INVALID);
-        }
-    }
-
-    /** TEXT 列按 UTF-8 字节数限制，中文/emoji 不能按 String.length() 判断。 */
-    private void validateTextLength(String value,String fieldName){
-        if(value!=null&&value.getBytes(StandardCharsets.UTF_8).length>65_535){
-            throw new BizException(QuizNestErrorCode.QUESTION_TEXT_TOO_LONG,fieldName);
-        }
     }
 
     /**
@@ -429,7 +369,7 @@ public class GroupQuestionService {
                     .build();
         }
         // 游标取「最后一条已消费索引」而不是「最后一条返回记录」：被懒删除的题目不会让游标停滞
-        Long nextCursor = hasNext ? pageRows.get(pageRows.size() - 1).getGroupQuestionId() : null;
+        Long nextCursor = hasNext ? pageRows.getLast().getGroupQuestionId() : null;
 
         List<Long> questionIds = pageRows.stream()
                 .map(GroupQuestion::getQuestionId)
@@ -527,7 +467,110 @@ public class GroupQuestionService {
         }
     }
 
+    /**
+     * 获取小组题目的具体内容，是本小组的人即可查看。
+     *
+     * <p>索引必须属于路径上的小组，否则 A 组成员可以拿 B 组的索引 id 读到 B 组题目。
+     * 题目服务返回非 200 时可能是超时，不能据此删除本地索引；只有明确返回
+     * {@code data=null} 才说明题目已不存在，此时做懒删除。</p>
+     *
+     * @param groupQuestionId 小组题目索引 id
+     * @param groupId         小组 id
+     * @return {@link GroupQuestionVo} 包含题目详情与小组索引 id
+     */
+    public GroupQuestionVo getQuestion(Long groupQuestionId,Long groupId){
+        checkGroupQuestionIds(groupQuestionId, groupId);
+        checkApprovedMember(UserContext.getUserId(),groupId);
+        GroupQuestion groupQuestion=groupQuestionMapper.selectById(groupQuestionId);
+        if(groupQuestion==null||!Objects.equals(groupQuestion.getGroupId(),groupId)){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP_QUESTION);
+        }
+        Result<QuestionDto>body=questionFeignClient.getQuestionInfo(groupQuestion.getQuestionId());
+        //code返回码不等于200,证明异常可能是接口超时此时不能删除本地索引，因为我们没确定是超时还是不存在，当code==200,且data==null，则证明不存在该题目。
+        if(body==null||body.getCode()==null||body.getCode()!=200){
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+        }
+        if(body.getData()==null){
+            lazyDeleteStaleMappings(List.of(groupQuestionId),groupId);
+            throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP_QUESTION);
+        }
 
+        return new GroupQuestionVo(body.getData(),groupQuestionId);
+    }
 
+    /**
+     * 修改小组题目，只有本组 ROOT/ADMIN 可以操作。
+     *
+     * <p>修改对象由路径上的小组索引决定，请求体里的 questionId 不参与定位；
+     * 平台题目只在小组题库中保留索引，正文不属于小组资产，因此不允许在组内修改。</p>
+     *
+     * @param updateGroupQuestionDto 修改内容（全量）
+     * @param groupQuestionId        小组题目索引 id
+     * @param groupId                小组 id
+     */
+    public void updateGroupQuestion(UpdateGroupQuestionDto updateGroupQuestionDto, Long groupQuestionId,Long groupId){
+        checkGroupQuestionIds(groupQuestionId, groupId);
+        CheckGroupQuestion.checkUpdate(updateGroupQuestionDto);
 
+        GroupQuestion groupQuestion=groupQuestionMapper.selectById(groupQuestionId);
+        if(groupQuestion==null||!Objects.equals(groupQuestion.getGroupId(),groupId)){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP_QUESTION);
+        }
+        if(!Integer.valueOf(0).equals(groupQuestion.getIsPlatFromQuestion())){
+            throw new BizException(QuizNestErrorCode.NOT_ALLOWED_UPDATE_PLATFORM_QUESTION);
+        }
+        checkMemberRole(UserContext.getUserId(),groupId);
+        try {
+            Result<QuestionDto> body = questionFeignClient.putQuestion(
+                    internalToken,
+                    GroupQuestionConvert.quizUpdateGroupQuestionDtoToApiUpdateGroupQuestionDto(
+                            updateGroupQuestionDto, groupQuestion.getQuestionId()));
+            checkUpdateQuestionResult(body);
+        }catch (BizException e){
+            throw e;
+        }catch (Exception e){
+            log.error("修改组内题目接口调用失败，小组题目id{},题目id{}",groupQuestionId,groupQuestion.getQuestionId(),e);
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+        }
+    }
+
+    /** 校验小组题目两个路径参数：空值按缺失处理，非正数按非法 id 处理。 */
+    private void checkGroupQuestionIds(Long groupQuestionId, Long groupId){
+        if(groupId==null||groupQuestionId==null){
+            throw new BizException(CommonErrorCode.PARAM_MISSING);
+        }
+        if(groupId<=0){
+            throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        }
+        if(groupQuestionId<=0){
+            throw new BizException(QuizNestErrorCode.INVALID_QUESTION_ID);
+        }
+    }
+
+    /**
+     * 把 service-question 内部改题接口的业务错误翻译成本服务的错误码。
+     *
+     * <p>下游返回的 code 来自 {@code QuestionErrorCode}，这里只识别与改题链路
+     * 相关的三种语义，其余一律按下游不可用处理，避免把陌生错误码透传给前端。</p>
+     */
+    private void checkUpdateQuestionResult(Result<QuestionDto> body){
+        if(body==null||body.getCode()==null){
+            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+        }
+        int code = body.getCode();
+        if(code==200){
+            return;
+        }
+        if(code==QUESTION_NOT_EDITABLE_CODE){
+            throw new BizException(QuizNestErrorCode.NOT_ALLOWED_UPDATE_PLATFORM_QUESTION);
+        }
+        if(code==QUESTION_NOT_FOUND_CODE){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_QUESTION);
+        }
+        if(code==QUESTION_CONTENT_DUPLICATED_CODE){
+            throw new BizException(QuizNestErrorCode.QUESTION_CONTENT_DUPLICATED);
+        }
+        log.error("修改组内题目下游返回异常: code={}, message={}", code, body.getMessage());
+        throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+    }
 }

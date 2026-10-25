@@ -1,6 +1,7 @@
 package org.example.servicequestion.FeugnService;
 
 import org.example.serviceapi.dto.question.QuestionDto;
+import org.example.serviceapi.dto.question.UpdateGroupQuestionDto;
 import org.example.serviceapi.exception.BizException;
 import org.example.servicequestion.dto.InsertQuestionDto;
 import org.example.servicequestion.entry.Question;
@@ -87,6 +88,57 @@ class QuestionServiceFeignTest {
                 .isInstanceOf(BizException.class)
                 .extracting(e -> ((BizException) e).getCode())
                 .isEqualTo(QuestionErrorCode.QUESTION_SAVE_FAILED.getCode());
+        verifyNoInteractions(questionService, questionMapper);
+    }
+
+    @Test
+    void updateQuestionMapsRecordToInsertDtoAndDelegates() {
+        UpdateGroupQuestionDto request = new UpdateGroupQuestionDto(
+                7L, "改后标题", "改后描述", "输入", "输出", "1 2", "3", "提示", "数学", 2000, 512);
+        Question updated = Question.builder()
+                .questionId(7L)
+                .title("改后标题")
+                .description("改后描述")
+                .status(3)
+                .timeLimit(2000)
+                .memoryLimit(512)
+                .build();
+        when(questionService.updateGroupQuestion(any(InsertQuestionDto.class), org.mockito.ArgumentMatchers.eq(7L)))
+                .thenReturn(updated);
+
+        QuestionDto result = new QuestionServiceFeign(questionMapper, questionService, testCaseMapper)
+                .updateGroupQuestion(request);
+
+        ArgumentCaptor<InsertQuestionDto> captor = ArgumentCaptor.forClass(InsertQuestionDto.class);
+        verify(questionService).updateGroupQuestion(captor.capture(), org.mockito.ArgumentMatchers.eq(7L));
+        InsertQuestionDto insert = captor.getValue();
+        assertThat(insert.getTitle()).isEqualTo("改后标题");
+        assertThat(insert.getDescription()).isEqualTo("改后描述");
+        assertThat(insert.getInputDesc()).isEqualTo("输入");
+        assertThat(insert.getOutputDesc()).isEqualTo("输出");
+        assertThat(insert.getSampleInput()).isEqualTo("1 2");
+        assertThat(insert.getSampleOutput()).isEqualTo("3");
+        assertThat(insert.getHint()).isEqualTo("提示");
+        assertThat(insert.getTags()).isEqualTo("数学");
+        assertThat(insert.getTimeLimit()).isEqualTo(2000);
+        assertThat(insert.getMemoryLimit()).isEqualTo(512);
+        assertThat(result.getQuestionId()).isEqualTo(7L);
+        verifyNoInteractions(questionMapper);
+    }
+
+    @Test
+    void updateQuestionRejectsNullRequestOrMissingQuestionId() {
+        assertThatThrownBy(() -> new QuestionServiceFeign(questionMapper, questionService, testCaseMapper)
+                .updateGroupQuestion(null))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getCode())
+                .isEqualTo(QuestionErrorCode.QUESTION_ID_REQUIRED.getCode());
+        assertThatThrownBy(() -> new QuestionServiceFeign(questionMapper, questionService, testCaseMapper)
+                .updateGroupQuestion(new UpdateGroupQuestionDto(
+                        null, "t", "d", null, null, null, null, null, null, 1, 1)))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getCode())
+                .isEqualTo(QuestionErrorCode.QUESTION_ID_REQUIRED.getCode());
         verifyNoInteractions(questionService, questionMapper);
     }
 }
