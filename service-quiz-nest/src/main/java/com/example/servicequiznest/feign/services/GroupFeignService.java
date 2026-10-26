@@ -106,6 +106,72 @@ public class GroupFeignService {
     }
 
     /**
+     * 判断题目是否属于该小组，且当前用户是否为该组 APPROVED 成员。
+     *
+     * <p>小组提交与普通浏览不同：公开题也必须校验小组归属，否则任意登录用户
+     * 都能把提交记录写进任意小组。</p>
+     *
+     * @param questionId 题目 id
+     * @param groupId    小组 id
+     * @return true 表示校验通过
+     * @throws BizException 参数非法、未登录、非组员或题目不在组内
+     */
+    public boolean checkQuestionInGroupAndIsGroupMember(Long questionId, Long groupId) {
+        if (groupId == null || groupId <= 0) {
+            throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        }
+        if (questionId == null || questionId <= 0) {
+            throw new BizException(QuizNestErrorCode.INVALID_QUESTION_ID);
+        }
+        Long userId = requireLogin();
+        // 先校验成员身份，再查题目索引：非组员无法通过错误码探测题目是否存在
+        requireApprovedMember(userId, groupId);
+        Long count = groupQuestionMapper.selectCount(new QueryWrapper<GroupQuestion>()
+                .eq("group_id", groupId)
+                .eq("question_id", questionId));
+        if (count == null || count == 0) {
+            throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP_QUESTION);
+        }
+        return true;
+    }
+
+    /**
+     * 小组级只读权限：当前用户必须是该组 APPROVED 成员。
+     *
+     * <p>用于小组提交记录列表等「不依赖某道题目」的组内只读接口。</p>
+     *
+     * @param groupId 小组 id
+     * @return true 表示校验通过
+     * @throws BizException 参数非法、未登录或非组员
+     */
+    public boolean checkIsGroupMemberByGroupId(Long groupId) {
+        if (groupId == null || groupId <= 0) {
+            throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        }
+        requireApprovedMember(requireLogin(), groupId);
+        return true;
+    }
+
+    /**
+     * 浏览鉴权：只要求「已加入」（APPROVED），不要求管理员。
+     *
+     * <p>不能复用 {@link #checkGroupAdminRole(Long, Long)}——那是添加题目的管理员校验，
+     * 会把普通成员挡在外面；同时必须校验 {@code join_status}，
+     * 否则 PENDING/REJECTED 占位记录也能看到小组题库。</p>
+     *
+     * @return 已通过 APPROVED 校验的成员记录
+     */
+    private GroupMember requireApprovedMember(Long userId, Long groupId) {
+        GroupMember groupMember = groupMemberMapper.selectOne(new QueryWrapper<GroupMember>()
+                .eq("user_id", userId)
+                .eq("group_id", groupId));
+        if (groupMember == null || !GroupJoinStatus.APPROVED.equals(groupMember.getJoinStatus())) {
+            throw new BizException(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP);
+        }
+        return groupMember;
+    }
+
+    /**
      * 按题目 id 取出全部小组索引。
      *
      * <p>平台题可以被多个小组引用，因此不能用 selectOne；权限判断按索引列表进行。</p>
@@ -158,16 +224,10 @@ public class GroupFeignService {
      *
      * @throws BizException 抛出自定义异常，无须捕获，透穿给用户即可
      */
-    private void checkGroupAdminRole(Long userId,Long groupId){
-        GroupMember groupMember=groupMemberMapper.selectOne(
-                new QueryWrapper<GroupMember>().eq("user_id",userId).
-                        eq("group_id",groupId)
-        );
-        if(groupMember==null||!GroupJoinStatus.APPROVED.equals(groupMember.getJoinStatus())){
-            throw new BizException(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP);
-        }
-        if(!GroupMemberRole.ROOT.equals(groupMember.getRole())
-                && !GroupMemberRole.ADMIN.equals(groupMember.getRole())){
+    private void checkGroupAdminRole(Long userId, Long groupId) {
+        GroupMember groupMember = requireApprovedMember(userId, groupId);
+        if (!GroupMemberRole.ROOT.equals(groupMember.getRole())
+                && !GroupMemberRole.ADMIN.equals(groupMember.getRole())) {
             throw new BizException(QuizNestErrorCode.NO_PERMISSION_ADD_QUESTION);
         }
     }

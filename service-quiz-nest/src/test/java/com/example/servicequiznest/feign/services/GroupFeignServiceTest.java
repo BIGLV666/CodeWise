@@ -226,6 +226,106 @@ class GroupFeignServiceTest {
                 () -> groupFeignService.checkIsGroupMember(QUESTION_ID));
     }
 
+    @Test
+    @DisplayName("小组提交：APPROVED 成员且题目在组内 → 通过")
+    void groupSubmitAllowedForApprovedMember() {
+        when(groupMemberMapper.selectOne(any()))
+                .thenReturn(member(GroupMemberRole.MEMBER, GroupJoinStatus.APPROVED));
+        when(groupQuestionMapper.selectCount(any())).thenReturn(1L);
+
+        assertThat(groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID))
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("小组提交：非组员/待审批成员拒绝，且不查题目索引")
+    void groupSubmitRejectsNonApprovedMember() {
+        when(groupMemberMapper.selectOne(any())).thenReturn(null);
+        assertCode(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID));
+
+        when(groupMemberMapper.selectOne(any()))
+                .thenReturn(member(GroupMemberRole.MEMBER, GroupJoinStatus.PENDING));
+        assertCode(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID));
+
+        verifyNoInteractions(groupQuestionMapper);
+    }
+
+    @Test
+    @DisplayName("小组提交：题目不在该小组 → 明确「未找到该题目」")
+    void groupSubmitRejectsQuestionNotInGroup() {
+        when(groupMemberMapper.selectOne(any()))
+                .thenReturn(member(GroupMemberRole.MEMBER, GroupJoinStatus.APPROVED));
+        when(groupQuestionMapper.selectCount(any())).thenReturn(0L);
+
+        assertCode(QuizNestErrorCode.NOTFOUND_GROUP_QUESTION,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID));
+    }
+
+    @Test
+    @DisplayName("小组提交：非法 id 直接拒绝，不查库")
+    void groupSubmitRejectsInvalidIds() {
+        assertCode(QuizNestErrorCode.INVALID_GROUP_ID,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, null));
+        assertCode(QuizNestErrorCode.INVALID_GROUP_ID,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, 0L));
+        assertCode(QuizNestErrorCode.INVALID_QUESTION_ID,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(null, GROUP_ID));
+        assertCode(QuizNestErrorCode.INVALID_QUESTION_ID,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(0L, GROUP_ID));
+
+        verifyNoInteractions(groupMemberMapper, groupQuestionMapper);
+    }
+
+    @Test
+    @DisplayName("小组提交：未登录直接拒绝，不查库")
+    void groupSubmitRequiresLogin() {
+        UserContext.clear();
+
+        assertCode(CommonErrorCode.LOGIN_REQUIRED,
+                () -> groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID));
+        verifyNoInteractions(groupMemberMapper, groupQuestionMapper);
+    }
+
+    @Test
+    @DisplayName("小组级成员校验：APPROVED 成员通过")
+    void groupMemberByGroupIdAllowed() {
+        when(groupMemberMapper.selectOne(any()))
+                .thenReturn(member(GroupMemberRole.MEMBER, GroupJoinStatus.APPROVED));
+
+        assertThat(groupFeignService.checkIsGroupMemberByGroupId(GROUP_ID)).isTrue();
+        verifyNoInteractions(groupQuestionMapper);
+    }
+
+    @Test
+    @DisplayName("小组级成员校验：非组员/待审批成员拒绝")
+    void groupMemberByGroupIdRejectsNonApproved() {
+        when(groupMemberMapper.selectOne(any())).thenReturn(null);
+        assertCode(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP,
+                () -> groupFeignService.checkIsGroupMemberByGroupId(GROUP_ID));
+
+        when(groupMemberMapper.selectOne(any()))
+                .thenReturn(member(GroupMemberRole.MEMBER, GroupJoinStatus.PENDING));
+        assertCode(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP,
+                () -> groupFeignService.checkIsGroupMemberByGroupId(GROUP_ID));
+        verifyNoInteractions(groupQuestionMapper);
+    }
+
+    @Test
+    @DisplayName("小组级成员校验：非法 groupId / 未登录直接拒绝，不查库")
+    void groupMemberByGroupIdParamAndLoginChecks() {
+        assertCode(QuizNestErrorCode.INVALID_GROUP_ID,
+                () -> groupFeignService.checkIsGroupMemberByGroupId(null));
+        assertCode(QuizNestErrorCode.INVALID_GROUP_ID,
+                () -> groupFeignService.checkIsGroupMemberByGroupId(0L));
+
+        UserContext.clear();
+        assertCode(CommonErrorCode.LOGIN_REQUIRED,
+                () -> groupFeignService.checkIsGroupMemberByGroupId(GROUP_ID));
+        verifyNoInteractions(groupMemberMapper, groupQuestionMapper);
+    }
+
     private void stubQuestion(int isPlatform) {
         when(groupQuestionMapper.selectList(any())).thenReturn(List.of(question(isPlatform)));
     }
@@ -235,10 +335,14 @@ class GroupFeignServiceTest {
     }
 
     private void stubAdminMember(GroupMemberRole role, GroupJoinStatus status) {
+        when(groupMemberMapper.selectOne(any())).thenReturn(member(role, status));
+    }
+
+    private static GroupMember member(GroupMemberRole role, GroupJoinStatus status) {
         GroupMember member = new GroupMember();
         member.setRole(role);
         member.setJoinStatus(status);
-        when(groupMemberMapper.selectOne(any())).thenReturn(member);
+        return member;
     }
 
     private void stubUserRole(Integer roleId) {

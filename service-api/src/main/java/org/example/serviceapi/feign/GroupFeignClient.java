@@ -47,4 +47,35 @@ public interface GroupFeignClient {
     Result<Boolean> checkIsGroupAdmin(
             @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
             @PathVariable("questionId") Long questionId);
+
+    /**
+     * 小组提交判题：判断题目是否属于该小组，且当前用户是否为该小组 APPROVED 成员。
+     *
+     * <p>小组提交与普通提交不同：即使是公开题，也必须同时满足「题目在组内」和
+     * 「用户是组员」，不能因为题目公开就绕过小组归属校验。</p>
+     *
+     * @param internalToken 内部调用凭证
+     * @param questionId    题目 id
+     * @param groupId       小组 id
+     * @return true 表示有权限；无权限时返回 code 非 200 的 {@link Result}
+     */
+    @GetMapping("/api/quiz/internal/questions/{questionId}/{groupId}/member")
+    Result<Boolean> checkQuestionInGroupAndIsGroupMember(
+            @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
+            @PathVariable("questionId") Long questionId,
+            @PathVariable("groupId") Long groupId);
+
+    /**
+     * 判断当前用户是否为指定小组的 APPROVED 成员。
+     *
+     * <p>用于不依赖题目的小组级只读接口（如小组提交记录列表）鉴权。</p>
+     *
+     * @param internalToken 内部调用凭证
+     * @param groupId       小组 id
+     * @return true 表示有权限；无权限时返回 code 非 200 的 {@link Result}
+     */
+    @GetMapping("/api/quiz/internal/groups/{groupId}/member")
+    Result<Boolean> checkIsGroupMemberByGroupId(
+            @RequestHeader("X-CodeWise-Internal-Token") String internalToken,
+            @PathVariable("groupId") Long groupId);
 }

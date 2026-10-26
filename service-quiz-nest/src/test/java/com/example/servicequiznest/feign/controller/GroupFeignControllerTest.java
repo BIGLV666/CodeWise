@@ -90,15 +90,61 @@ class GroupFeignControllerTest {
     }
 
     @Test
+    @DisplayName("小组提交 Feign 端点：伪造 Token 拒绝，合法 Token 委托")
+    void groupSubmitEndpointTokenAndDelegation() {
+        assertThatThrownBy(() -> controller.checkQuestionInGroupAndIsGroupMember(
+                "wrong-token", QUESTION_ID, 88L))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getCode())
+                .isEqualTo(QuizNestErrorCode.INTERNAL_CALL_UNAUTHORIZED.getCode());
+        verifyNoInteractions(groupFeignService);
+
+        when(groupFeignService.checkQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L)).thenReturn(true);
+        Result<Boolean> result = controller.checkQuestionInGroupAndIsGroupMember(
+                INTERNAL_TOKEN, QUESTION_ID, 88L);
+
+        assertThat(result.getCode()).isEqualTo(200);
+        assertThat(result.getData()).isTrue();
+        verify(groupFeignService).checkQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L);
+    }
+
+    @Test
+    @DisplayName("小组级成员 Feign 端点：伪造 Token 拒绝，合法 Token 委托")
+    void groupMemberByGroupIdEndpointTokenAndDelegation() {
+        assertThatThrownBy(() -> controller.checkIsGroupMemberByGroupId("wrong-token", 88L))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getCode())
+                .isEqualTo(QuizNestErrorCode.INTERNAL_CALL_UNAUTHORIZED.getCode());
+        verifyNoInteractions(groupFeignService);
+
+        when(groupFeignService.checkIsGroupMemberByGroupId(88L)).thenReturn(true);
+        Result<Boolean> result = controller.checkIsGroupMemberByGroupId(INTERNAL_TOKEN, 88L);
+
+        assertThat(result.getCode()).isEqualTo(200);
+        assertThat(result.getData()).isTrue();
+        verify(groupFeignService).checkIsGroupMemberByGroupId(88L);
+    }
+
+    @Test
     @DisplayName("Feign 契约：类级路径 + 方法级路径与 service-api 完全一致")
     void feignContractMatchesControllerPaths() throws NoSuchMethodException {
         RequestMapping classMapping = GroupFeignController.class.getAnnotation(RequestMapping.class);
         assertThat(classMapping.value()).containsExactly("/api/quiz/internal");
 
-        assertPath("checkIsGroupMember", "/questions/{questionId}/member",
+        assertPath("checkIsGroupMember", new Class<?>[]{String.class, Long.class},
+                "/questions/{questionId}/member",
                 "/api/quiz/internal/questions/{questionId}/member");
-        assertPath("checkIsGroupAdmin", "/questions/{questionId}/admin",
+        assertPath("checkIsGroupAdmin", new Class<?>[]{String.class, Long.class},
+                "/questions/{questionId}/admin",
                 "/api/quiz/internal/questions/{questionId}/admin");
+        assertPath("checkQuestionInGroupAndIsGroupMember",
+                new Class<?>[]{String.class, Long.class, Long.class},
+                "/questions/{questionId}/{groupId}/member",
+                "/api/quiz/internal/questions/{questionId}/{groupId}/member");
+        assertPath("checkIsGroupMemberByGroupId",
+                new Class<?>[]{String.class, Long.class},
+                "/groups/{groupId}/member",
+                "/api/quiz/internal/groups/{groupId}/member");
     }
 
     @Test
@@ -110,6 +156,13 @@ class GroupFeignControllerTest {
         assertThat(GroupFeignController.class
                 .getMethod("checkIsGroupAdmin", String.class, Long.class)
                 .isAnnotationPresent(Skip.class)).isTrue();
+        assertThat(GroupFeignController.class
+                .getMethod("checkQuestionInGroupAndIsGroupMember",
+                        String.class, Long.class, Long.class)
+                .isAnnotationPresent(Skip.class)).isTrue();
+        assertThat(GroupFeignController.class
+                .getMethod("checkIsGroupMemberByGroupId", String.class, Long.class)
+                .isAnnotationPresent(Skip.class)).isTrue();
     }
 
     @Test
@@ -119,21 +172,29 @@ class GroupFeignControllerTest {
         assertThat(feignClient).isNotNull();
         assertThat(feignClient.name()).isEqualTo("service-quiz-nest");
 
-        for (String methodName : new String[]{"checkIsGroupMember", "checkIsGroupAdmin"}) {
+        for (String methodName : new String[]{
+                "checkIsGroupMember", "checkIsGroupAdmin", "checkIsGroupMemberByGroupId"}) {
             Method method = GroupFeignClient.class.getMethod(methodName, String.class, Long.class);
             assertThat(method.getParameterAnnotations()[0])
                     .anyMatch(annotation -> annotation instanceof RequestHeader header
                             && "X-CodeWise-Internal-Token".equals(header.value()));
         }
+
+        Method groupSubmit = GroupFeignClient.class.getMethod(
+                "checkQuestionInGroupAndIsGroupMember", String.class, Long.class, Long.class);
+        assertThat(groupSubmit.getParameterAnnotations()[0])
+                .anyMatch(annotation -> annotation instanceof RequestHeader header
+                        && "X-CodeWise-Internal-Token".equals(header.value()));
     }
 
-    private static void assertPath(String methodName, String controllerPath, String feignPath)
+    private static void assertPath(String methodName, Class<?>[] parameterTypes,
+                                   String controllerPath, String feignPath)
             throws NoSuchMethodException {
         GetMapping controllerMapping = GroupFeignController.class
-                .getMethod(methodName, String.class, Long.class)
+                .getMethod(methodName, parameterTypes)
                 .getAnnotation(GetMapping.class);
         GetMapping feignMapping = GroupFeignClient.class
-                .getMethod(methodName, String.class, Long.class)
+                .getMethod(methodName, parameterTypes)
                 .getAnnotation(GetMapping.class);
         RequestMapping classMapping = GroupFeignController.class.getAnnotation(RequestMapping.class);
 

@@ -8,6 +8,7 @@ import org.example.servicequestion.dto.GetCodeDto;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.service.JudgeService;
 import org.example.servicequestion.service.SubmitRecordService;
+import org.example.servicequestion.vo.MiniGroupSubmitRecordVo;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
@@ -65,6 +66,22 @@ public class JudgeController {
 
             CursorPageResult<SubmitRecord> records = submitRecordService.cursorSubmitRecord(lastId,pageSize);
         return Result.success(records);
+    }
+
+    /**
+     * 小组提交记录游标分页：不区分题目，按提交时间（自增 id）倒序，仅本组 APPROVED 成员可看。
+     *
+     * @param groupId  小组 id
+     * @param lastId   上一页 nextCursor，首页不传
+     * @param pageSize 每页条数，默认 20，上限 50
+     */
+    @GetMapping("/group/{groupId}/submit-records")
+    @RateLimit(limit = 100, window = 60)
+    public Result<CursorPageResult<MiniGroupSubmitRecordVo>> cursorMiniGroupSubmitRecords(
+            @PathVariable Long groupId,
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(required = false) Integer pageSize) {
+        return Result.success(submitRecordService.cursorMiniGroupSubmitRecord(groupId, lastId, pageSize));
     }
 
     @DeleteMapping("/deletesubmitrecord")

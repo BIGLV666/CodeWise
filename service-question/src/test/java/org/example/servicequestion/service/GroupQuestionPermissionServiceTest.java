@@ -214,6 +214,162 @@ class GroupQuestionPermissionServiceTest {
                 () -> permissionService.canMaintainQuestionSamples(question(OWNER_ID)));
     }
 
+    @Test
+    @DisplayName("小组提交：题目在组内且用户是 APPROVED 成员时放行")
+    void groupSubmitAllowedForApprovedMember() {
+        when(groupFeignClient.checkQuestionInGroupAndIsGroupMember(INTERNAL_TOKEN, QUESTION_ID, 88L))
+                .thenReturn(Result.success(true));
+
+        permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L);
+
+        verify(groupFeignClient)
+                .checkQuestionInGroupAndIsGroupMember(INTERNAL_TOKEN, QUESTION_ID, 88L);
+    }
+
+    @Test
+    @DisplayName("小组提交：非组员返回明确权限错误，不再混用 404/资源受限")
+    void groupSubmitRejectsNonMember() {
+        when(groupFeignClient.checkQuestionInGroupAndIsGroupMember(INTERNAL_TOKEN, QUESTION_ID, 88L))
+                .thenReturn(Result.error("不是组员", 4041101));
+
+        assertCode(QuestionErrorCode.GROUP_MEMBER_REQUIRED,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L));
+    }
+
+    @Test
+    @DisplayName("小组提交：题目不在小组返回明确「不在题库」错误")
+    void groupSubmitRejectsQuestionNotInGroup() {
+        when(groupFeignClient.checkQuestionInGroupAndIsGroupMember(INTERNAL_TOKEN, QUESTION_ID, 88L))
+                .thenReturn(Result.error("题目不在小组", 4041104));
+
+        assertCode(QuestionErrorCode.GROUP_QUESTION_NOT_IN_GROUP,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L));
+    }
+
+    @Test
+    @DisplayName("小组提交：下游 data=false 或未知错误码不能误放行")
+    void groupSubmitRejectsFalseDataAndUnknownCode() {
+        when(groupFeignClient.checkQuestionInGroupAndIsGroupMember(INTERNAL_TOKEN, QUESTION_ID, 88L))
+                .thenReturn(Result.success(false))
+                .thenReturn(Result.error("未知错误", 5001101));
+
+        assertCode(QuestionErrorCode.GROUP_MEMBER_REQUIRED,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L));
+        assertCode(CommonErrorCode.DOWNSTREAM_UNAVAILABLE,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L));
+    }
+
+    @Test
+    @DisplayName("小组提交：null code 不得拆箱 NPE，按下游不可用失败")
+    void groupSubmitNullCodeMappedToDownstream() {
+        Result<Boolean> nullCode = Result.success(true);
+        nullCode.setCode(null);
+        when(groupFeignClient.checkQuestionInGroupAndIsGroupMember(INTERNAL_TOKEN, QUESTION_ID, 88L))
+                .thenReturn(null)
+                .thenReturn(nullCode);
+
+        assertCode(CommonErrorCode.DOWNSTREAM_UNAVAILABLE,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L));
+        assertCode(CommonErrorCode.DOWNSTREAM_UNAVAILABLE,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L));
+    }
+
+    @Test
+    @DisplayName("小组提交：Feign 异常保留 cause，按下游不可用失败")
+    void groupSubmitFeignFailureMappedToDownstream() {
+        RuntimeException cause = new RuntimeException("connect timeout");
+        when(groupFeignClient.checkQuestionInGroupAndIsGroupMember(INTERNAL_TOKEN, QUESTION_ID, 88L))
+                .thenThrow(cause);
+
+        assertThatThrownBy(() -> permissionService
+                .assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L))
+                .isInstanceOfSatisfying(BizException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(CommonErrorCode.DOWNSTREAM_UNAVAILABLE.getCode());
+                    assertThat(e.getCause()).isSameAs(cause);
+                });
+    }
+
+    @Test
+    @DisplayName("小组提交：参数非法或未登录时不调用下游")
+    void groupSubmitParamAndLoginChecks() {
+        assertCode(QuestionErrorCode.QUESTION_ID_REQUIRED,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(null, 88L));
+        assertCode(QuestionErrorCode.GROUP_ID_REQUIRED,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, null));
+        assertCode(QuestionErrorCode.GROUP_ID_INVALID,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 0L));
+
+        UserContext.clear();
+        assertCode(CommonErrorCode.LOGIN_REQUIRED,
+                () -> permissionService.assertQuestionInGroupAndIsGroupMember(QUESTION_ID, 88L));
+        verifyNoInteractions(groupFeignClient, userFeignClient);
+    }
+
+    @Test
+    @DisplayName("小组级只读：APPROVED 成员放行")
+    void approvedGroupMemberAllowed() {
+        when(groupFeignClient.checkIsGroupMemberByGroupId(INTERNAL_TOKEN, 88L))
+                .thenReturn(Result.success(true));
+
+        permissionService.assertApprovedGroupMember(88L);
+
+        verify(groupFeignClient).checkIsGroupMemberByGroupId(INTERNAL_TOKEN, 88L);
+    }
+
+    @Test
+    @DisplayName("小组级只读：非组员/data=false 返回查看权限错误")
+    void nonMemberCannotViewGroupRecords() {
+        when(groupFeignClient.checkIsGroupMemberByGroupId(INTERNAL_TOKEN, 88L))
+                .thenReturn(Result.error("不是组员", 4041101))
+                .thenReturn(Result.success(false));
+
+        assertCode(QuestionErrorCode.GROUP_SUBMIT_RECORD_VIEW_FORBIDDEN,
+                () -> permissionService.assertApprovedGroupMember(88L));
+        assertCode(QuestionErrorCode.GROUP_SUBMIT_RECORD_VIEW_FORBIDDEN,
+                () -> permissionService.assertApprovedGroupMember(88L));
+    }
+
+    @Test
+    @DisplayName("小组级只读：null code/未知码按下游不可用失败，不拆箱 NPE")
+    void groupMemberMalformedResponseMappedToDownstream() {
+        Result<Boolean> nullCode = Result.success(true);
+        nullCode.setCode(null);
+        when(groupFeignClient.checkIsGroupMemberByGroupId(INTERNAL_TOKEN, 88L))
+                .thenReturn(null)
+                .thenReturn(nullCode)
+                .thenReturn(Result.error("未知错误", 5001101));
+
+        assertCode(CommonErrorCode.DOWNSTREAM_UNAVAILABLE,
+                () -> permissionService.assertApprovedGroupMember(88L));
+        assertCode(CommonErrorCode.DOWNSTREAM_UNAVAILABLE,
+                () -> permissionService.assertApprovedGroupMember(88L));
+        assertCode(CommonErrorCode.DOWNSTREAM_UNAVAILABLE,
+                () -> permissionService.assertApprovedGroupMember(88L));
+    }
+
+    @Test
+    @DisplayName("小组级只读：Feign 异常保留 cause；参数/登录前置校验不查下游")
+    void groupMemberParamLoginAndFeignFailure() {
+        assertCode(QuestionErrorCode.GROUP_ID_REQUIRED,
+                () -> permissionService.assertApprovedGroupMember(null));
+        assertCode(QuestionErrorCode.GROUP_ID_INVALID,
+                () -> permissionService.assertApprovedGroupMember(0L));
+
+        UserContext.clear();
+        assertCode(CommonErrorCode.LOGIN_REQUIRED,
+                () -> permissionService.assertApprovedGroupMember(88L));
+        verifyNoInteractions(groupFeignClient);
+
+        UserContext.setUserId(USER_ID);
+        RuntimeException cause = new RuntimeException("timeout");
+        when(groupFeignClient.checkIsGroupMemberByGroupId(INTERNAL_TOKEN, 88L)).thenThrow(cause);
+        assertThatThrownBy(() -> permissionService.assertApprovedGroupMember(88L))
+                .isInstanceOfSatisfying(BizException.class, e -> {
+                    assertThat(e.getCode()).isEqualTo(CommonErrorCode.DOWNSTREAM_UNAVAILABLE.getCode());
+                    assertThat(e.getCause()).isSameAs(cause);
+                });
+    }
+
     private void stubGroupMember(boolean member) {
         when(groupFeignClient.checkIsGroupMember(INTERNAL_TOKEN, QUESTION_ID))
                 .thenReturn(Result.success(member));

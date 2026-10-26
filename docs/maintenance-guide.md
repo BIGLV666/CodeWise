@@ -76,6 +76,14 @@ service-question/src/main/resources/sql/function_test_case_unique_hash.sql
 
 如果已有重复用例，唯一键创建会失败，应先查询并人工确认重复数据，禁止无确认直接删除。
 
+小组提交判题索引表已加入新环境的 `question.sql`；已有数据库升级时执行：
+
+```text
+service-question/src/main/resources/sql/migration_20261026_group_submit_record.sql
+```
+
+该脚本使用 `CREATE TABLE IF NOT EXISTS`，在判题入口发布前执行即可，不需要回填历史提交记录。
+
 ## 5. 构建方式
 
 根 `pom.xml` 当前主要承担父依赖管理，没有声明 Maven `modules`。维护时按模块构建，不要使用 `-pl service-question` 从根工程选择模块。

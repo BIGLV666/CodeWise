@@ -9,4 +9,6 @@ public class GetCodeDto {
     private String language;
     private Long questionId;
     private String submitScene;
+    /** 小组提交时必填；普通提交保持为空。 */
+    private Long groupId;
 }

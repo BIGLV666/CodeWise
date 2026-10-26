@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * 私密题目访问权限：创建者 / 小组 APPROVED 成员 / 平台管理员。
@@ -54,6 +55,86 @@ public class GroupQuestionPermissionService {
         this.groupFeignClient = groupFeignClient;
         this.userFeignClient = userFeignClient;
         this.internalToken = internalToken;
+    }
+
+    /**
+     * 小组提交判题前的强制校验：题目必须在该小组题库中，且当前用户是该组的
+     * APPROVED 成员。
+     *
+     * <p>与 {@link #canAccessPrivateQuestion(Question)} 不同，这里不区分题目状态：
+     * 公开题被小组引用后，从小组页面提交同样必须满足小组归属与成员身份，
+     * 否则任何登录用户都能把提交记录写进任意小组。</p>
+     *
+     * @param questionId 题目 id
+     * @param groupId    小组 id
+     * @throws BizException 参数非法、未登录、非组员、题目不在组内或下游不可用
+     */
+    public void assertQuestionInGroupAndIsGroupMember(Long questionId, Long groupId) {
+        if (questionId == null || questionId <= 0) {
+            throw new BizException(QuestionErrorCode.QUESTION_ID_REQUIRED);
+        }
+        if (groupId == null) {
+            throw new BizException(QuestionErrorCode.GROUP_ID_REQUIRED);
+        }
+        if (groupId <= 0) {
+            throw new BizException(QuestionErrorCode.GROUP_ID_INVALID);
+        }
+        requireLogin();
+
+        Result<Boolean> body = invokeDownstream(questionId, "校验小组提交权限",
+                () -> groupFeignClient.checkQuestionInGroupAndIsGroupMember(
+                        internalToken, questionId, groupId));
+        int code = body.getCode();
+        if (code == 200) {
+            if (Boolean.TRUE.equals(body.getData())) {
+                return;
+            }
+            throw new BizException(QuestionErrorCode.GROUP_MEMBER_REQUIRED);
+        }
+        if (code == QUIZ_NOT_GROUP_MEMBER || code == QUIZ_NO_GROUP_PERMISSION) {
+            throw new BizException(QuestionErrorCode.GROUP_MEMBER_REQUIRED);
+        }
+        if (code == QUIZ_GROUP_QUESTION_NOT_FOUND) {
+            throw new BizException(QuestionErrorCode.GROUP_QUESTION_NOT_IN_GROUP);
+        }
+        log.error("校验小组提交权限返回异常: questionId={}, groupId={}, code={}, message={}",
+                questionId, groupId, code, body.getMessage());
+        throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+    }
+
+    /**
+     * 小组级只读接口鉴权：当前用户必须是指定小组的 APPROVED 成员。
+     *
+     * <p>列表类接口没有 questionId，不能复用按题目的权限校验；这里只按 groupId
+     * 回调 quiz-nest，非组员统一返回「无法查看小组提交记录」。</p>
+     *
+     * @param groupId 小组 id
+     * @throws BizException 参数非法、未登录、非组员或下游不可用
+     */
+    public void assertApprovedGroupMember(Long groupId) {
+        if (groupId == null) {
+            throw new BizException(QuestionErrorCode.GROUP_ID_REQUIRED);
+        }
+        if (groupId <= 0) {
+            throw new BizException(QuestionErrorCode.GROUP_ID_INVALID);
+        }
+        requireLogin();
+
+        Result<Boolean> body = invokeDownstream(groupId, "校验小组成员身份",
+                () -> groupFeignClient.checkIsGroupMemberByGroupId(internalToken, groupId));
+        int code = body.getCode();
+        if (code == 200) {
+            if (Boolean.TRUE.equals(body.getData())) {
+                return;
+            }
+            throw new BizException(QuestionErrorCode.GROUP_SUBMIT_RECORD_VIEW_FORBIDDEN);
+        }
+        if (code == QUIZ_NOT_GROUP_MEMBER || code == QUIZ_NO_GROUP_PERMISSION) {
+            throw new BizException(QuestionErrorCode.GROUP_SUBMIT_RECORD_VIEW_FORBIDDEN);
+        }
+        log.error("校验小组成员身份返回异常: groupId={}, code={}, message={}",
+                groupId, code, body.getMessage());
+        throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
     }
 
     /**
@@ -122,17 +203,28 @@ public class GroupQuestionPermissionService {
      * @throws BizException 下游异常、响应结构不完整或未知错误码
      */
     private Boolean queryGroupMembership(Long questionId) {
-        Result<Boolean> body;
-        try {
-            body = groupFeignClient.checkIsGroupMember(internalToken, questionId);
-        } catch (Exception e) {
-            log.error("查询小组题目权限失败: questionId={}", questionId, e);
-            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE, e);
-        }
-        if (body == null || body.getCode() == null) {
-            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
-        }
+        return queryGroupAccess(questionId, "查询小组题目权限",
+                () -> groupFeignClient.checkIsGroupMember(internalToken, questionId));
+    }
 
+    /**
+     * 查询用户是否为小组管理员。
+     *
+     * @return true=组内 ROOT/ADMIN；false=明确无权限（非组员、题目不在小组、平台题）
+     * @throws BizException 下游异常、响应结构不完整或未知错误码
+     */
+    private boolean queryGroupAdmin(Long questionId) {
+        return Boolean.TRUE.equals(queryGroupAccess(questionId, "查询小组题目维护权限",
+                () -> groupFeignClient.checkIsGroupAdmin(internalToken, questionId)));
+    }
+
+    /**
+     * 统一解析 quiz-nest 的权限查询结果：把「明确拒绝」折叠成 false、
+     * 「题目不在小组」折叠成 null，其余异常一律按下游不可用失败。
+     */
+    private Boolean queryGroupAccess(Long questionId, String action,
+                                     Supplier<Result<Boolean>> call) {
+        Result<Boolean> body = invokeDownstream(questionId, action, call);
         int code = body.getCode();
         if (code == 200) {
             if (body.getData() == null) {
@@ -146,44 +238,28 @@ public class GroupQuestionPermissionService {
         if (code == QUIZ_GROUP_QUESTION_NOT_FOUND) {
             return null;
         }
-        log.error("查询小组题目权限返回异常: questionId={}, code={}, message={}",
-                questionId, code, body.getMessage());
+        log.error("{}返回异常: questionId={}, code={}, message={}",
+                action, questionId, code, body.getMessage());
         throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
     }
 
     /**
-     * 查询用户是否为小组管理员。
-     *
-     * @return true=组内 ROOT/ADMIN；false=明确无权限（非组员、题目不在小组、平台题）
-     * @throws BizException 下游异常、响应结构不完整或未知错误码
+     * 调用下游并保证响应结构可用：Feign 异常、null 响应、null code 统一按
+     * {@link CommonErrorCode#DOWNSTREAM_UNAVAILABLE} 失败，避免调用点拆箱 NPE。
      */
-    private boolean queryGroupAdmin(Long questionId) {
-        Result<Boolean> body;
+    private <T> Result<T> invokeDownstream(Long targetId, String action,
+                                           Supplier<Result<T>> call) {
+        Result<T> body;
         try {
-            body = groupFeignClient.checkIsGroupAdmin(internalToken, questionId);
+            body = call.get();
         } catch (Exception e) {
-            log.error("查询小组题目维护权限失败: questionId={}", questionId, e);
+            log.error("{}失败: targetId={}", action, targetId, e);
             throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE, e);
         }
         if (body == null || body.getCode() == null) {
             throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
-
-        int code = body.getCode();
-        if (code == 200) {
-            if (body.getData() == null) {
-                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
-            }
-            return body.getData();
-        }
-        if (code == QUIZ_NOT_GROUP_MEMBER
-                || code == QUIZ_GROUP_QUESTION_NOT_FOUND
-                || code == QUIZ_NO_GROUP_PERMISSION) {
-            return false;
-        }
-        log.error("查询小组题目维护权限返回异常: questionId={}, code={}, message={}",
-                questionId, code, body.getMessage());
-        throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+        return body;
     }
 
     /**
@@ -192,14 +268,9 @@ public class GroupQuestionPermissionService {
      * <p>用户服务不可用时必须按下游异常失败，不能把管理员误判成普通用户而误拒。</p>
      */
     private boolean isPlatformAdmin(Long userId) {
-        Result<UserDto> body;
-        try {
-            body = userFeignClient.getUserInfo(userId);
-        } catch (Exception e) {
-            log.error("查询用户角色失败: userId={}", userId, e);
-            throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE, e);
-        }
-        if (body == null || body.getCode() == null || body.getCode() != 200) {
+        Result<UserDto> body = invokeDownstream(userId, "查询用户角色",
+                () -> userFeignClient.getUserInfo(userId));
+        if (body.getCode() != 200) {
             throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
         }
         if (body.getData() == null) {

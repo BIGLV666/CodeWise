@@ -58,6 +58,30 @@ public class GroupFeignController {
         return Result.success(groupFeignService.checkIsGroupAdmin(questionId));
     }
 
+    /**
+     * 小组提交判题：题目在该小组题库中，且当前用户是该组 APPROVED 成员。
+     */
+    @GetMapping("/questions/{questionId}/{groupId}/member")
+    @Skip(reason = "系统内部端点（service-question 校验小组提交权限经 Feign 调用），鉴权依赖 X-CodeWise-Internal-Token 校验，不参与限流")
+    public Result<Boolean> checkQuestionInGroupAndIsGroupMember(
+            @RequestHeader("X-CodeWise-Internal-Token") String requestToken,
+            @PathVariable("questionId") Long questionId,
+            @PathVariable("groupId") Long groupId) {
+        checkInternalToken(requestToken);
+        return Result.success(groupFeignService.checkQuestionInGroupAndIsGroupMember(questionId, groupId));
+    }
+
+    /**
+     * 小组级只读接口鉴权：当前用户是否为该组 APPROVED 成员。
+     */
+    @GetMapping("/groups/{groupId}/member")
+    @Skip(reason = "系统内部端点（service-question 校验小组成员身份经 Feign 调用），鉴权依赖 X-CodeWise-Internal-Token 校验，不参与限流")
+    public Result<Boolean> checkIsGroupMemberByGroupId(
+            @RequestHeader("X-CodeWise-Internal-Token") String requestToken,
+            @PathVariable("groupId") Long groupId) {
+        checkInternalToken(requestToken);
+        return Result.success(groupFeignService.checkIsGroupMemberByGroupId(groupId));
+    }
     /** 内部调用凭证必须与服务配置一致；不一致统一按无权限拒绝。 */
     private void checkInternalToken(String requestToken) {
         if (!internalToken.equals(requestToken)) {

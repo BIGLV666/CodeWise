@@ -7,13 +7,16 @@ import org.example.servicecommon.RedisDto.DebugDto;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
 import org.example.servicequestion.dto.GetCodeDto;
+import org.example.servicequestion.entry.GroupSubmitRecord;
 import org.example.servicequestion.entry.Question;
 import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.exception.QuestionErrorCode;
+import org.example.servicequestion.mapper.GroupSubmitRecordMapper;
 import org.example.servicequestion.mapper.QuestionMapper;
 import org.example.servicequestion.mapper.SubmitRecordMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,8 +37,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -44,17 +50,21 @@ import static org.mockito.Mockito.when;
  * JudgeService 事务性 Outbox（OutboxPro）单测：
  * 提交/调试不再直接发 MQ，改为在事务内 publish Outbox 事件（路由由 EventRegistry 解析）。
  *
- * <p>新增的题目可见性判断依赖 {@link QuestionMapper} 与
- * {@link GroupQuestionPermissionService}，测试必须为它们提供替身；否则
- * {@code questionMapper} 为 null 会直接 NPE。</p>
+ * <p>新增的小组提交必须同时满足「题目在组内 + 用户是组员」，即使是公开题也不能
+ * 绕过；本测试覆盖参数、权限、事务回滚与小组索引写入。</p>
  */
 @ExtendWith(MockitoExtension.class)
 class JudgeServiceTest {
 
     private static final long QUESTION_ID = 5L;
+    private static final long GROUP_ID = 88L;
+    private static final long USER_ID = 42L;
 
     @Mock
     private SubmitRecordMapper submitRecordMapper;
+
+    @Mock
+    private GroupSubmitRecordMapper groupSubmitRecordMapper;
 
     @Mock
     private OutboxProPublisher outboxPublisher;
@@ -79,7 +89,7 @@ class JudgeServiceTest {
 
     @BeforeEach
     void setUp() {
-        UserContext.setUserId(42L);
+        UserContext.setUserId(USER_ID);
         // 默认题目为公开题；需要私密题的用例自行覆盖
         lenient().when(questionMapper.selectById(QUESTION_ID)).thenReturn(question(1));
         // 真实事务模板会执行回调；单测用替身模拟执行，并允许用例覆盖以捕获回滚状态
@@ -109,6 +119,7 @@ class JudgeServiceTest {
         verify(submitRecordMapper).insert(captor.capture());
         assertEquals(scene, captor.getValue().getSubmitScene());
         verify(outboxPublisher).publish(EventTypes.JUDGE_SUBMIT_REQUEST, 900L);
+        verifyNoInteractions(groupSubmitRecordMapper);
     }
 
     @Test
@@ -119,7 +130,7 @@ class JudgeServiceTest {
         assertEquals(QuestionErrorCode.SUBMIT_SCENE_UNSUPPORTED.getCode(), exception.getCode());
         // 场景校验先于题目查询/小组 Feign，非法请求不产生任何 IO
         verifyNoInteractions(questionMapper, groupQuestionPermissionService,
-                submitRecordMapper, outboxPublisher);
+                submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
     }
 
     @Test
@@ -148,7 +159,15 @@ class JudgeServiceTest {
                 () -> judgeService.judge(getCodeDto));
         assertEquals(QuestionErrorCode.SUBMIT_SCENE_REQUIRED.getCode(), exception.getCode());
         verifyNoInteractions(questionMapper, groupQuestionPermissionService,
-                submitRecordMapper, outboxPublisher);
+                submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
+    }
+
+    @Test
+    void judgeRejectsNullRequest() {
+        BizException exception = assertThrows(BizException.class, () -> judgeService.judge(null));
+
+        assertEquals(CommonErrorCode.PARAM_MISSING.getCode(), exception.getCode());
+        verifyNoInteractions(questionMapper, submitRecordMapper, outboxPublisher);
     }
 
     @Test
@@ -158,8 +177,8 @@ class JudgeServiceTest {
         BizException exception = assertThrows(BizException.class,
                 () -> judgeService.judge(request("NORMAL")));
 
-        assertEquals(CommonErrorCode.RESOURCE_NOT_FOUND.getCode(), exception.getCode());
-        verifyNoInteractions(submitRecordMapper, outboxPublisher);
+        assertEquals(QuestionErrorCode.QUESTION_NOT_FOUND.getCode(), exception.getCode());
+        verifyNoInteractions(submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
     }
 
     @Test
@@ -185,24 +204,176 @@ class JudgeServiceTest {
                 () -> judgeService.judge(request("NORMAL")));
 
         assertEquals(CommonErrorCode.RESOURCE_NOT_FOUND.getCode(), exception.getCode());
-        verifyNoInteractions(submitRecordMapper, outboxPublisher);
+        verifyNoInteractions(submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
     }
 
     @Test
     void judgeMapsInsertFailureToBusinessErrorAndMarksRollback() {
-        TransactionStatus status = mock(TransactionStatus.class);
-        org.mockito.Mockito.doAnswer(invocation -> {
-            TransactionCallback<?> callback = invocation.getArgument(0);
-            return callback.doInTransaction(status);
-        }).when(transactionTemplate).execute(any());
+        TransactionStatus status = captureRollbackStatus();
         when(submitRecordMapper.insert(any(SubmitRecord.class))).thenReturn(0);
 
         BizException exception = assertThrows(BizException.class,
                 () -> judgeService.judge(request("NORMAL")));
 
-        assertEquals(QuestionErrorCode.JUDGE_SERVICE_UNAVAILABLE.getCode(), exception.getCode());
+        assertEquals(QuestionErrorCode.SUBMIT_RECORD_SAVE_FAILED.getCode(), exception.getCode());
         verify(status).setRollbackOnly();
         verifyNoInteractions(outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("insert 成功但未回填主键：按保存失败回滚，不能发布空 id 事件")
+    void judgeRejectsInsertWithoutGeneratedId() {
+        TransactionStatus status = captureRollbackStatus();
+        when(submitRecordMapper.insert(any(SubmitRecord.class))).thenReturn(1);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("NORMAL")));
+
+        assertEquals(QuestionErrorCode.SUBMIT_RECORD_SAVE_FAILED.getCode(), exception.getCode());
+        verify(status).setRollbackOnly();
+        verifyNoInteractions(outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("小组提交：缺 groupId 直接拒绝，不查库、不调用 Feign")
+    void groupSubmitRejectsMissingGroupId() {
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("GROUP")));
+
+        assertEquals(QuestionErrorCode.GROUP_ID_REQUIRED.getCode(), exception.getCode());
+        verifyNoInteractions(questionMapper, groupQuestionPermissionService,
+                submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("小组提交：非法 groupId 直接拒绝")
+    void groupSubmitRejectsInvalidGroupId() {
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("GROUP", 0L)));
+
+        assertEquals(QuestionErrorCode.GROUP_ID_INVALID.getCode(), exception.getCode());
+        verifyNoInteractions(questionMapper, submitRecordMapper, outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("传了 groupId 却不是 GROUP 场景：拒绝，不能静默按普通提交落库")
+    void groupSubmitRejectsSceneMismatch() {
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("NORMAL", GROUP_ID)));
+
+        assertEquals(QuestionErrorCode.GROUP_SUBMIT_SCENE_REQUIRED.getCode(), exception.getCode());
+        verifyNoInteractions(questionMapper, submitRecordMapper, outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("公开题小组提交：仍然必须校验小组归属与成员身份")
+    void groupSubmitRequiresMembershipEvenForPublicQuestion() {
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(question(1));
+        doThrow(new BizException(QuestionErrorCode.GROUP_MEMBER_REQUIRED))
+                .when(groupQuestionPermissionService)
+                .assertQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("GROUP", GROUP_ID)));
+
+        assertEquals(QuestionErrorCode.GROUP_MEMBER_REQUIRED.getCode(), exception.getCode());
+        // 公开题不能因为 status=1 就跳过小组校验
+        verify(groupQuestionPermissionService)
+                .assertQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID);
+        verify(groupQuestionPermissionService, never()).canAccessPrivateQuestion(any());
+        verifyNoInteractions(submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("题目不在小组：透传权限错误，不写任何记录")
+    void groupSubmitRejectsQuestionNotInGroup() {
+        doThrow(new BizException(QuestionErrorCode.GROUP_QUESTION_NOT_IN_GROUP))
+                .when(groupQuestionPermissionService)
+                .assertQuestionInGroupAndIsGroupMember(QUESTION_ID, GROUP_ID);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("GROUP", GROUP_ID)));
+
+        assertEquals(QuestionErrorCode.GROUP_QUESTION_NOT_IN_GROUP.getCode(), exception.getCode());
+        verifyNoInteractions(submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("小组提交成功：submit_record + group_submit_record + Outbox 同一事务")
+    void groupSubmitWritesIndexAndPublishesOutbox() {
+        when(submitRecordMapper.insert(any(SubmitRecord.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, SubmitRecord.class).setSubmitRecordId(902L);
+            return 1;
+        });
+        when(groupSubmitRecordMapper.insert(any(GroupSubmitRecord.class))).thenReturn(1);
+
+        assertEquals(902L, judgeService.judge(request("GROUP", GROUP_ID)));
+
+        ArgumentCaptor<GroupSubmitRecord> captor = ArgumentCaptor.forClass(GroupSubmitRecord.class);
+        verify(groupSubmitRecordMapper).insert(captor.capture());
+        GroupSubmitRecord index = captor.getValue();
+        assertEquals(902L, index.getSubmitRecordId());
+        assertEquals(USER_ID, index.getUserId());
+        assertEquals(GROUP_ID, index.getGroupId());
+        assertNotNull(index.getCreateTime());
+        verify(outboxPublisher).publish(EventTypes.JUDGE_SUBMIT_REQUEST, 902L);
+    }
+
+    @Test
+    @DisplayName("小组索引写入失败：整个事务回滚，且不发布判题事件")
+    void groupSubmitRollsBackWhenIndexInsertFails() {
+        TransactionStatus status = captureRollbackStatus();
+        when(submitRecordMapper.insert(any(SubmitRecord.class))).thenAnswer(invocation -> {
+            invocation.getArgument(0, SubmitRecord.class).setSubmitRecordId(903L);
+            return 1;
+        });
+        when(groupSubmitRecordMapper.insert(any(GroupSubmitRecord.class))).thenReturn(0);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("GROUP", GROUP_ID)));
+
+        assertEquals(QuestionErrorCode.GROUP_SUBMIT_RECORD_SAVE_FAILED.getCode(), exception.getCode());
+        verify(status).setRollbackOnly();
+        verifyNoInteractions(outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("小组题目下架/审核中：即使有权限也不能提交")
+    void groupSubmitRejectsOffShelfAndUnderReviewQuestions() {
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(question(0));
+        BizException offShelf = assertThrows(BizException.class,
+                () -> judgeService.judge(request("GROUP", GROUP_ID)));
+        assertEquals(QuestionErrorCode.QUESTION_OFF_SHELF.getCode(), offShelf.getCode());
+
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(question(2));
+        BizException underReview = assertThrows(BizException.class,
+                () -> judgeService.judge(request("GROUP", GROUP_ID)));
+        assertEquals(QuestionErrorCode.QUESTION_UNDER_REVIEW.getCode(), underReview.getCode());
+        verifyNoInteractions(submitRecordMapper, groupSubmitRecordMapper, outboxPublisher);
+    }
+
+    @Test
+    @DisplayName("事务回调返回 null：按判题服务不可用兜底")
+    void judgeMapsNullTransactionResultToUnavailable() {
+        doReturn(null).when(transactionTemplate).execute(any());
+
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("NORMAL")));
+
+        assertEquals(QuestionErrorCode.JUDGE_SERVICE_UNAVAILABLE.getCode(), exception.getCode());
+    }
+
+    @Test
+    @DisplayName("事务执行抛非业务异常：回滚并保留 cause")
+    void judgeWrapsUnexpectedTransactionFailure() {
+        RuntimeException cause = new RuntimeException("db down");
+        org.mockito.Mockito.doThrow(cause).when(transactionTemplate).execute(any());
+
+        BizException exception = assertThrows(BizException.class,
+                () -> judgeService.judge(request("NORMAL")));
+
+        assertEquals(QuestionErrorCode.JUDGE_SERVICE_UNAVAILABLE.getCode(), exception.getCode());
+        assertEquals(cause, exception.getCause());
     }
 
     @Test
@@ -224,13 +395,44 @@ class JudgeServiceTest {
                 eq(uuid));
     }
 
+    @Test
+    void debugRejectsNullRequest() {
+        BizException exception = assertThrows(BizException.class, () -> judgeService.debug(null));
+        assertEquals(CommonErrorCode.PARAM_MISSING.getCode(), exception.getCode());
+    }
+
+    @Test
+    void debugRejectsMissingQuestion() {
+        when(questionMapper.selectById(QUESTION_ID)).thenReturn(null);
+        DebugDto debugDto = new DebugDto();
+        debugDto.setQuestionId(QUESTION_ID);
+
+        BizException exception = assertThrows(BizException.class, () -> judgeService.debug(debugDto));
+        assertEquals(QuestionErrorCode.QUESTION_NOT_FOUND.getCode(), exception.getCode());
+        verifyNoInteractions(redisTemplate, outboxPublisher);
+    }
+
+    private TransactionStatus captureRollbackStatus() {
+        TransactionStatus status = mock(TransactionStatus.class);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(status);
+        }).when(transactionTemplate).execute(any());
+        return status;
+    }
+
     private static GetCodeDto request(String scene) {
+        return request(scene, null);
+    }
+
+    private static GetCodeDto request(String scene, Long groupId) {
         GetCodeDto dto = new GetCodeDto();
         dto.setCode("print(1)");
         dto.setLanguage("Python");
         dto.setQuestionId(QUESTION_ID);
         dto.setQuestionTitle("两数之和");
         dto.setSubmitScene(scene);
+        dto.setGroupId(groupId);
         return dto;
     }
 

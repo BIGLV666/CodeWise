@@ -439,7 +439,8 @@ Content-Type: application/json
 | `language` | `String` | 是 | 语言标识 |
 | `questionId` | `Long` | 是 | 题目 ID，为空报「题目不存在或已被删除」（`4040201`） |
 | `questionTitle` | `String` | 否 | 题目标题，冗余写入提交记录 |
-| `submitScene` | `String` | 是 | 提交场景：`NORMAL` / `REVIEW` / `PLAN` |
+| `submitScene` | `String` | 是 | 提交场景：`NORMAL` / `REVIEW` / `PLAN` / `GROUP` |
+| `groupId` | `Long` | 小组提交必填 | 小组 id；`submitScene=GROUP` 时必填，其他场景不得传 |
 
 返回：`Result<Long>`，`data` 为 `submitRecordId`。
 
@@ -449,6 +450,23 @@ Content-Type: application/json
 - `submitScene` 缺失或为空白时报业务错误「提交类型不能为空，请刷新后重试」（`4000207`），不在枚举内的值报「不支持该提交类型，请刷新后重试」（`4000208`）（服务端先校验再进入归一化，不会再因缺字段抛 NPE 得到 500）。
 - `userId` 取自 `UserContext`；提交记录以 `judge_status=pending` 落库，判题请求事件（`EventTypes.JUDGE_SUBMIT_REQUEST`，载荷仅 `submitRecordId`）经 OutboxPro 与插入同事务登记，由 Relay 投递到 `MqContexts.JUDGE_EXCHANGE` / `JUDGE_ROUTING_KEY`。
 - 判题结果异步处理，前端可通过提交记录接口或 WebSocket 获取后续状态（异步链路见文末“提交与判题异步链路”一节）。
+
+**小组提交（`submitScene=GROUP`）**：
+
+```json
+{
+  "code": "print(input())",
+  "language": "python",
+  "questionId": 1,
+  "questionTitle": "A+B Problem",
+  "submitScene": "GROUP",
+  "groupId": 88
+}
+```
+
+- `groupId` 为空报 `4000238`，非正数报 `4000239`；非 `GROUP` 场景却传了 `groupId` 报 `4000240`，避免 groupId 被静默忽略。
+- 无论题目是否公开，都必须同时满足「题目在该小组题库中」和「当前用户是该组 APPROVED 成员」：非组员报 `4030204`，题目不在该组报 `4040209`；小组提交额外写入 `group_submit_record` 索引。
+- 提交记录、小组索引与判题 Outbox 事件在同一事务内写入，任一步失败整体回滚。
 
 ### 自定义调试
 
@@ -512,6 +530,33 @@ Authorization: Bearer <token>
 说明：不需要传 `userId`，服务从登录态读取当前用户。按提交记录 ID **倒序**游标分页（`id < lastId`），第一页不传 `lastId`，后续页传上一页的 `nextCursor`。
 
 返回：`Result<CursorPageResult<SubmitRecord>>`（字段见游标分页查询题目一节）。
+
+### 查询小组提交记录
+
+```http
+GET /api/question/group/88/submit-records?lastId=100&pageSize=20
+Authorization: Bearer <token>
+```
+
+说明：
+
+- 仅该小组的 APPROVED 成员可查看，非组员报「您不是该小组成员，无法查看小组提交记录」（`4030205`）；`groupId` 为空/非正数报 `4000238` / `4000239`。
+- 不按题目过滤，返回该小组全部提交记录；按 `group_submit_record_id` **倒序**（自增主键与提交时间同序）游标分页，第一页不传 `lastId`，后续页传上一页的 `nextCursor`。
+- `pageSize` 为空/非正数取 20，超过 50 截断。
+- 服务端每页只做一次 `submit_record` 批量查询和一次用户信息批量查询，不逐条调用；用户已注销时昵称/头像返回 `null`。
+- 提交记录已不存在的孤儿小组索引会跳过输出，但游标仍按原索引推进，不会重复或卡死。
+
+返回：`Result<CursorPageResult<MiniGroupSubmitRecordVo>>`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `groupSubmitRecordId` | `Long` | 小组提交记录 id |
+| `submitRecordId` | `Long` | 提交记录 id |
+| `questionId` | `Long` | 题目 id |
+| `questionTitle` | `String` | 题目标题 |
+| `nickName` | `String` | 昵称，缺失时回退用户名；用户已删除时为 `null` |
+| `avatarUrl` | `String` | 头像 |
+| `status` | `String` | 判题状态 |
 
 ### 批量查询提交记录
 

@@ -55,11 +55,16 @@ public enum QuestionErrorCode implements ErrorCode {
     BATCH_IMPORT_LIMIT_EXCEEDED(4000235, "单次最多导入 %s 道题目，请分批提交"),
     BATCH_IMPORT_ITEM_INCOMPLETE(4000236, "第 %s 道题的导入信息不完整，请检查标题、函数签名与解法代码"),
     SAMPLE_PROMOTE_COUNT_INVALID(4000237, "提升为样例的数量需在 %s 到 %s 之间"),
+    GROUP_ID_REQUIRED(4000238, "小组 ID 不能为空"),
+    GROUP_ID_INVALID(4000239, "小组 ID 有误，请刷新后重试"),
+    GROUP_SUBMIT_SCENE_REQUIRED(4000240, "小组提交请使用小组提交类型，请刷新后重试"),
 
     // ---- 权限/可见性（403，账号状态语义为本服务自有）----
     ACCOUNT_UNAVAILABLE(4030201, "当前账号不可用，请联系管理员"),
     INTERNAL_CALL_UNAUTHORIZED(4030202, "无权调用内部接口"),
     GROUP_QUESTION_UPDATE_FORBIDDEN(4030203, "仅小组自建题目支持修改"),
+    GROUP_MEMBER_REQUIRED(4030204, "您不是该小组成员，无法在该小组提交题目"),
+    GROUP_SUBMIT_RECORD_VIEW_FORBIDDEN(4030205, "您不是该小组成员，无法查看小组提交记录"),
 
 
     // ---- 资源不存在（404，按对象类型区分归属）----
@@ -71,6 +76,7 @@ public enum QuestionErrorCode implements ErrorCode {
     GENERATION_TASK_NOT_FOUND(4040206, "生成任务不存在或已过期，请重新发起"),
     USER_NOT_FOUND(4040207, "用户信息不存在或已被删除"),
     DEBUG_RECORD_NOT_FOUND(4040208, "调试任务不存在或已过期"),
+    GROUP_QUESTION_NOT_IN_GROUP(4040209, "该题目不在当前小组题库中，无法提交"),
 
     // ---- 状态冲突/重复（409）----
     QUESTION_OFF_SHELF(4090201, "该题目已下架，暂时无法访问"),
@@ -100,7 +106,9 @@ public enum QuestionErrorCode implements ErrorCode {
     QUESTION_IMPORT_FAILED(5000215, "题目导入失败，请稍后重试"),
     QUESTION_COUNT_UPDATE_FAILED(5000216, "题目统计更新失败，稍后将自动重试"),
     DESCRIPTION_GENERATE_FAILED(5000217, "题面生成失败，请稍后重试或直接补充题面后再导入"),
-    DELETE_GROUP_QUESTION_FAILED(5000218,"小组题目删除失败"),
+    DELETE_GROUP_QUESTION_FAILED(5000218, "小组题目删除失败，请稍后重试"),
+    SUBMIT_RECORD_SAVE_FAILED(5000219, "提交记录保存失败，请稍后重试"),
+    GROUP_SUBMIT_RECORD_SAVE_FAILED(5000220, "小组提交记录保存失败，请稍后重试"),
     ;
 
     private final int code;
