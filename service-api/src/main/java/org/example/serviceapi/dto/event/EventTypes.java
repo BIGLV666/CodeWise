@@ -51,4 +51,9 @@ public final class EventTypes {
 
     /** 小组题库清理：quiz-nest -> question，payload 为 GroupQuestionCleanupDto（最后一名成员退出删组时清理自建题目） */
     public static final String GROUP_QUESTION_CLEANUP = "GROUP_QUESTION_CLEANUP";
+    /**小组广播发送:quiz-nest->message payload 为{@link org.example.serviceapi.dto.quizNest.BroadCast}*/
+    public static final String GROUP_BROADCAST="GROUP_BROADCAST";
+    /**小组审批结果推送:quiz-nest->message payload 为{@link org.example.serviceapi.dto.quizNest.ApproveResult}*/
+    public static final String GROUP_APPROVAL_RESULT="GROUP_APPROVAL_RESULT";
+
 }

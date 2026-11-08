@@ -1,8 +1,11 @@
 package com.example.servicequiznest.config;
 
+import com.example.servicequiznest.entity.GroupMember;
 import org.example.serviceapi.dto.event.EventTypes;
 import org.example.serviceapi.dto.question.GroupQuestionCleanupDto;
 import org.example.serviceapi.dto.question.QuestionRollbackDto;
+import org.example.serviceapi.dto.quizNest.ApproveResult;
+import org.example.serviceapi.dto.quizNest.BroadCast;
 import org.example.serviceapi.dto.quizNest.JoinToken;
 import org.example.servicecommon.config.MqContexts;
 import org.outboxpro.core.event.EventDefinition;
@@ -53,4 +56,23 @@ public class OutboxEventRouteConfig {
                 .route(MqContexts.Question_EXCHANGE, MqContexts.QUESTION_GROUP_CLEANUP_ROUTING_KEY)
                 .build();
     }
+    @Bean
+    public  EventDefinition<BroadCast> groupBroadcast() {
+        return EventDefinition.<BroadCast>builder()
+                .eventType(EventTypes.GROUP_BROADCAST)
+                .payloadType(BroadCast.class)
+                .route(MqContexts.NOTIFICATION_EXCHANGE,MqContexts.NOTIFICATION_BROADCAST_ROUTING_KEY)
+                .build();
+    }
+
+    @Bean
+    public EventDefinition<ApproveResult>groupApproveResult(){
+        return EventDefinition.<ApproveResult>builder()
+                .eventType(EventTypes.GROUP_APPROVAL_RESULT)
+                .payloadType(ApproveResult.class)
+                .route(MqContexts.NOTIFICATION_EXCHANGE,MqContexts.NOTIFICATION_APPROVE_RESULT_ROUTING_KEY)
+                .build();
+    }
+
+
 }

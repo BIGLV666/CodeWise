@@ -240,6 +240,59 @@ class SubmitRecordServiceTest {
         assertThat(SubmitRecordService.normalizePageSize(100)).isEqualTo(50);
     }
 
+    // ---------- 提交详情 ----------
+
+    @Test
+    @DisplayName("提交详情：作者本人直接可见，不触发组员校验（退组后仍可看自己的代码）")
+    void groupSubmitRecord_ownerCanViewOwnCode() {
+        when(groupSubmitRecordMapper.selectById(500L)).thenReturn(groupRecord(500L, 50L, USER_ID));
+        when(submitRecordMapper.selectById(50L)).thenReturn(submitRecord(50L, 7L, USER_ID));
+
+        SubmitRecord record = submitRecordService.getGroupSubmitRecord(500L);
+
+        assertThat(record.getSubmitRecordId()).isEqualTo(50L);
+        verifyNoInteractions(groupQuestionPermissionService);
+    }
+
+    @Test
+    @DisplayName("提交详情：同组 APPROVED 成员可查看其他成员的代码")
+    void groupSubmitRecord_memberCanViewOthersCode() {
+        when(groupSubmitRecordMapper.selectById(500L)).thenReturn(groupRecord(500L, 50L, 99L));
+        when(submitRecordMapper.selectById(50L)).thenReturn(submitRecord(50L, 7L, 99L));
+
+        SubmitRecord record = submitRecordService.getGroupSubmitRecord(500L);
+
+        assertThat(record.getSubmitRecordId()).isEqualTo(50L);
+        verify(groupQuestionPermissionService).assertApprovedGroupMember(GROUP_ID);
+    }
+
+    @Test
+    @DisplayName("提交详情：非组员被拒绝，不返回代码")
+    void groupSubmitRecord_nonMemberRejected() {
+        when(groupSubmitRecordMapper.selectById(500L)).thenReturn(groupRecord(500L, 50L, 99L));
+        when(submitRecordMapper.selectById(50L)).thenReturn(submitRecord(50L, 7L, 99L));
+        doThrow(new BizException(QuestionErrorCode.GROUP_SUBMIT_RECORD_VIEW_FORBIDDEN))
+                .when(groupQuestionPermissionService).assertApprovedGroupMember(GROUP_ID);
+
+        assertThatThrownBy(() -> submitRecordService.getGroupSubmitRecord(500L))
+                .isInstanceOfSatisfying(BizException.class, e ->
+                        assertThat(e.getCode())
+                                .isEqualTo(QuestionErrorCode.GROUP_SUBMIT_RECORD_VIEW_FORBIDDEN.getCode()));
+    }
+
+    @Test
+    @DisplayName("提交详情：索引或提交记录缺失返回资源不存在")
+    void groupSubmitRecord_missingRecordReturnsNotFound() {
+        assertThatThrownBy(() -> submitRecordService.getGroupSubmitRecord(500L))
+                .isInstanceOfSatisfying(BizException.class, e ->
+                        assertThat(e.getCode()).isEqualTo(CommonErrorCode.RESOURCE_NOT_FOUND.getCode()));
+
+        when(groupSubmitRecordMapper.selectById(500L)).thenReturn(groupRecord(500L, 50L, USER_ID));
+        assertThatThrownBy(() -> submitRecordService.getGroupSubmitRecord(500L))
+                .isInstanceOfSatisfying(BizException.class, e ->
+                        assertThat(e.getCode()).isEqualTo(CommonErrorCode.RESOURCE_NOT_FOUND.getCode()));
+    }
+
     private static GroupSubmitRecord groupRecord(long groupSubmitRecordId,
                                                 long submitRecordId,
                                                 long userId) {

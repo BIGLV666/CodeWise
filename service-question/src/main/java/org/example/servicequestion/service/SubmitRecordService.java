@@ -236,11 +236,11 @@ public class SubmitRecordService {
     /**
      * 同组成员查看具体提交记录
      * <B>只需要校验该用户为小组成员或者该用户即为创作者本身</B>
-     * @param groupQuestionId 小组记录索引
+     * @param groupSubmitRecordId 小组提交索引 ID（group_submit_record 主键）
      */
 
-    public SubmitRecord getGroupSubmitRecord(Long groupQuestionId){
-        GroupSubmitRecord groupSubmitRecord = groupSubmitRecordMapper.selectById(groupQuestionId);
+    public SubmitRecord getGroupSubmitRecord(Long groupSubmitRecordId){
+        GroupSubmitRecord groupSubmitRecord = groupSubmitRecordMapper.selectById(groupSubmitRecordId);
         if (groupSubmitRecord == null) throw new BizException(CommonErrorCode.RESOURCE_NOT_FOUND);
         //先查询记录，如果先鉴权会把退出小组的提交者本身拦住
         SubmitRecord submitRecord=submitRecordMapper.selectById(groupSubmitRecord.getSubmitRecordId());

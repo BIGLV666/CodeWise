@@ -15,6 +15,16 @@
           and join_status &lt;&gt; 'APPROVED'
     </update>
 
+    <update id="approveTOREJECTED">
+        update group_member
+        set join_status = 'REJECTED',
+            join_time = coalesce(join_time, CURRENT_TIMESTAMP()),
+            update_time = CURRENT_TIMESTAMP()
+        where group_id = #{groupId}
+          and user_id = #{userId}
+          and join_status ='PENDING'
+    </update>
+
     <!-- 被拒绝后重新申请：只允许 REJECTED -> PENDING，避免覆盖并发通过的 APPROVED -->
     <update id="reapplyRejectedMember">
         update group_member
@@ -24,4 +34,53 @@
           and user_id = #{userId}
           and join_status = 'REJECTED'
     </update>
+
+    <!-- 我的小组列表。UserGroup 是 record（无无参构造器），必须用构造器结果映射；
+         role 显式指定 EnumTypeHandler，按枚举 name() 读取，与写入口径一致。 -->
+    <resultMap id="userGroupMap" type="com.example.servicequiznest.vo.UserGroup">
+        <constructor>
+            <idArg column="group_id" javaType="java.lang.Long"/>
+            <arg column="group_name" javaType="java.lang.String"/>
+            <arg column="role" javaType="com.example.servicequiznest.enums.GroupMemberRole"
+                 typeHandler="org.apache.ibatis.type.EnumTypeHandler"/>
+            <arg column="member_count" javaType="java.lang.Long"/>
+            <arg column="join_time" javaType="java.time.LocalDateTime"/>
+        </constructor>
+    </resultMap>
+
+    <!-- 只返回已加入（APPROVED）的小组：待审批/已拒绝记录从未计入成员数，
+         也不应出现在「我的小组」里。 -->
+    <select id="getAllUserGroup" resultMap="userGroupMap">
+        select g.group_id,
+               g.group_name,
+               gm.role,
+               g.member_count,
+               gm.join_time
+        from group_member gm
+                 join `group` g on g.group_id = gm.group_id
+        where gm.user_id = #{userId}
+          and gm.join_status = 'APPROVED'
+        order by gm.join_time desc, g.group_id desc
+    </select>
+
+    <!-- 设置/取消管理员：ROOT 是 group.user_id 的投影，不允许通过这里改；
+         必须仍为 APPROVED，避免把待审批/已拒绝占位记录提升为管理员。 -->
+    <update id="updateMemberRole">
+        update group_member
+        set role = #{role},
+            update_time = CURRENT_TIMESTAMP()
+        where group_id = #{groupId}
+          and user_id = #{userId}
+          and join_status = 'APPROVED'
+          and role &lt;&gt; 'ROOT'
+    </update>
+
+    <!-- 移除成员：只删 APPROVED 且非 ROOT 的记录；ROOT 只能走退出+晋升链路。 -->
+    <delete id="deleteMember">
+        delete from group_member
+        where group_id = #{groupId}
+          and user_id = #{userId}
+          and join_status = 'APPROVED'
+          and role &lt;&gt; 'ROOT'
+    </delete>
 </mapper>

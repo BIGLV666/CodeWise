@@ -12,5 +12,9 @@ public enum NotificationCenterType {
     /** 复习掌握祝贺（review -> message，extraData 为 ReviewMasteredDto） */
     REVIEW_MASTERED,
     /** 小组邀请码（quiz-nest -> message，extraData 为 JoinToken） */
-    GROUP_INVITE
+    GROUP_INVITE,
+    /** 小组广播（quiz-nest -> message，extraData 为 BroadCast） */
+    GROUP_BROADCAST,
+    /** 小组审批结果（quiz-nest -> message，extraData 为 ApproveResult） */
+    GROUP_APPROVAL_RESULT
 }

@@ -31,7 +31,7 @@
 | `service-community` | `8087` | `/api/community/**` | 帖子、题解、评论和点赞 |
 | `service-message` | `8083` | `/api/message/**`、`/websocket/**` | 通知中心与 WebSocket 推送 |
 | `service-ai` | `8085` | `/api/ai/**` | AI 建议、会话与自定义模型 |
-| `service-quiz-nest` | `8088` | `/api/quiz/**` | 小组（建组/改组/退出与 root 晋升/加入/邀请码/题库增删改查）与后续 Quiz 业务 |
+| `service-quiz-nest` | `8088` | `/api/quiz/**` | 小组（建组/改组/成员与审批/角色/踢人/广播/退出与 root 晋升/加入/邀请码/题库增删改查）与后续 Quiz 业务 |
 | `service-judge` | `8086` | `/api/judge/**` | 容器池与失败提交管理（管理员） |
 
 `codewise-agent`（FastAPI，8000）不经过网关路由：生产环境由 nginx 以 `/agentapi/` 反代，前端直连其 `/api/agent/**`（7 个端点，含 SSE 流式 `/api/agent/stream`），JWT 由 Agent 自行校验。
@@ -120,13 +120,13 @@ X-Real-IP: <clientIp>
 | `QuestionErrorCode` | `service-question` | 74 | 题目、测试用例、提交与生成链路 |
 | `ReviewErrorCode` | `service-review` | 49 | 复习项、收藏夹、笔记、进度计划 |
 | `CommunityErrorCode` | `service-community` | 31 | 帖子、评论、点赞、申诉 |
-| `MessageErrorCode` | `service-message` | 13 | 通知、事件认领、推送、小组邀请码 |
+| `MessageErrorCode` | `service-message` | 14 | 通知、事件认领、推送、小组邀请码/广播/审批结果 |
 | `AiErrorCode` | `service-ai` | 48 | 模型调用、密钥、SSE、产物生成 |
 | `JudgeErrorCode` | `service-judge` | 22 | 容器池、编译执行、重试与死信 |
 | `InfraErrorCode` | `service-common` | 6 | 信封编解码、必需配置缺失 |
 | `GatewayErrorCode` | `service-gateway` | 8 | 网关自身兜底（不依赖 service-api，文案与 `CommonErrorCode` 对齐） |
 | `AgentErrorCode` | `codewise-agent` | 5 | Python agent 鉴权与会话 |
-| `QuizNestErrorCode` | `service-quiz-nest` | 42 | 小组创建、修改、退出、加入、邀请码与小组题库 |
+| `QuizNestErrorCode` | `service-quiz-nest` | 57 | 小组创建、修改、成员管理/审批/角色/踢人、加入、邀请码与小组题库 |
 
 收敛规则（写在 `service-common/.../advice/AbstractGlobalExceptionHandler`，各服务的 `Advice`/`advice` 子类只声明 `basePackages`）：
 

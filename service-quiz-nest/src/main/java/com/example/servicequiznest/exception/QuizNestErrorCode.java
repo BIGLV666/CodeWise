@@ -14,7 +14,6 @@ import org.example.serviceapi.exception.ErrorCode;
  * {@code new BizException(枚举, cause)}，cause 只进日志。</p>
  */
 public enum QuizNestErrorCode implements ErrorCode {
-
     // ---------- 参数类 400 ----------
     GROUP_NAME_REQUIRED(4001101, "小组名称不能为空"),
     GROUP_TYPE_REQUIRED(4001102, "请选择小组加入方式"),
@@ -25,30 +24,40 @@ public enum QuizNestErrorCode implements ErrorCode {
     NOT_USERID_SEND_JOIN_TOKEN(4001107, "请选择要邀请的用户"),
     CANNOT_INVITE_SELF(4001108, "不能邀请自己加入小组"),
     INVITE_CONTEXT_TOO_LONG(4001109, "邀请留言不能超过200字"),
-    QUESTION_REQUIRED(4001110,"题目内容不可为空，请补充后重试"),
-    QUESTION_TITLE_REQUIRED(4001111,"标题不能为空"),
-    QUESTION_CONTENT_REQUIRED(4001112,"题目详情不能为空"),
-    QUESTION_TITLE_TOO_LONG(4001113,"标题长度不能超过 %s 个字符"),
-    QUESTION_TAGS_TOO_LONG(4001114,"标签长度不能超过 %s 个字符"),
-    QUESTION_TEXT_TOO_LONG(4001115,"%s内容过长，请缩短后重试"),
-    QUESTION_TIME_LIMIT_INVALID(4001116,"时间限制必须为正整数"),
-    QUESTION_MEMORY_LIMIT_INVALID(4001117,"内存限制必须为正整数"),
-    INVALID_GROUP_ID(4001118,"非法小组Id"),
-    INVALID_QUESTION_ID(4001119,"非法题目Id"),
-
+    QUESTION_REQUIRED(4001110, "题目内容不可为空，请补充后重试"),
+    QUESTION_TITLE_REQUIRED(4001111, "标题不能为空"),
+    QUESTION_CONTENT_REQUIRED(4001112, "题目详情不能为空"),
+    QUESTION_TITLE_TOO_LONG(4001113, "标题长度不能超过 %s 个字符"),
+    QUESTION_TAGS_TOO_LONG(4001114, "标签长度不能超过 %s 个字符"),
+    QUESTION_TEXT_TOO_LONG(4001115, "%s内容过长，请缩短后重试"),
+    QUESTION_TIME_LIMIT_INVALID(4001116, "时间限制必须为正整数"),
+    QUESTION_MEMORY_LIMIT_INVALID(4001117, "内存限制必须为正整数"),
+    INVALID_GROUP_ID(4001118, "非法小组Id"),
+    INVALID_QUESTION_ID(4001119, "非法题目Id"),
+    GROUP_BROADCAST_NOT_IsEMPTY(4001120,"广播内容不可为空"),
+    INVALID_JOIN_STATUS(4001121,"未知状态"),
+    INVALID_MEMBER_ID(4001122, "非法成员Id"),
+    APPROVE_DECISION_REQUIRED(4001123, "请指定审批结果（通过或拒绝）"),
+    INVALID_MEMBER_ROLE(4001124, "成员角色不正确，仅支持管理员或普通成员"),
+    CANNOT_CHANGE_ROOT_ROLE(4001125, "不能修改小组创建人的角色"),
+    CANNOT_KICK_ROOT(4001126, "不能移除小组创建人"),
+    CANNOT_KICK_SELF(4001127, "不能移除自己，请使用退出小组"),
 
     // ---------- 无权限 403 ----------
     NO_PERMISSION_UPDATE_GROUP(4031101, "无权限修改小组"),
     NO_PERMISSION_SEND_JOIN_TOKEN(4031102, "您暂无权限邀请他人，请联系管理员"),
-    NO_PERMISSION_ADD_QUESTION(4031103,"您暂无权限添加题目，请联系管理员"),
-    NOT_ALLOWED_UPDATE_PLATFORM_QUESTION(4031104,"平台题目不支持在小组内修改"),
-    INTERNAL_CALL_UNAUTHORIZED(4031105,"无权调用内部接口"),
-
+    NO_PERMISSION_ADD_QUESTION(4031103, "您暂无权限添加题目，请联系管理员"),
+    NOT_ALLOWED_UPDATE_PLATFORM_QUESTION(4031104, "平台题目不支持在小组内修改"),
+    INTERNAL_CALL_UNAUTHORIZED(4031105, "无权调用内部接口"),
+    NO_PERMISSION_SEND_BROADCAST(4031106, "无权限发送组内广播"),
+    NO_PERMISSION_APPROVE(4031107, "无权限查询或审批加入小组"),
+    NO_PERMISSION_SET_ROLE(4031108, "无权限设置成员角色，仅小组创建人可操作"),
+    NO_PERMISSION_KICK_MEMBER(4031109, "无权限移除该成员"),
     // ---------- 资源不存在 404 ----------
     NOTFOUND_USER_IN_GROUP(4041101, "您不是该小组成员"),
     NOTFOUND_GROUP(4041102, "您选择的小组不存在，请确认后重试"),
-    NOTFOUND_QUESTION(4041103,"您添加的题目不存在请核对后重试"),
-    NOTFOUND_GROUP_QUESTION(4041104,"未找到该题目，请核对后重试"),
+    NOTFOUND_QUESTION(4041103, "您添加的题目不存在请核对后重试"),
+    NOTFOUND_GROUP_QUESTION(4041104, "未找到该题目，请核对后重试"),
 
     // ---------- 状态冲突 409 ----------
     DUPLICATE_REQUEST(4091101, "该创建请求已提交，请勿重复提交"),
@@ -58,6 +67,7 @@ public enum QuizNestErrorCode implements ErrorCode {
     INVITEE_ALREADY_MEMBER(4091105, "对方已经是该小组成员，无需再次邀请"),
     QUESTION_ALREADY_IN_GROUP(4091106, "该题目已在小组题库中，请勿重复添加"),
     QUESTION_CONTENT_DUPLICATED(4091107, "题目内容与已有题目重复，请调整后重试"),
+    APPROVE_HAVE_CLASH(4091108,"该请求已被其他人处理，状态为%s"),
 
     // ---------- 服务内部 500 ----------
     CREATE_FAILED(5001101, "小组创建失败，请稍后重试"),
@@ -65,8 +75,11 @@ public enum QuizNestErrorCode implements ErrorCode {
     LEAVE_GROUP_FAILED(5001103, "退出小组失败，请稍后重试"),
     JOIN_GROUP_FAILED(5001104, "加入小组失败，请稍后重试"),
     SEND_JOIN_TOKEN_FAILED(5001105, "邀请码发送失败，请稍后重试"),
-    ADD_QUESTION_FAILED(5001106,"添加题目失败请稍后重试"),
-    DELETE_GROUP_QUESTION_FAILED(5001107,"删除题目失败请稍后重试");
+    ADD_QUESTION_FAILED(5001106, "添加题目失败请稍后重试"),
+    DELETE_GROUP_QUESTION_FAILED(5001107, "删除题目失败请稍后重试"),
+    APPROVE_FAILED(5001108, "审批失败，请稍后重试"),
+    KICK_MEMBER_FAILED(5001109, "移除成员失败，请稍后重试"),
+    SET_MEMBER_ROLE_FAILED(5001110, "设置成员角色失败，请稍后重试");
 
     private final int code;
     private final String message;

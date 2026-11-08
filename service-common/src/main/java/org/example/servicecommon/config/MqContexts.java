@@ -94,7 +94,12 @@ public  class MqContexts {
     public static final String NOTIFICATION_APPEAL_ROUTING_KEY = "notification.appeal.routing";
     /** 小组邀请码站内信：quiz-nest -> message（经 Outbox），payload 为 JoinToken */
     public static final String NOTIFICATION_JOIN_TOKEN_ROUTING_KEY = "notification.join.token.routing";
+    /**小组消息广播:quiz-nest->message(经Outbox），payload为{@link org.example.serviceapi.dto.quizNest.BroadCast}*/
+    public static final String NOTIFICATION_BROADCAST_ROUTING_KEY = "notification.broadcast.routing";
     /** 复习掌握祝贺通知：review -> message（经 Outbox），payload 为 ReviewMasteredDto */
     public static final String NOTIFICATION_REVIEW_MASTERED_ROUTING_KEY = "notification.review.mastered.routing";
+
+    /** 小组审批结果站内信：quiz-nest -> message（经 Outbox），payload 为 ApproveResult */
+    public static final String NOTIFICATION_APPROVE_RESULT_ROUTING_KEY ="notification.approve.result.routing";
 
 }

@@ -558,6 +558,21 @@ Authorization: Bearer <token>
 | `avatarUrl` | `String` | 头像 |
 | `status` | `String` | 判题状态 |
 
+### 查询小组提交记录详情
+
+```http
+GET /api/question/group/submit-records/500
+Authorization: Bearer <token>
+```
+
+说明：
+
+- `groupSubmitRecordId` 为列表接口返回的小组提交索引 id。
+- 本组 APPROVED 成员可查看其他成员的代码；提交者本人即使已退出小组仍可查看自己的记录。
+- 非组员查看他人记录返回 `4030205`；索引或提交记录不存在返回资源不存在。
+
+返回：`Result<SubmitRecord>`（含 `submitContent`、`language`、`judgeStatus` 等完整字段）。
+
 ### 批量查询提交记录
 
 ```http

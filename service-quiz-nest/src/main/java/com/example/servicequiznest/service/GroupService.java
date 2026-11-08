@@ -12,12 +12,17 @@ import com.example.servicequiznest.exception.QuizNestErrorCode;
 import com.example.servicequiznest.mapper.GroupMapper;
 import com.example.servicequiznest.mapper.GroupMemberMapper;
 import com.example.servicequiznest.util.check.CheckGroup;
+import com.example.servicequiznest.vo.MemberVO;
+import com.example.servicequiznest.vo.GroupMembershipVo;
+import com.example.servicequiznest.vo.UserGroup;
 import lombok.extern.slf4j.Slf4j;
 import org.example.serviceapi.dto.Result;
 import org.example.serviceapi.dto.event.EventTypes;
+import org.example.serviceapi.dto.quizNest.ApproveResult;
 import org.example.serviceapi.dto.quizNest.JoinToken;
 import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.exception.BizException;
+import org.example.serviceapi.exception.CommonErrorCode;
 import org.example.serviceapi.feign.UserFeignClient;
 import org.example.servicecommon.RedisDto.RedisContext;
 import org.example.servicecommon.until.UserContext;
@@ -31,9 +36,13 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -331,28 +340,28 @@ public class GroupService {
      *
      * @param groupId 小组 ID
      * @param token   邀请码（仅 INVITE 小组需要，可空）
+     * @return 加入后的成员关系（FREE/INVITE 为 APPROVED，APPROVAL 为 PENDING）
      */
-    public void joinGroup(Long groupId, String token) {
+    public GroupMembershipVo joinGroup(Long groupId, String token) {
         if (groupId == null) {
             throw new BizException(QuizNestErrorCode.GROUP_ID_REQUIRED);
         }
         for (int attempt = 1; attempt <= JOIN_MAX_ATTEMPTS; attempt++) {
             try {
-                transactionTemplate.executeWithoutResult(status -> doJoin(groupId, token));
-                return;
+                return transactionTemplate.execute(status -> doJoin(groupId, token));
             } catch (ConcurrencyFailureException e) {
                 log.warn("加入小组遇到并发冲突，重试 {}/{}: groupId={}", attempt, JOIN_MAX_ATTEMPTS, groupId, e);
                 if (attempt == JOIN_MAX_ATTEMPTS) {
                     throw new BizException(QuizNestErrorCode.JOIN_GROUP_FAILED, e);
                 }
                 sleepBeforeJoinRetry(attempt);
-                attempt++;
             }
         }
+        throw new BizException(QuizNestErrorCode.JOIN_GROUP_FAILED);
     }
 
-    /** 单个加入事务：校验小组存在并分派到 FREE/APPROVAL/INVITE 流程。 */
-    private void doJoin(Long groupId, String token) {
+    /** 单个加入事务：校验小组存在并分派到 FREE/APPROVAL/INVITE 流程，返回落库后的成员关系。 */
+    private GroupMembershipVo doJoin(Long groupId, String token) {
         Group group = groupMapper.selectById(groupId);
         if (group == null) {
             throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP);
@@ -367,6 +376,7 @@ public class GroupService {
             case INVITE -> joinINVITE(groupId, token);
             default -> throw new BizException(QuizNestErrorCode.JOIN_GROUP_FAILED);
         }
+        return requireMembership(groupId);
     }
 
     private void sleepBeforeJoinRetry(int attempt) {
@@ -679,4 +689,330 @@ public class GroupService {
         }
         return "小组管理员";
     }
+    public List<UserGroup>getAllUserGroup(){
+        Long userId=UserContext.getUserId();
+        return groupMemberMapper.getAllUserGroup(userId);
+    }
+
+    /**
+     * 查询当前用户与小组的关系：未申请/已退出返回 null，前端据此直接判断成员身份，
+     * 不再通过题库接口的 404 间接探测。加入接口也复用该结果区分 PENDING/APPROVED。
+     */
+    public GroupMembershipVo getMembership(Long groupId) {
+        if (groupId == null) {
+            throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        }
+        GroupMember member = groupMemberMapper.selectOne(new QueryWrapper<GroupMember>()
+                .eq("user_id", UserContext.getUserId())
+                .eq("group_id", groupId));
+        return member == null ? null : toMembershipVo(member);
+    }
+
+    /** 加入成功后的成员关系；理论上必然存在，缺失说明并发下记录被删除，按加入失败处理。 */
+    private GroupMembershipVo requireMembership(Long groupId) {
+        GroupMembershipVo membership = getMembership(groupId);
+        if (membership == null) {
+            throw new BizException(QuizNestErrorCode.JOIN_GROUP_FAILED);
+        }
+        return membership;
+    }
+
+    private GroupMembershipVo toMembershipVo(GroupMember member) {
+        return new GroupMembershipVo(
+                member.getGroupId(),
+                member.getGroupMemberId(),
+                member.getUserId(),
+                member.getRole(),
+                member.getJoinStatus(),
+                member.getJoinTime()
+        );
+    }
+
+    /**
+     * 设置/取消管理员：仅本组 ROOT 可操作，目标必须为 APPROVED 成员且不能是 ROOT。
+     * 单条条件更新即可，无需事务。
+     */
+    public void updateMemberRole(Long groupId, Long userId, GroupMemberRole role) {
+        if (groupId == null) {
+            throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        }
+        if (userId == null) {
+            throw new BizException(QuizNestErrorCode.INVALID_MEMBER_ID);
+        }
+        if (role == null || GroupMemberRole.ROOT.equals(role)) {
+            throw new BizException(QuizNestErrorCode.INVALID_MEMBER_ROLE);
+        }
+        GroupMember operator = requireApprovedMember(groupId, UserContext.getUserId());
+        if (!GroupMemberRole.ROOT.equals(operator.getRole())) {
+            throw new BizException(QuizNestErrorCode.NO_PERMISSION_SET_ROLE);
+        }
+        if (operator.getUserId().equals(userId)) {
+            throw new BizException(QuizNestErrorCode.CANNOT_CHANGE_ROOT_ROLE);
+        }
+        GroupMember target = requireApprovedMember(groupId, userId);
+        if (GroupMemberRole.ROOT.equals(target.getRole())) {
+            throw new BizException(QuizNestErrorCode.CANNOT_CHANGE_ROOT_ROLE);
+        }
+        if (role.equals(target.getRole())) {
+            return;
+        }
+        if (groupMemberMapper.updateMemberRole(groupId, userId, role.name()) == 0) {
+            // 预检查后仍命中 0 行：目标被并发踢出/退出
+            throw new BizException(QuizNestErrorCode.SET_MEMBER_ROLE_FAILED);
+        }
+    }
+
+    /**
+     * 移除成员：ROOT 可移除管理员和普通成员，ADMIN 只能移除普通成员；
+     * 不能移除自己或 ROOT（ROOT 只能走退出+晋升）。人数扣减与删除记录同事务。
+     */
+    public void kickMember(Long groupId, Long userId) {
+        if (groupId == null) {
+            throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        }
+        if (userId == null) {
+            throw new BizException(QuizNestErrorCode.INVALID_MEMBER_ID);
+        }
+        Long operatorId = UserContext.getUserId();
+        GroupMember operator = requireApprovedMember(groupId, operatorId);
+        if (GroupMemberRole.MEMBER.equals(operator.getRole())) {
+            throw new BizException(QuizNestErrorCode.NO_PERMISSION_KICK_MEMBER);
+        }
+        if (operatorId.equals(userId)) {
+            throw new BizException(QuizNestErrorCode.CANNOT_KICK_SELF);
+        }
+        GroupMember target = requireApprovedMember(groupId, userId);
+        if (GroupMemberRole.ROOT.equals(target.getRole())) {
+            throw new BizException(QuizNestErrorCode.CANNOT_KICK_ROOT);
+        }
+        if (GroupMemberRole.ADMIN.equals(operator.getRole())
+                && GroupMemberRole.ADMIN.equals(target.getRole())) {
+            throw new BizException(QuizNestErrorCode.NO_PERMISSION_KICK_MEMBER);
+        }
+        transactionTemplate.executeWithoutResult(status -> {
+            // 先扣人数拿 group 行锁，再删成员记录，锁顺序与退出/审批路径一致
+            if (groupMapper.decMemberCount(groupId) == 0) {
+                throw new BizException(QuizNestErrorCode.KICK_MEMBER_FAILED);
+            }
+            if (groupMemberMapper.deleteMember(groupId, userId) == 0) {
+                throw new BizException(QuizNestErrorCode.KICK_MEMBER_FAILED);
+            }
+        });
+    }
+
+    /** 校验当前用户是本组 APPROVED 成员，返回其成员记录。 */
+    private GroupMember requireApprovedMember(Long groupId, Long userId) {
+        GroupMember member = groupMemberMapper.selectOne(new QueryWrapper<GroupMember>()
+                .eq("group_id", groupId)
+                .eq("user_id", userId));
+        if (member == null || !GroupJoinStatus.APPROVED.equals(member.getJoinStatus())) {
+            throw new BizException(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP);
+        }
+        return member;
+    }
+
+    /**
+     * 供给小组成员查询本组成员，只要加入小组即可查询该组成员，不必管理员
+     *
+     * @param groupId 查询小组id
+     * @return {@link List<MemberVO>} 成员列表
+     */
+    public List<MemberVO>groupMembers(Long groupId){
+        if(groupId==null)throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        Long userId=UserContext.getUserId();
+        GroupMember member=groupMemberMapper.selectOne(
+                new QueryWrapper<GroupMember>().eq("user_id",userId).eq("group_id",groupId)
+        );
+        if(member==null||!member.getJoinStatus().equals(GroupJoinStatus.APPROVED)){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP);
+        }
+
+        List<GroupMember>allMember=groupMemberMapper.selectList(
+                new QueryWrapper<GroupMember>().eq("group_id",groupId).eq("join_status",GroupJoinStatus.APPROVED.name())
+        );
+        List<Long>userIds=allMember.stream().map(GroupMember::getUserId).toList();
+        if(userIds.isEmpty())return List.of();
+        Map<Long,UserDto> users;
+        try{
+            var body=userFeignClient.getUserList(userIds);
+            if(body==null||body.getCode()!=200||body.getData()==null){
+                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+            }
+            users=body.getData();
+        }catch (Exception e){
+            log.error("批量获取用户失败，userIds ={} err={}",userIds,e.getMessage(),e);
+            throw new BizException(CommonErrorCode.CONTENT_RESTRICTED);
+        }
+        return allMember.stream()
+                .map(a -> toMemberVO(a, users)).toList();
+
+    }
+
+    /**
+     * 把成员记录 + 批量查回的用户信息组装为前端展示 VO。
+     * 用户信息必须按 {@code member.userId} 取，不能用当前登录人（会渲染成 N 行同一个人）。
+     */
+    private MemberVO toMemberVO(GroupMember member, Map<Long, UserDto> users) {
+        UserDto user = users.get(member.getUserId());
+        return new MemberVO(
+                member.getGroupId(),
+                member.getGroupMemberId(),
+                member.getUserId(),
+                user == null ? null : user.getAvatarUrl(),
+                user == null ? null : user.getNickName(),
+                member.getRole(),
+                member.getJoinTime()
+        );
+    }
+
+    /**
+     * 获取待审批或者已拒绝的用户列表
+     *
+     * @param groupId 小组id
+     * @param status  状态，详情见{@link GroupJoinStatus}
+     *                <ul>
+     *                              <li> 0-待审批</li>
+     *                              <li> 1-已加入</li>
+     *                              <li> 2-已拒绝</li>
+     *                </ul>
+     * @return {@link List<MemberVO>} 成员列表
+     */
+    public List<MemberVO>approvedUsers(Long groupId,Integer status){
+        if(groupId==null)throw new BizException(QuizNestErrorCode.INVALID_GROUP_ID);
+        if(status==null||status==1)return groupMembers(groupId);
+        Long userId=UserContext.getUserId();
+        GroupMember member=groupMemberMapper.selectOne(
+                new QueryWrapper<GroupMember>().eq("user_id",userId).eq("group_id",groupId)
+        );
+        if(member==null||!member.getJoinStatus().equals(GroupJoinStatus.APPROVED)){
+            throw new BizException(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP);
+        }
+
+
+        if(GroupMemberRole.MEMBER.equals(member.getRole()))throw new BizException(QuizNestErrorCode.NO_PERMISSION_APPROVE);
+
+        List<GroupMember> allMember;
+        switch (status){
+            case 0-> allMember =groupMemberMapper.selectList( new QueryWrapper<GroupMember>().eq("group_id",groupId).eq("join_status",GroupJoinStatus.PENDING.name()));
+            case 2 -> allMember =groupMemberMapper.selectList( new QueryWrapper<GroupMember>().eq("group_id",groupId).eq("join_status",GroupJoinStatus.REJECTED.name()));
+            default -> throw new BizException(QuizNestErrorCode.INVALID_JOIN_STATUS);
+        }
+        List<Long>userIds=allMember.stream().map(GroupMember::getUserId).toList();
+        if(userIds.isEmpty())return List.of();
+        Map<Long,UserDto> users;
+        try{
+            var body=userFeignClient.getUserList(userIds);
+            if(body==null||body.getCode()!=200||body.getData()==null){
+                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+            }
+            users=body.getData();
+        }catch (Exception e){
+            log.error("批量获取用户失败，userIds ={} err={}",userIds,e.getMessage(),e);
+            throw new BizException(CommonErrorCode.CONTENT_RESTRICTED);
+        }
+        return allMember.stream()
+                .map(a -> toMemberVO(a, users)).toList();
+
+    }
+
+    private void addAndPublish(boolean is,String context,Long groupId,Long toUserId,String groupName)  {
+        // 只有状态迁移 + 人数 + Outbox 写入需要原子性；调用方的权限/存在性校验和
+        // 消息组装都留在事务外，避免把只读查询和后续远程调用拖进长事务。
+        transactionTemplate.executeWithoutResult(status ->
+                doAddAndPublish(is, context, groupId, toUserId, groupName));
+    }
+
+    private void doAddAndPublish(boolean is,String context,Long groupId,Long toUserId,String groupName)  {
+
+        if(is){
+            int r=groupMemberMapper.approveExistingMember(groupId,toUserId);
+            if(r==0){
+                GroupMember member=groupMemberMapper.selectOne(new QueryWrapper<GroupMember>()
+                        .eq("user_id",toUserId).eq("group_id",groupId).last("for update"));
+                if(member==null){
+                    throw new BizException(QuizNestErrorCode.INVALID_JOIN_STATUS);
+                }
+                if(!GroupJoinStatus.PENDING.equals(member.getJoinStatus())){
+                    throw new BizException(QuizNestErrorCode.APPROVE_HAVE_CLASH,member.getJoinStatus());
+                }
+                //执行到此说明为未知状态
+                log.error("小组成员审批失败，userId={},groupId={}",toUserId,groupId);
+                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+            }
+            // 审批通过才计入 member_count（PENDING/REJECTED 从未计数），口径与 joinFREEGroup 一致
+            if(groupMapper.addMemberCount(groupId)==0){
+                log.error("小组成员审批成功但人数累加失败，userId={},groupId={}",toUserId,groupId);
+                throw new BizException(QuizNestErrorCode.APPROVE_FAILED);
+            }
+        }else {
+            int r=groupMemberMapper.approveTOREJECTED(groupId,toUserId);
+            if(r==0){
+                GroupMember member=groupMemberMapper.selectOne(new QueryWrapper<GroupMember>()
+                        .eq("user_id",toUserId).eq("group_id",groupId).last("for update"));
+                if(member==null){
+                    throw new BizException(QuizNestErrorCode.INVALID_JOIN_STATUS);
+                }
+                if(!GroupJoinStatus.PENDING.equals(member.getJoinStatus())){
+                    throw new BizException(QuizNestErrorCode.APPROVE_HAVE_CLASH,member.getJoinStatus());
+                }
+                //执行到此说明为未知状态
+                log.error("小组成员审批失败，userId={},groupId={}",toUserId,groupId);
+                throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
+            }
+        }
+        outboxPublisher.publish(ApproveResult.class,getApproveResult(toUserId,context,groupId,groupName,is?GroupJoinStatus.APPROVED:GroupJoinStatus.REJECTED));
+    }
+
+    private ApproveResult getApproveResult(Long toUserID,String context,Long groupID,String groupName,GroupJoinStatus status){
+        ApproveResult approveResult=new ApproveResult();
+        approveResult.setGroupId(groupID);
+        approveResult.setGroupName(groupName);
+        // UUID 保证 64 字符以内（notification_center.message_id 列宽），且每次审批动作独立；
+        // Outbox 重投复用同一条 payload，因此仍然幂等。
+        approveResult.setMessageId("quiz:approve:" + UUID.randomUUID());
+        approveResult.setSendTime(LocalDateTime.now().format(MESSAGE_TIME_FORMATTER));
+        approveResult.setToUserId(toUserID);
+        if(context==null||context.isBlank()){
+            context=status.equals(GroupJoinStatus.APPROVED)?"恭喜您成功加入我们的小组":"非常感谢您申请我们的小组，很遗憾由于某些原因我们不能允许您加入,祝愿您尽早加入心仪的小组";
+        }
+        approveResult.setContext(context);
+        return approveResult;
+
+
+    }
+
+    /**
+     * 审批成员的加入申请：通过时迁移为 APPROVED 并累加成员数，拒绝时迁移为 REJECTED。
+     * 权限与存在性校验在事务外完成；真正需要原子性的状态迁移、人数与 Outbox 写入
+     * 由 {@link #addAndPublish} 内的编程式事务包住，避免长事务。
+     */
+    public void approveMember(Long groupMemberId,String context,boolean is){
+        if(groupMemberId==null){
+            throw new BizException(QuizNestErrorCode.INVALID_MEMBER_ID);
+        }
+
+        GroupMember member=groupMemberMapper.selectById(groupMemberId);
+        //目前未鉴定该调用人员身份，模糊返回未知状态
+        if(member==null)throw new BizException(QuizNestErrorCode.INVALID_JOIN_STATUS);
+
+        GroupMember useUser=groupMemberMapper.selectOne(
+                new QueryWrapper<GroupMember>().eq("user_id",UserContext.getUserId()).eq("group_id",member.getGroupId())
+        );
+        if(useUser==null)throw new BizException(QuizNestErrorCode.NOTFOUND_USER_IN_GROUP);
+
+        if(GroupMemberRole.MEMBER.equals(useUser.getRole())){
+            throw new BizException(QuizNestErrorCode.NO_PERMISSION_APPROVE);
+        }
+
+        Group group=groupMapper.selectById(member.getGroupId());
+        if(group==null)throw new BizException(QuizNestErrorCode.NOTFOUND_GROUP);
+
+        addAndPublish(is,context,member.getGroupId(),member.getUserId(),group.getGroupName());
+    }
+
+
+
+
+
+
 }

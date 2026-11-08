@@ -84,6 +84,17 @@ public class JudgeController {
         return Result.success(submitRecordService.cursorMiniGroupSubmitRecord(groupId, lastId, pageSize));
     }
 
+    /**
+     * 小组提交记录详情：本组 APPROVED 成员可查看其他成员的代码；提交者本人即使已退组也可查看。
+     *
+     * @param groupSubmitRecordId 小组提交索引 ID（列列表接口返回的 {@code groupSubmitRecordId}）
+     */
+    @GetMapping("/group/submit-records/{groupSubmitRecordId}")
+    @RateLimit(limit = 100, window = 60)
+    public Result<SubmitRecord> getGroupSubmitRecord(@PathVariable Long groupSubmitRecordId) {
+        return Result.success(submitRecordService.getGroupSubmitRecord(groupSubmitRecordId));
+    }
+
     @DeleteMapping("/deletesubmitrecord")
     @RateLimit(limit = 30, window = 60)
     public Result<Void> deleteSubmitRecord(@RequestParam Long submitRecordId) {

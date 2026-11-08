@@ -4,15 +4,25 @@ import com.example.servicequiznest.dto.CreateGroupDto;
 import com.example.servicequiznest.dto.CreateGroupQuestionDto;
 import com.example.servicequiznest.dto.GroupDto;
 import com.example.servicequiznest.dto.JoinGroupDto;
+import com.example.servicequiznest.dto.ApproveMemberDto;
+import com.example.servicequiznest.dto.SendGroupBroadcastDto;
 import com.example.servicequiznest.dto.SendJoinTokenDto;
 import com.example.servicequiznest.dto.UpdateGroupQuestionDto;
+import com.example.servicequiznest.dto.UpdateMemberRoleDto;
 import com.example.servicequiznest.entity.Group;
+import com.example.servicequiznest.enums.GroupMemberRole;
+import com.example.servicequiznest.exception.QuizNestErrorCode;
+import com.example.servicequiznest.service.GroupBroadcastService;
 import com.example.servicequiznest.service.GroupQuestionService;
 import com.example.servicequiznest.service.GroupService;
+import com.example.servicequiznest.vo.GroupMembershipVo;
 import com.example.servicequiznest.vo.GroupQuestionVo;
+import com.example.servicequiznest.vo.MemberVO;
+import com.example.servicequiznest.vo.UserGroup;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.dto.question.QuestionDto;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,10 +38,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import com.example.servicequiznest.vo.MinimalQuestionVo;
 
 import java.lang.reflect.Method;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -49,6 +62,9 @@ class GroupControllerTest {
 
     @Mock
     private GroupQuestionService groupQuestionService;
+
+    @Mock
+    private GroupBroadcastService groupBroadcastService;
 
     @InjectMocks
     private GroupController groupController;
@@ -109,9 +125,15 @@ class GroupControllerTest {
 
         JoinGroupDto joinDto = new JoinGroupDto();
         joinDto.setToken("012345");
-        Result<Boolean> joined = groupController.joinGroup(88L, joinDto);
+        GroupMembershipVo membership = new GroupMembershipVo(
+                88L, 1L, 9L, GroupMemberRole.MEMBER,
+                com.example.servicequiznest.enums.GroupJoinStatus.APPROVED, LocalDateTime.now());
+        when(groupService.joinGroup(88L, "012345")).thenReturn(membership);
+        Result<GroupMembershipVo> joined = groupController.joinGroup(88L, joinDto);
         assertThat(joined.getCode()).isEqualTo(200);
+        assertThat(joined.getData()).isSameAs(membership);
         verify(groupService).joinGroup(88L, "012345");
+        when(groupService.joinGroup(88L, null)).thenReturn(membership);
         groupController.joinGroup(88L, null);
         verify(groupService).joinGroup(88L, null);
 
@@ -121,6 +143,59 @@ class GroupControllerTest {
         Result<Void> sent = groupController.sendJoinToken(88L, sendDto);
         assertThat(sent.getCode()).isEqualTo(200);
         verify(groupService).sendJoinTokenById(88L, 9L, "一起刷题");
+
+        List<UserGroup> myGroups = List.of(new UserGroup(
+                88L, "算法小组", GroupMemberRole.MEMBER, 3L, LocalDateTime.now()));
+        when(groupService.getAllUserGroup()).thenReturn(myGroups);
+        assertThat(groupController.myGroups().getData()).isSameAs(myGroups);
+
+        List<MemberVO> pending = List.of(new MemberVO(
+                88L, 123L, 9L, "avatar", "昵称", GroupMemberRole.MEMBER, null));
+        when(groupService.approvedUsers(88L, 0)).thenReturn(pending);
+        assertThat(groupController.groupMembers(88L, 0).getData()).isSameAs(pending);
+        verify(groupService).approvedUsers(88L, 0);
+
+        when(groupService.getMembership(88L)).thenReturn(membership);
+        assertThat(groupController.membership(88L).getData()).isSameAs(membership);
+        verify(groupService).getMembership(88L);
+
+        UpdateMemberRoleDto roleDto = new UpdateMemberRoleDto();
+        roleDto.setRole(GroupMemberRole.ADMIN);
+        Result<Void> roleUpdated = groupController.updateMemberRole(88L, 9L, roleDto);
+        assertThat(roleUpdated.getCode()).isEqualTo(200);
+        verify(groupService).updateMemberRole(88L, 9L, GroupMemberRole.ADMIN);
+
+        Result<Void> kicked = groupController.kickMember(88L, 9L);
+        assertThat(kicked.getCode()).isEqualTo(200);
+        verify(groupService).kickMember(88L, 9L);
+
+        ApproveMemberDto approveDto = new ApproveMemberDto();
+        approveDto.setApproved(true);
+        approveDto.setContext("欢迎加入");
+        Result<Void> approved = groupController.approveMember(123L, approveDto);
+        assertThat(approved.getCode()).isEqualTo(200);
+        verify(groupService).approveMember(123L, "欢迎加入", true);
+
+        SendGroupBroadcastDto broadcastDto = new SendGroupBroadcastDto();
+        broadcastDto.setContext("今晚八点刷题");
+        Result<Void> broadcast = groupController.broadcast(88L, broadcastDto);
+        assertThat(broadcast.getCode()).isEqualTo(200);
+        verify(groupBroadcastService).sendGroupBroadCastService("今晚八点刷题", 88L);
+    }
+
+    @Test
+    @DisplayName("审批接口：必须显式传 approved，漏传不能默认成拒绝")
+    void approveRequiresExplicitDecision() {
+        ApproveMemberDto dto = new ApproveMemberDto();
+
+        BizException missing = catchThrowableOfType(
+                () -> groupController.approveMember(123L, dto), BizException.class);
+        assertThat(missing.getCode()).isEqualTo(QuizNestErrorCode.APPROVE_DECISION_REQUIRED.getCode());
+
+        BizException missingBody = catchThrowableOfType(
+                () -> groupController.approveMember(123L, null), BizException.class);
+        assertThat(missingBody.getCode()).isEqualTo(QuizNestErrorCode.APPROVE_DECISION_REQUIRED.getCode());
+        verifyNoInteractions(groupService);
     }
 
     @Test
@@ -143,7 +218,7 @@ class GroupControllerTest {
                     .isPositive();
             assertThat(rateLimit.window()).as("路由 %s 的 window", method.getName()).isPositive();
         }
-        assertThat(routes).as("应扫描到 12 条路由").isEqualTo(12);
+        assertThat(routes).as("应扫描到 19 条路由").isEqualTo(19);
     }
 
     private boolean isRoute(Method method) {

@@ -1,10 +1,14 @@
 package com.example.servicequiznest.dto;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class CreateGroupQuestionDto {
 
     //所属小组id

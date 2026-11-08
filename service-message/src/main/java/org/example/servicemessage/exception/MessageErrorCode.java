@@ -25,7 +25,8 @@ public enum MessageErrorCode implements ErrorCode {
     WEBSOCKET_PUSH_FAILED(5000505, "实时推送失败，消息将重新投递"),
     MAIL_NOT_CONFIGURED(5000506, "邮件服务尚未完成配置，暂时无法发送邮件"),
     DUPLICATE_MESSAGE_HANDLER(5000507, "消息处理配置冲突，请联系管理员"),
-    GROUP_INVITE_SERIALIZE_FAILED(5000508, "小组邀请消息处理失败，已转入后台待处理");
+    GROUP_INVITE_SERIALIZE_FAILED(5000508, "小组邀请消息处理失败，已转入后台待处理"),
+    GROUP_NOTIFICATION_SERIALIZE_FAILED(5000509, "小组通知处理失败，已转入后台待处理");
 
     private final int code;
     private final String message;

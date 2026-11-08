@@ -1,6 +1,7 @@
 package org.example.servicequestion.controller;
 
 import org.example.servicequestion.dto.CursorPageResult;
+import org.example.servicequestion.entry.SubmitRecord;
 import org.example.servicequestion.service.JudgeService;
 import org.example.servicequestion.service.SubmitRecordService;
 import org.example.servicequestion.vo.MiniGroupSubmitRecordVo;
@@ -68,5 +69,29 @@ class JudgeControllerTest {
                 .andExpect(jsonPath("$.data.hasNext").value(false));
 
         verify(submitRecordService).cursorMiniGroupSubmitRecord(88L, 100L, 20);
+    }
+
+    @Test
+    @DisplayName("GET /group/submit-records/{id}：返回代码详情")
+    void getGroupSubmitRecord() throws Exception {
+        SubmitRecord record = SubmitRecord.builder()
+                .submitRecordId(50L)
+                .questionId(7L)
+                .questionTitle("两数之和")
+                .userId(42L)
+                .submitContent("public class Main {}")
+                .language("java")
+                .build();
+        record.setJudgeStatus("AC");
+        when(submitRecordService.getGroupSubmitRecord(500L)).thenReturn(record);
+
+        mockMvc.perform(get("/api/question/group/submit-records/500"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.submitRecordId").value(50))
+                .andExpect(jsonPath("$.data.submitContent").value("public class Main {}"))
+                .andExpect(jsonPath("$.data.language").value("java"));
+
+        verify(submitRecordService).getGroupSubmitRecord(500L);
     }
 }

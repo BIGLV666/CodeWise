@@ -4,15 +4,24 @@ import com.example.servicequiznest.dto.CreateGroupDto;
 import com.example.servicequiznest.dto.CreateGroupQuestionDto;
 import com.example.servicequiznest.dto.GroupDto;
 import com.example.servicequiznest.dto.JoinGroupDto;
+import com.example.servicequiznest.dto.ApproveMemberDto;
+import com.example.servicequiznest.dto.SendGroupBroadcastDto;
 import com.example.servicequiznest.dto.SendJoinTokenDto;
 import com.example.servicequiznest.dto.UpdateGroupQuestionDto;
+import com.example.servicequiznest.dto.UpdateMemberRoleDto;
 import com.example.servicequiznest.entity.Group;
+import com.example.servicequiznest.exception.QuizNestErrorCode;
+import com.example.servicequiznest.service.GroupBroadcastService;
 import com.example.servicequiznest.service.GroupQuestionService;
 import com.example.servicequiznest.service.GroupService;
+import com.example.servicequiznest.vo.GroupMembershipVo;
 import com.example.servicequiznest.vo.GroupQuestionVo;
+import com.example.servicequiznest.vo.MemberVO;
+import com.example.servicequiznest.vo.UserGroup;
 import io.github.biglv666.apigovernance.annotation.RateLimit;
 import org.example.serviceapi.dto.CursorPageResult;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.exception.BizException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +32,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import com.example.servicequiznest.vo.MinimalQuestionVo;
+
+import java.util.List;
 
 /**
  * 小组对外接口（网关路由 {@code /api/quiz/**}）。
@@ -40,10 +51,14 @@ public class GroupController {
 
     private final GroupService groupService;
     private final GroupQuestionService groupQuestionService;
+    private final GroupBroadcastService groupBroadcastService;
 
-    public GroupController(GroupService groupService, GroupQuestionService groupQuestionService) {
+    public GroupController(GroupService groupService,
+                           GroupQuestionService groupQuestionService,
+                           GroupBroadcastService groupBroadcastService) {
         this.groupService = groupService;
         this.groupQuestionService = groupQuestionService;
+        this.groupBroadcastService = groupBroadcastService;
     }
 
     /**
@@ -164,13 +179,14 @@ public class GroupController {
 
     /**
      * 加入小组。FREE/APPROVAL 无需请求体；INVITE 小组必须在请求体里带邀请码。
+     * 返回加入后的成员关系，前端据此区分「已加入」和「申请已提交（待审批）」。
      */
     @PostMapping("/{groupId}/join")
     @RateLimit(limit = 10, window = 60)
-    public Result<Boolean> joinGroup(@PathVariable Long groupId,
-                                     @RequestBody(required = false) JoinGroupDto joinGroupDto) {
-        groupService.joinGroup(groupId, joinGroupDto == null ? null : joinGroupDto.getToken());
-        return Result.success(true);
+    public Result<GroupMembershipVo> joinGroup(@PathVariable Long groupId,
+                                               @RequestBody(required = false) JoinGroupDto joinGroupDto) {
+        return Result.success(groupService.joinGroup(
+                groupId, joinGroupDto == null ? null : joinGroupDto.getToken()));
     }
 
     /**
@@ -183,5 +199,86 @@ public class GroupController {
         groupService.sendJoinTokenById(
                 groupId, sendJoinTokenDto.getToUserId(), sendJoinTokenDto.getContent());
         return Result.success("邀请码已发送");
+    }
+
+    /**
+     * 当前用户已加入的小组列表（只含 APPROVED 小组）。
+     */
+    @GetMapping("/mine")
+    @RateLimit(limit = 100, window = 60)
+    public Result<List<UserGroup>> myGroups() {
+        return Result.success(groupService.getAllUserGroup());
+    }
+
+    /**
+     * 小组成员列表。{@code status}：0 待审批、1 已加入（默认）、2 已拒绝；
+     * 0/2 仅本组 ROOT/ADMIN 可查，1 只要已加入即可查。
+     */
+    @GetMapping("/{groupId}/members")
+    @RateLimit(limit = 100, window = 60)
+    public Result<List<MemberVO>> groupMembers(@PathVariable Long groupId,
+                                               @RequestParam(required = false) Integer status) {
+        return Result.success(groupService.approvedUsers(groupId, status));
+    }
+
+    /**
+     * 当前用户与小组的关系：未申请/已退出返回 null，前端据此判断成员身份与组内角色。
+     */
+    @GetMapping("/{groupId}/membership")
+    @RateLimit(limit = 100, window = 60)
+    public Result<GroupMembershipVo> membership(@PathVariable Long groupId) {
+        return Result.success(groupService.getMembership(groupId));
+    }
+
+    /**
+     * 设置/取消管理员（仅本组 ROOT），role 只接受 ADMIN/MEMBER。
+     */
+    @PutMapping("/{groupId}/members/{userId}/role")
+    @RateLimit(limit = 20, window = 60)
+    public Result<Void> updateMemberRole(@PathVariable Long groupId,
+                                         @PathVariable Long userId,
+                                         @RequestBody(required = false) UpdateMemberRoleDto updateMemberRoleDto) {
+        if (updateMemberRoleDto == null) {
+            throw new BizException(QuizNestErrorCode.INVALID_MEMBER_ROLE);
+        }
+        groupService.updateMemberRole(groupId, userId, updateMemberRoleDto.getRole());
+        return Result.success("成员角色已更新");
+    }
+
+    /**
+     * 移除成员：ROOT 可移除管理员/普通成员，ADMIN 只能移除普通成员；不能移除 ROOT 或自己。
+     */
+    @DeleteMapping("/{groupId}/members/{userId}")
+    @RateLimit(limit = 20, window = 60)
+    public Result<Void> kickMember(@PathVariable Long groupId, @PathVariable Long userId) {
+        groupService.kickMember(groupId, userId);
+        return Result.success("成员已移除");
+    }
+
+    /**
+     * 审批成员的加入申请（仅本组 ROOT/ADMIN）。成员记录 ID 由待审批列表返回。
+     */
+    @PutMapping("/members/{groupMemberId}/approval")
+    @RateLimit(limit = 20, window = 60)
+    public Result<Void> approveMember(@PathVariable Long groupMemberId,
+                                      @RequestBody(required = false) ApproveMemberDto approveMemberDto) {
+        if (approveMemberDto == null || approveMemberDto.getApproved() == null) {
+            throw new BizException(QuizNestErrorCode.APPROVE_DECISION_REQUIRED);
+        }
+        groupService.approveMember(
+                groupMemberId, approveMemberDto.getContext(), approveMemberDto.getApproved());
+        return Result.success(approveMemberDto.getApproved() ? "已通过该申请" : "已拒绝该申请");
+    }
+
+    /**
+     * 发送小组广播（仅本组 ROOT/ADMIN），发送人不会收到自己的广播。
+     */
+    @PostMapping("/{groupId}/broadcast")
+    @RateLimit(limit = 5, window = 60)
+    public Result<Void> broadcast(@PathVariable Long groupId,
+                                  @RequestBody(required = false) SendGroupBroadcastDto sendGroupBroadcastDto) {
+        groupBroadcastService.sendGroupBroadCastService(
+                sendGroupBroadcastDto == null ? null : sendGroupBroadcastDto.getContext(), groupId);
+        return Result.success("广播已发送");
     }
 }
