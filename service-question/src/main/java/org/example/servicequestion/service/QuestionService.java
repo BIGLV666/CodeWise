@@ -2,9 +2,18 @@ package org.example.servicequestion.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
-import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.Result;
+import org.example.serviceapi.dto.question.QuestionDto;
 import org.example.serviceapi.dto.user.UserDto;
 import org.example.serviceapi.exception.BizException;
 import org.example.serviceapi.exception.CommonErrorCode;
@@ -35,37 +44,18 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.DigestUtils;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
-
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.concurrent.TimeUnit;
-
 @Slf4j
 @Service
 public class QuestionService {
     private final String LOCK_ADD_QUESTION = "lock_add_question";
-    @Autowired
-    private QuestionMapper questionMapper;
-    @Autowired
-    private RedissonClient redissonClient;
-    @Autowired
-    private SubmitRecordMapper submitRecordMapper;
-    @Autowired
-    private RedisTemplate<String, Object> redisTemplate;
-    @Autowired
-    private UserFeignClient userFeignClient;
-    @Autowired
-    private FunctionConfigMapper  functionConfigMapper;
+    @Autowired private QuestionMapper questionMapper;
+    @Autowired private RedissonClient redissonClient;
+    @Autowired private SubmitRecordMapper submitRecordMapper;
+    @Autowired private RedisTemplate<String, Object> redisTemplate;
+    @Autowired private UserFeignClient userFeignClient;
+    @Autowired private FunctionConfigMapper functionConfigMapper;
 
-    @Autowired
-    private GroupQuestionPermissionService groupQuestionPermissionService;
-
+    @Autowired private GroupQuestionPermissionService groupQuestionPermissionService;
 
     public Long getTotalQuestionCount() {
         long total = 0L;
@@ -79,19 +69,17 @@ public class QuestionService {
             boolean tryLock = redissonClient.getLock(LOCK_ADD_QUESTION).tryLock();
             RLock lock = redissonClient.getLock(LOCK_ADD_QUESTION);
             if (tryLock) {
-
                 try {
-                    Long count = Long.parseLong(questionMapper.selectCount(new QueryWrapper<Question>().eq("status", 1)).toString());
+                    Long count = Long.parseLong(
+                            questionMapper.selectCount(new QueryWrapper<Question>().eq("status", 1)).toString());
                     redisTemplate.opsForValue().set(RedisContext.QUESTION_TOTAL_KEY, count);
                     return count;
                 } catch (Exception e) {
-
-                    log.error("获取总数失败{}",e.getMessage());
+                    log.error("获取总数失败{}", e.getMessage());
                     throw new BizException(QuestionErrorCode.QUESTION_TOTAL_QUERY_FAILED, e);
                 } finally {
                     lock.unlock();
                 }
-
             }
         }
 
@@ -100,17 +88,16 @@ public class QuestionService {
 
     @Transactional
     public Question addQuestion(InsertQuestionDto insertQuestionDto) {
-        Long userId= UserContext.getUserId();
-        if(userId==null){
+        Long userId = UserContext.getUserId();
+        if (userId == null) {
             throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         validateOrdinaryQuestion(insertQuestionDto);
-        String LockKey=LOCK_ADD_QUESTION+userId;
-        RLock lock=redissonClient.getLock(LockKey);
-        try{
-
+        String LockKey = LOCK_ADD_QUESTION + userId;
+        RLock lock = redissonClient.getLock(LockKey);
+        try {
             boolean locked = lock.tryLock(3, 10, TimeUnit.SECONDS);
-            if(!locked){
+            if (!locked) {
                 throw new BizException(CommonErrorCode.RATE_LIMITED);
             }
             Question question = new Question(insertQuestionDto);
@@ -133,23 +120,18 @@ public class QuestionService {
             throw new BizException(CommonErrorCode.DUPLICATE_RESOURCE, e);
         } catch (Exception e) {
             throw new BizException(CommonErrorCode.INTERNAL_ERROR, e);
-        }finally {
-            if(lock.isHeldByCurrentThread()){
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
         }
-       }
-
-
-
-
+    }
 
     public QuestionVo getQuestionById(Long questionId) {
         Question question = questionMapper.selectById(questionId);
-        if(question==null){
+        if (question == null) {
             throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
-
 
         // 私密题目可能是小组题：创建者/组员/平台管理员可读，其余人按无权限处理
         if (Integer.valueOf(3).equals(question.getStatus())) {
@@ -157,20 +139,19 @@ public class QuestionService {
                 throw new BizException(CommonErrorCode.CONTENT_RESTRICTED);
             }
         }
-        if(Integer.valueOf(0).equals(question.getStatus())){
+        if (Integer.valueOf(0).equals(question.getStatus())) {
             throw new BizException(QuestionErrorCode.QUESTION_OFF_SHELF);
         }
-        if(Integer.valueOf(2).equals(question.getStatus())){
+        if (Integer.valueOf(2).equals(question.getStatus())) {
             throw new BizException(QuestionErrorCode.QUESTION_UNDER_REVIEW);
         }
 
-
-        if(question.getQuestionType().equals(QuestionType.FUNCTION)){
-            FunctionConfig functionConfig=functionConfigMapper.selectOne(new QueryWrapper<FunctionConfig>().eq("question_id", questionId));
-            return new QuestionVo(question,functionConfig);
+        if (question.getQuestionType().equals(QuestionType.FUNCTION)) {
+            FunctionConfig functionConfig =
+                    functionConfigMapper.selectOne(new QueryWrapper<FunctionConfig>().eq("question_id", questionId));
+            return new QuestionVo(question, functionConfig);
         }
-        return new QuestionVo(question,null);
-
+        return new QuestionVo(question, null);
     }
 
     /** agent 批量题目详情单次上限：完整题干 payload 较大，控制单请求规模。 */
@@ -190,20 +171,20 @@ public class QuestionService {
      * @return 逐题结果，顺序与入参一致；仅 state=ok 的条目携带完整题目
      */
     public List<AgentQuestionDetailVo> getQuestionDetailsBatch(List<Long> inputIds) {
-        if(UserContext.getUserId()==null){
+        if (UserContext.getUserId() == null) {
             throw new BizException(CommonErrorCode.LOGIN_REQUIRED);
         }
         List<Long> distinct = inputIds == null ? Collections.emptyList()
-                : inputIds.stream().filter(Objects::nonNull).distinct().toList();
-        if(distinct.isEmpty()){
+                                               : inputIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (distinct.isEmpty()) {
             throw new BizException(QuestionErrorCode.QUESTION_LIST_REQUIRED);
         }
-        if(distinct.size() > AGENT_DETAIL_BATCH_MAX){
+        if (distinct.size() > AGENT_DETAIL_BATCH_MAX) {
             throw new BizException(QuestionErrorCode.QUESTION_BATCH_LIMIT_EXCEEDED, AGENT_DETAIL_BATCH_MAX);
         }
         Map<Long, Question> questions = new HashMap<>();
-        for(Question question : questionMapper.selectList(new LambdaQueryWrapper<Question>()
-                .in(Question::getQuestionId, distinct))){
+        for (Question question :
+                questionMapper.selectList(new LambdaQueryWrapper<Question>().in(Question::getQuestionId, distinct))) {
             questions.put(question.getQuestionId(), question);
         }
         Long userId = UserContext.getUserId();
@@ -213,33 +194,33 @@ public class QuestionService {
                     && !userId.equals(question.getCreateUserId());
         });
         boolean isAdmin = false;
-        if(needRoleCheck){
+        if (needRoleCheck) {
             Result<UserDto> userDtoResult = userFeignClient.getUserInfo(userId);
-            if(userDtoResult.getCode()!=200){
+            if (userDtoResult.getCode() != 200) {
                 throw new BizException(CommonErrorCode.DOWNSTREAM_UNAVAILABLE);
             }
-            if(userDtoResult.getData()==null){
+            if (userDtoResult.getData() == null) {
                 throw new BizException(QuestionErrorCode.USER_NOT_FOUND);
             }
             isAdmin = Integer.valueOf(2).equals(userDtoResult.getData().getRoleId());
         }
         List<AgentQuestionDetailVo> results = new ArrayList<>();
-        for(Long id : distinct){
+        for (Long id : distinct) {
             Question question = questions.get(id);
-            if(question == null){
+            if (question == null) {
                 results.add(AgentQuestionDetailVo.notFound(id));
                 continue;
             }
-            if(Integer.valueOf(3).equals(question.getStatus())
-                    && !userId.equals(question.getCreateUserId()) && !isAdmin){
+            if (Integer.valueOf(3).equals(question.getStatus()) && !userId.equals(question.getCreateUserId())
+                    && !isAdmin) {
                 results.add(AgentQuestionDetailVo.invisible(id, "无权查看该题目"));
                 continue;
             }
-            if(Integer.valueOf(0).equals(question.getStatus())){
+            if (Integer.valueOf(0).equals(question.getStatus())) {
                 results.add(AgentQuestionDetailVo.invisible(id, "题目已下架"));
                 continue;
             }
-            if(Integer.valueOf(2).equals(question.getStatus())){
+            if (Integer.valueOf(2).equals(question.getStatus())) {
                 results.add(AgentQuestionDetailVo.invisible(id, "题目审核中"));
                 continue;
             }
@@ -252,11 +233,11 @@ public class QuestionService {
     }
 
     @Transactional
-    public Question updateQuestion(InsertQuestionDto insertQuestionDto,Long questionId) {
+    public Question updateQuestion(InsertQuestionDto insertQuestionDto, Long questionId) {
         requireQuestionAdmin();
         validateOrdinaryQuestion(insertQuestionDto);
-        Question updatequestion= questionMapper.selectById(questionId);
-        if(Objects.isNull(updatequestion)){
+        Question updatequestion = questionMapper.selectById(questionId);
+        if (Objects.isNull(updatequestion)) {
             throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
         updatequestion.setTitle(insertQuestionDto.getTitle());
@@ -269,7 +250,6 @@ public class QuestionService {
         updatequestion.setTags(insertQuestionDto.getTags());
         updatequestion.setTimeLimit(insertQuestionDto.getTimeLimit());
         updatequestion.setMemoryLimit(insertQuestionDto.getMemoryLimit());
-
 
         int update = questionMapper.updateById(updatequestion);
         if (update > 0) {
@@ -338,8 +318,8 @@ public class QuestionService {
     @Transactional
     public void deleteQuestion(Long questionId) {
         requireQuestionAdmin();
-        Question question= questionMapper.selectById(questionId);
-        if(Objects.isNull(question)){
+        Question question = questionMapper.selectById(questionId);
+        if (Objects.isNull(question)) {
             throw new BizException(QuestionErrorCode.QUESTION_NOT_FOUND);
         }
 
@@ -446,14 +426,14 @@ public class QuestionService {
         }
     }
 
-    public CursorPageResult<ReturnQuestionDto> cursorQuestions(Long lastId, Integer pageSize, String difficulty, Integer status, String title,String type) {
+    public CursorPageResult<ReturnQuestionDto> cursorQuestions(
+            Long lastId, Integer pageSize, String difficulty, Integer status, String title, String type) {
         LambdaQueryWrapper<Question> wrapper = new LambdaQueryWrapper<>();
 
         // 游标分页：如果传入了 lastId，则查询大于 lastId 的记录（升序）
         if (lastId != null) {
-            wrapper.gt(Question::getQuestionId, lastId);  // 改为 gt（大于），从前往后
+            wrapper.gt(Question::getQuestionId, lastId); // 改为 gt（大于），从前往后
         }
-
 
         // 状态筛选
         if (status != null) {
@@ -465,10 +445,10 @@ public class QuestionService {
             wrapper.like(Question::getTitle, title);
         }
         // 类型搜索
-        if (type != null&& !type.isEmpty()) {
+        if (type != null && !type.isEmpty()) {
             wrapper.eq(Question::getQuestionType, type);
         }
-        if(difficulty!=null && !difficulty.isEmpty()) {
+        if (difficulty != null && !difficulty.isEmpty()) {
             wrapper.and(group -> {
                 for (String value : difficulty.split(",")) {
                     group.or().eq(Question::getDifficulty, value);
@@ -477,14 +457,13 @@ public class QuestionService {
         }
 
         // 按 questionId 升序排列（从小到大）
-        wrapper.orderByAsc(Question::getQuestionId);  // 改为升序
+        wrapper.orderByAsc(Question::getQuestionId); // 改为升序
         wrapper.last("LIMIT " + (pageSize + 1));
-
 
         List<Question> list = questionMapper.selectList(wrapper);
         List<ReturnQuestionDto> returnQuestionDtoList = new ArrayList<>();
-        for(Question question:list){
-            ReturnQuestionDto returnQuestionDto=new ReturnQuestionDto(question);
+        for (Question question : list) {
+            ReturnQuestionDto returnQuestionDto = new ReturnQuestionDto(question);
             returnQuestionDtoList.add(returnQuestionDto);
         }
 
@@ -502,28 +481,31 @@ public class QuestionService {
                 nextCursor = lastRecord.getQuestionId();
                 hasNext = true;
             } else {
-                records =  returnQuestionDtoList;
+                records = returnQuestionDtoList;
                 hasNext = false;
             }
         } else {
             records = new ArrayList<>();
         }
-        List<Long>questionIds = new ArrayList<>();
-        for(ReturnQuestionDto returnQuestionDto:records){
+        List<Long> questionIds = new ArrayList<>();
+        for (ReturnQuestionDto returnQuestionDto : records) {
             questionIds.add(returnQuestionDto.getQuestionId());
         }
 
         Map<Long, Integer> questionStatusMap = new HashMap<>();
         Long userId = UserContext.getUserId();
-        if(userId != null && !questionIds.isEmpty()){
-            List<SubmitRecord> submitRecords = submitRecordMapper.getQuestionSubmitStatusByQuestionIds(userId, questionIds);
-            for(SubmitRecord submitRecord:submitRecords){
-                questionStatusMap.put(submitRecord.getQuestionId(), "AC".equals(submitRecord.getSubmitStatus()) ? 1 : 2);
+        if (userId != null && !questionIds.isEmpty()) {
+            List<SubmitRecord> submitRecords =
+                    submitRecordMapper.getQuestionSubmitStatusByQuestionIds(userId, questionIds);
+            for (SubmitRecord submitRecord : submitRecords) {
+                questionStatusMap.put(
+                        submitRecord.getQuestionId(), "AC".equals(submitRecord.getSubmitStatus()) ? 1 : 2);
             }
         }
-        for(ReturnQuestionDto record:records){
+        for (ReturnQuestionDto record : records) {
             // 0-未尝试，1-已通过，3-尝试过但未通过
-            record.setStatus(questionStatusMap.getOrDefault(record.getQuestionId(), 0));
+            record.setStatus(questionStatusMap.getOrDefault(record.getQuestionId(), 0))
+            ;
         }
 
         return CursorPageResult.<ReturnQuestionDto>builder()
@@ -532,11 +514,14 @@ public class QuestionService {
                 .hasNext(hasNext)
                 .build();
     }
-    public List< QuestionVo> serach(String likeKey) {
-
+    public List<QuestionVo> serach(String likeKey) {
         List<QuestionVo> questionVoList = new ArrayList<>();
-        List<Question> questions = questionMapper.selectList(new QueryWrapper<Question>().like("title",likeKey).or().like("tags",likeKey).orderByAsc("question_id"));
-        for(Question question:questions){
+        List<Question> questions = questionMapper.selectList(new QueryWrapper<Question>()
+                        .like("title", likeKey)
+                        .or()
+                        .like("tags", likeKey)
+                        .orderByAsc("question_id"));
+        for (Question question : questions) {
             questionVoList.add(new QuestionVo(question));
         }
         return questionVoList;
